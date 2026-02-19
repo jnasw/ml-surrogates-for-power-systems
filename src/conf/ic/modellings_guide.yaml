@@ -1,0 +1,14 @@
+- name: "SM4"
+  keys: ["theta", "omega", "E_d_dash", "E_q_dash"]
+  keys_ext: ["Vs", "theta_vs"]
+  full_name: "Synchronous Machine 4th-order open loop"
+
+- name: "SM6"
+  keys: ["theta", "omega", "E_d_dash", "E_q_dash", "E_d_dash_dash", "E_q_dash_dash"]
+  keys_ext: ["Vs", "theta_vs"]
+  full_name: "Synchronous Machine 6th-order open loop"
+
+- name: "SM_AVR_GOV"
+  keys: ["theta", "omega", "E_d_dash", "E_q_dash", "R_F", "V_r", "E_fd", "P_sv", "P_m"]
+  keys_ext: ["Vs", "theta_vs"]
+  full_name: "Synchronous Machine with AVR and governor"

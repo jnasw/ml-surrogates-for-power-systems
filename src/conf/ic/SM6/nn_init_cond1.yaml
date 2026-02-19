@@ -1,0 +1,8 @@
+- {name: theta, range: [-2.0, 2.0], iterations: 5}
+- {name: omega, range: [-1.0, 1.0], iterations: 5}
+- {name: E_d_dash, range: [0.0], iterations: 1}
+- {name: E_q_dash, range: [0.9, 1.1], iterations: 2}
+- {name: E_d_dash_dash, range: [0.0], iterations: 1}
+- {name: E_q_dash_dash, range: [1.0], iterations: 1}
+- {name: Vs, range: [0.95, 1.05], iterations: 3}
+- {name: theta_vs, range: [-0.3, 0.3], iterations: 4}

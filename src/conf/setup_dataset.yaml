@@ -1,0 +1,23 @@
+wandb:
+  project: "sm-surrogates-dataset"
+  use: false
+
+time: 1.0
+num_of_points: 1000
+save_freq: 1000
+PINN_flag: false
+
+model:
+  model_flag: "SM4"
+  machine_num: 1
+  init_condition_bounds: 1
+  sampling: "Lhs" # Lhs | Linear | Random
+  ic_generation_method: "full_factorial" # full_factorial | joint_lhs | adaptive_iterative
+  ic_num_samples: null # used when ic_generation_method=joint_lhs; null -> product(iterations)
+  torch: false
+  seed: 37
+
+dirs:
+  params_dir: ${hydra:runtime.cwd}/src/conf/params
+  init_conditions_dir: ${hydra:runtime.cwd}/src/conf/ic
+  dataset_dir: ${hydra:runtime.cwd}/data
