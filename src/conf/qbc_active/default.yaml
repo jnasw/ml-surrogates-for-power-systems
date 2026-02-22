@@ -1,0 +1,19 @@
+# @package _global_
+
+active:
+  candidate_method: "lhs" # sobol | lhs | random
+  diversify: true
+  predict_batch_size: 2048
+
+qbc_n0: 32
+qbc_M: 3
+qbc_P: 256
+qbc_K: 16
+qbc_T: 3
+
+# Optional QBC logging/checkpointing for create_dataset.py.
+# Disabled by default.
+qbc_enable_logging: false
+qbc_run_dir: null
+qbc_resume_from_round: -1
+qbc_resume_stage: next_round # next_round | same_round_post_train

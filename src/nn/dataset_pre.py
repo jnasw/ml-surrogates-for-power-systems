@@ -35,6 +35,11 @@ class Datapreprocessor:
         self.model_flag = str(cfg.model.model_flag)
         self.save_freq = 500_000
         self.info_attributes: dict[str, Any] = {}
+        self.test_split_mode = str(getattr(self.dataset_cfg, "test_split_mode", "internal")).lower()
+        self.shared_test_dataset_number = getattr(self.dataset_cfg, "shared_test_dataset_number", None)
+        self.shared_test_max_trajectories = getattr(self.dataset_cfg, "shared_test_max_trajectories", None)
+        self.paired_other_dataset_number = getattr(self.dataset_cfg, "paired_other_dataset_number", None)
+        self.ic_key_decimals = int(getattr(self.dataset_cfg, "ic_key_decimals", 8))
 
         self.scrap_info()
         self.create_train_val_test_folder()
@@ -222,9 +227,15 @@ class Datapreprocessor:
             rng.shuffle(data)
         return data
 
-    def _trajectory_to_xy(self, trajectory: Any, time_limit: float) -> tuple[np.ndarray, np.ndarray]:
+    def _trajectory_to_xy(
+        self,
+        trajectory: Any,
+        time_limit: float,
+        simulation_time: float | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
         arr = np.array(trajectory, dtype=np.float32)
-        if time_limit > self.time_sim:
+        sim_time = self.time_sim if simulation_time is None else float(simulation_time)
+        if time_limit > sim_time:
             raise ValueError("Configured preprocessing time exceeds simulation time in info.txt.")
         if time_limit != 0:
             arr = arr[:, arr[0] <= time_limit]
@@ -241,47 +252,255 @@ class Datapreprocessor:
             return VAL_SPLIT
         return TEST_SPLIT
 
-    def get_preprocess_save_data(self) -> None:
-        train_traj = int(self.total_init_conditions * float(self.dataset_cfg.split_ratio))
+    def _ic_key_from_trajectory(self, trajectory: Any) -> tuple[float, ...]:
+        arr = np.asarray(trajectory, dtype=np.float32)
+        ic = arr[1:, 0]
+        return tuple(np.round(ic, self.ic_key_decimals).tolist())
+
+    def _internal_split_bounds(self, total_trajectories: int) -> tuple[int, int]:
+        train_cutoff = int(total_trajectories * float(self.dataset_cfg.split_ratio))
         if bool(self.dataset_cfg.validation_flag):
-            remaining = self.total_init_conditions - train_traj
+            remaining = total_trajectories - train_cutoff
             val_traj = remaining // 2
-            val_cutoff = train_traj + val_traj
+            val_cutoff = train_cutoff + val_traj
         else:
-            val_cutoff = train_traj
+            val_cutoff = train_cutoff
+        return train_cutoff, val_cutoff
+
+    def _collect_internal_test_trajectories(
+        self, dataset_number: int
+    ) -> dict[tuple[float, ...], tuple[Any, float]]:
+        raw_path, total_trajectories, time_sim = self._load_dataset_info(int(dataset_number))
+        train_cutoff, val_cutoff = self._internal_split_bounds(total_trajectories)
+        has_val = bool(self.dataset_cfg.validation_flag)
+
+        mapping: dict[tuple[float, ...], tuple[Any, float]] = {}
+        idx = 0
+        raw_files = sorted([f for f in os.listdir(raw_path) if f.endswith(".pkl")])
+        for raw_file in raw_files:
+            file_path = os.path.join(raw_path, raw_file)
+            trajectories = self._load_raw_file(file_path, shuffle_flag=False)
+            for trajectory in trajectories:
+                split = self._split_from_index(
+                    traj_idx=idx,
+                    train_cutoff=train_cutoff,
+                    val_cutoff=val_cutoff,
+                    has_val=has_val,
+                )
+                if split == TEST_SPLIT:
+                    key = self._ic_key_from_trajectory(trajectory)
+                    if key not in mapping:
+                        mapping[key] = (trajectory, time_sim)
+                idx += 1
+        return mapping
+
+    def _load_dataset_info(self, dataset_number: int) -> tuple[str, int, float]:
+        folder = os.path.join(self.cfg.dirs.dataset_dir, self.model_flag, f"dataset_v{int(dataset_number)}")
+        info_path = os.path.join(folder, INFO_FILE_NAME)
+        if not os.path.exists(info_path):
+            raise FileNotFoundError(f"info.txt not found for shared dataset: {info_path}")
+        with open(info_path, "r", encoding="utf-8") as text_file:
+            lines = text_file.readlines()
+        validate_info_lines(lines)
+        total_trajectories = int(lines[2].split(":", 1)[1].strip())
+        time_sim = float(lines[3].split(":", 1)[1].strip())
+        raw_path = os.path.join(folder, "raw")
+        if not os.path.exists(raw_path):
+            raise FileNotFoundError(f"Raw data folder not found for shared dataset: {raw_path}")
+        return raw_path, total_trajectories, time_sim
+
+    def get_preprocess_save_data(self) -> None:
+        if self.test_split_mode not in {"internal", "shared_dataset", "paired_common_from_datasets"}:
+            raise ValueError(
+                "dataset.test_split_mode must be one of: "
+                "['internal', 'shared_dataset', 'paired_common_from_datasets']"
+            )
+
+        train_traj = int(self.total_init_conditions * float(self.dataset_cfg.split_ratio))
+        has_val = bool(self.dataset_cfg.validation_flag)
+        if self.test_split_mode in {"internal", "paired_common_from_datasets"}:
+            if has_val:
+                remaining = self.total_init_conditions - train_traj
+                val_traj = remaining // 2
+                val_cutoff = train_traj + val_traj
+            else:
+                val_cutoff = train_traj
+        else:
+            # In shared-dataset test mode, current dataset contributes only train/(optional)val.
+            val_cutoff = self.total_init_conditions if has_val else train_traj
 
         buffers_x = {TRAIN_SPLIT: [], VAL_SPLIT: [], TEST_SPLIT: []}
         buffers_y = {TRAIN_SPLIT: [], VAL_SPLIT: [], TEST_SPLIT: []}
         trajectories_by_split = {TRAIN_SPLIT: 0, VAL_SPLIT: 0, TEST_SPLIT: 0}
 
-        traj_idx_global = 0
         raw_files = sorted([f for f in os.listdir(self.raw_data_path) if f.endswith(".pkl")])
-        for raw_file in raw_files:
-            file_path = os.path.join(self.raw_data_path, raw_file)
-            trajectories = self._load_raw_file(file_path, bool(self.dataset_cfg.shuffle))
-            for trajectory in trajectories:
-                split = self._split_from_index(
-                    traj_idx=traj_idx_global,
-                    train_cutoff=train_traj,
-                    val_cutoff=val_cutoff,
-                    has_val=bool(self.dataset_cfg.validation_flag),
-                )
-                x, y = self._trajectory_to_xy(trajectory, float(self.cfg.time))
-                buffers_x[split].append(x)
-                buffers_y[split].append(y)
-                trajectories_by_split[split] += 1
-                traj_idx_global += 1
+        if self.test_split_mode != "paired_common_from_datasets":
+            traj_idx_global = 0
+            for raw_file in raw_files:
+                file_path = os.path.join(self.raw_data_path, raw_file)
+                trajectories = self._load_raw_file(file_path, bool(self.dataset_cfg.shuffle))
+                for trajectory in trajectories:
+                    if self.test_split_mode == "internal":
+                        split = self._split_from_index(
+                            traj_idx=traj_idx_global,
+                            train_cutoff=train_traj,
+                            val_cutoff=val_cutoff,
+                            has_val=has_val,
+                        )
+                    else:
+                        if traj_idx_global < train_traj:
+                            split = TRAIN_SPLIT
+                        elif has_val:
+                            split = VAL_SPLIT
+                        else:
+                            split = TRAIN_SPLIT
 
-                # Flush split buffers by sample count.
-                for split_name in (TRAIN_SPLIT, VAL_SPLIT, TEST_SPLIT):
-                    sample_count = sum(chunk.shape[0] for chunk in buffers_x[split_name])
+                    x, y = self._trajectory_to_xy(
+                        trajectory,
+                        float(self.cfg.time),
+                        simulation_time=self.time_sim,
+                    )
+                    buffers_x[split].append(x)
+                    buffers_y[split].append(y)
+                    trajectories_by_split[split] += 1
+                    traj_idx_global += 1
+
+                    # Flush split buffers by sample count.
+                    for split_name in (TRAIN_SPLIT, VAL_SPLIT, TEST_SPLIT):
+                        sample_count = sum(chunk.shape[0] for chunk in buffers_x[split_name])
+                        if sample_count >= self.save_freq:
+                            self._flush_split_buffers(split_name, buffers_x, buffers_y)
+
+        if self.test_split_mode == "shared_dataset":
+            if self.shared_test_dataset_number is None:
+                raise ValueError(
+                    "dataset.shared_test_dataset_number must be set when test_split_mode='shared_dataset'."
+                )
+            shared_raw_path, _, shared_time_sim = self._load_dataset_info(int(self.shared_test_dataset_number))
+            max_test = None if self.shared_test_max_trajectories is None else int(self.shared_test_max_trajectories)
+            if max_test is not None and max_test <= 0:
+                raise ValueError("dataset.shared_test_max_trajectories must be positive if set.")
+
+            test_count = 0
+            shared_files = sorted([f for f in os.listdir(shared_raw_path) if f.endswith(".pkl")])
+            for raw_file in shared_files:
+                file_path = os.path.join(shared_raw_path, raw_file)
+                trajectories = self._load_raw_file(file_path, bool(self.dataset_cfg.shuffle))
+                for trajectory in trajectories:
+                    if max_test is not None and test_count >= max_test:
+                        break
+                    x, y = self._trajectory_to_xy(
+                        trajectory,
+                        float(self.cfg.time),
+                        simulation_time=shared_time_sim,
+                    )
+                    buffers_x[TEST_SPLIT].append(x)
+                    buffers_y[TEST_SPLIT].append(y)
+                    trajectories_by_split[TEST_SPLIT] += 1
+                    test_count += 1
+
+                    sample_count = sum(chunk.shape[0] for chunk in buffers_x[TEST_SPLIT])
                     if sample_count >= self.save_freq:
-                        self._flush_split_buffers(split_name, buffers_x, buffers_y)
+                        self._flush_split_buffers(TEST_SPLIT, buffers_x, buffers_y)
+                if max_test is not None and test_count >= max_test:
+                    break
+
+        if self.test_split_mode == "paired_common_from_datasets":
+            if self.paired_other_dataset_number is None:
+                raise ValueError(
+                    "dataset.paired_other_dataset_number must be set when "
+                    "test_split_mode='paired_common_from_datasets'."
+                )
+
+            ds_a = int(self.dataset_cfg.number)
+            ds_b = int(self.paired_other_dataset_number)
+            ordered_pair = sorted({ds_a, ds_b})
+            combined_test_map: dict[tuple[float, ...], tuple[Any, float]] = {}
+            for ds_num in ordered_pair:
+                part = self._collect_internal_test_trajectories(dataset_number=ds_num)
+                for key, value in part.items():
+                    if key not in combined_test_map:
+                        combined_test_map[key] = value
+
+            common_test_keys = set(combined_test_map.keys())
+
+            # Rebuild train/val buffers from current dataset without any common-test ICs.
+            buffers_x = {TRAIN_SPLIT: [], VAL_SPLIT: [], TEST_SPLIT: []}
+            buffers_y = {TRAIN_SPLIT: [], VAL_SPLIT: [], TEST_SPLIT: []}
+            trajectories_by_split = {TRAIN_SPLIT: 0, VAL_SPLIT: 0, TEST_SPLIT: 0}
+
+            non_test_flags: list[bool] = []
+            raw_files = sorted([f for f in os.listdir(self.raw_data_path) if f.endswith(".pkl")])
+            for raw_file in raw_files:
+                file_path = os.path.join(self.raw_data_path, raw_file)
+                trajectories = self._load_raw_file(file_path, shuffle_flag=False)
+                for trajectory in trajectories:
+                    key = self._ic_key_from_trajectory(trajectory)
+                    non_test_flags.append(key not in common_test_keys)
+
+            non_test_total = int(sum(non_test_flags))
+            train_non_test = int(non_test_total * float(self.dataset_cfg.split_ratio))
+            if has_val:
+                val_non_test = (non_test_total - train_non_test) // 2
+                val_non_test_cutoff = train_non_test + val_non_test
+            else:
+                val_non_test_cutoff = train_non_test
+
+            non_test_idx = 0
+            global_idx = 0
+            for raw_file in raw_files:
+                file_path = os.path.join(self.raw_data_path, raw_file)
+                trajectories = self._load_raw_file(file_path, shuffle_flag=False)
+                for trajectory in trajectories:
+                    if non_test_flags[global_idx]:
+                        if non_test_idx < train_non_test:
+                            split = TRAIN_SPLIT
+                        elif has_val and non_test_idx < val_non_test_cutoff:
+                            split = VAL_SPLIT
+                        else:
+                            split = TRAIN_SPLIT if not has_val else VAL_SPLIT
+                        x, y = self._trajectory_to_xy(
+                            trajectory,
+                            float(self.cfg.time),
+                            simulation_time=self.time_sim,
+                        )
+                        buffers_x[split].append(x)
+                        buffers_y[split].append(y)
+                        trajectories_by_split[split] += 1
+                        non_test_idx += 1
+
+                        sample_count = sum(chunk.shape[0] for chunk in buffers_x[split])
+                        if sample_count >= self.save_freq:
+                            self._flush_split_buffers(split, buffers_x, buffers_y)
+                    global_idx += 1
+
+            # Append shared/common test set (identical for both compared datasets).
+            ordered_test_keys = sorted(combined_test_map.keys())
+            for key in ordered_test_keys:
+                trajectory, source_time = combined_test_map[key]
+                x, y = self._trajectory_to_xy(
+                    trajectory,
+                    float(self.cfg.time),
+                    simulation_time=source_time,
+                )
+                buffers_x[TEST_SPLIT].append(x)
+                buffers_y[TEST_SPLIT].append(y)
+                trajectories_by_split[TEST_SPLIT] += 1
+                sample_count = sum(chunk.shape[0] for chunk in buffers_x[TEST_SPLIT])
+                if sample_count >= self.save_freq:
+                    self._flush_split_buffers(TEST_SPLIT, buffers_x, buffers_y)
 
         for split_name in (TRAIN_SPLIT, VAL_SPLIT, TEST_SPLIT):
             self._flush_split_buffers(split_name, buffers_x, buffers_y, flush_all=True)
 
         self._finalize_stats()
+        self.set_info_attributes(
+            dataset_test_split_mode=self.test_split_mode,
+            dataset_shared_test_number=self.shared_test_dataset_number,
+            dataset_shared_test_max_trajectories=self.shared_test_max_trajectories,
+            dataset_paired_other_number=self.paired_other_dataset_number,
+            dataset_ic_key_decimals=self.ic_key_decimals,
+        )
         self.set_info_attributes(
             num_of_train_files=self.train_file_count,
             num_of_training_trajectories=trajectories_by_split[TRAIN_SPLIT],

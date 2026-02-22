@@ -46,6 +46,29 @@ class ODEModelling:
         self._save_flag = True
         self._load_keys()
 
+    def _ensure_dataset_folder(self) -> None:
+        dataset_dir = self.config.dirs.dataset_dir
+        model_dir = os.path.join(dataset_dir, self.model_flag)
+        dataset_version_dir = self._next_dataset_version_folder(model_dir)
+        self.dataset_folder_path = os.path.join(dataset_version_dir, "raw")
+        os.makedirs(self.dataset_folder_path, exist_ok=False)
+        print(f"Created dataset folder: {dataset_version_dir}")
+
+    def _write_info_file(self, num_files: int, total_trajectories: int, extra_info: dict[str, Any] | None = None) -> None:
+        info_path = os.path.join(os.path.dirname(self.dataset_folder_path), INFO_FILE_NAME)
+        with open(info_path, "w", encoding="utf-8") as info:
+            info.write(f"Number of files: {num_files}\n")
+            info.write(f"Initial conditions file: {self.init_conditions_path}\n")
+            info.write(f"Number of different simulated trajectories: {total_trajectories}\n")
+            info.write(f"Time horizon of the simulations: {self.time}\n")
+            info.write(f"Number of points in the each simulation: {self.num_of_points}\n")
+            info.write(f"IC generation method: {self.ic_generation_method}\n")
+            info.write(f"IC per-variable sampling method: {self.sampling}\n")
+            info.write(f"IC joint sample count override: {self.ic_num_samples}\n")
+            if extra_info:
+                for key, value in extra_info.items():
+                    info.write(f"{key}: {value}\n")
+
     def _load_keys(self) -> None:
         guide_path = os.path.join(self.config.dirs.init_conditions_dir, "modellings_guide.yaml")
         if not os.path.exists(guide_path):
@@ -197,8 +220,8 @@ class ODEModelling:
             return self.build_joint_lhs_ic_table(set_of_values, iterations)
         if self.ic_generation_method == "adaptive_iterative":
             raise NotImplementedError(
-                "ic_generation_method='adaptive_iterative' is not implemented yet. "
-                "Implement it in ODEModelling.build_initial_conditions()."
+                "ic_generation_method='adaptive_iterative' is orchestrated in create_dataset.py. "
+                "Use create_dataset.py with model.ic_generation_method=adaptive_iterative."
             )
         raise ValueError(
             f"Unsupported ic_generation_method '{self.ic_generation_method}'. "
@@ -254,15 +277,9 @@ class ODEModelling:
         return os.path.join(model_dir, f"dataset_v{next_version}")
 
     def save_dataset(self, solution_batch: list[Any], iteration: int) -> None:
-        dataset_dir = self.config.dirs.dataset_dir
-        model_dir = os.path.join(dataset_dir, self.model_flag)
-
         if self._save_flag:
-            dataset_version_dir = self._next_dataset_version_folder(model_dir)
-            self.dataset_folder_path = os.path.join(dataset_version_dir, "raw")
-            os.makedirs(self.dataset_folder_path, exist_ok=False)
+            self._ensure_dataset_folder()
             self._save_flag = False
-            print(f"Created dataset folder: {dataset_version_dir}")
 
         path = os.path.join(self.dataset_folder_path, f"{RAW_FILE_PREFIX}{iteration}{RAW_FILE_SUFFIX}")
         dataset_payload = []
@@ -283,19 +300,97 @@ class ODEModelling:
                 if os.path.isfile(os.path.join(self.dataset_folder_path, f))
             ]
             num_files = len(raw_files)
-
-            info_path = os.path.join(os.path.dirname(self.dataset_folder_path), INFO_FILE_NAME)
-            with open(info_path, "w", encoding="utf-8") as info:
-                info.write(f"Number of files: {num_files}\n")
-                info.write(f"Initial conditions file: {self.init_conditions_path}\n")
-                info.write(f"Number of different simulated trajectories: {self.total_init_conditions}\n")
-                info.write(f"Time horizon of the simulations: {self.time}\n")
-                info.write(f"Number of points in the each simulation: {self.num_of_points}\n")
-                info.write(f"IC generation method: {self.ic_generation_method}\n")
-                info.write(f"IC per-variable sampling method: {self.sampling}\n")
-                info.write(f"IC joint sample count override: {self.ic_num_samples}\n")
+            self._write_info_file(num_files=num_files, total_trajectories=self.total_init_conditions)
 
             print(f"Saved dataset in {os.path.dirname(self.dataset_folder_path)} with {num_files} raw files.")
+
+    def save_dataset_from_arrays(
+        self,
+        ics: np.ndarray,
+        trajectories: np.ndarray,
+        time_grid: np.ndarray,
+        extra_info: dict[str, Any] | None = None,
+    ) -> None:
+        """Persist trajectories from in-memory arrays using the standard raw dataset contract.
+
+        Args:
+            ics: Initial conditions with shape (N, D). Used for consistency checks.
+            trajectories: Simulated state trajectories with shape (N, T, S).
+            time_grid: Shared time grid with shape (T,).
+            extra_info: Optional extra metadata written to info.txt as ``key: value`` lines.
+        """
+        ics = np.asarray(ics, dtype=np.float32)
+        trajectories = np.asarray(trajectories, dtype=np.float32)
+        time_grid = np.asarray(time_grid, dtype=np.float32)
+        if ics.ndim != 2:
+            raise ValueError(f"ics must be 2D, got shape {ics.shape}")
+        if trajectories.ndim != 3:
+            raise ValueError(f"trajectories must be 3D, got shape {trajectories.shape}")
+        if time_grid.ndim != 1:
+            raise ValueError(f"time_grid must be 1D, got shape {time_grid.shape}")
+        if ics.shape[0] != trajectories.shape[0]:
+            raise ValueError("ics and trajectories must have the same first dimension.")
+        if trajectories.shape[1] != time_grid.shape[0]:
+            raise ValueError("trajectory time dimension must match time_grid length.")
+        if trajectories.shape[2] not in (self.keys_length, len(self.keys)):
+            raise ValueError(
+                "Expected trajectory state dimension to match either modeled states "
+                f"({self.keys_length}) or full channel count ({len(self.keys)}), "
+                f"got {trajectories.shape[2]}."
+            )
+        if ics.shape[1] < self.keys_length:
+            raise ValueError(
+                f"ics must contain at least {self.keys_length} state dimensions, got {ics.shape[1]}."
+            )
+        if trajectories.shape[2] == self.keys_length and self.keys_ext_length > 0 and ics.shape[1] < len(self.keys):
+            raise ValueError(
+                "To export full raw channel layout, ICs must include extended keys "
+                f"({len(self.keys)} total dims), got {ics.shape[1]}."
+            )
+
+        self.total_init_conditions = int(trajectories.shape[0])
+        self._ensure_dataset_folder()
+
+        batch: list[list[np.ndarray]] = []
+        file_counter = 0
+        for i in range(self.total_init_conditions):
+            traj = trajectories[i]
+            if not np.allclose(traj[0], ics[i, : self.keys_length], rtol=1e-5, atol=1e-5):
+                raise ValueError(
+                    "Trajectory initial state does not match provided IC values at index "
+                    f"{i}. Ensure trajectories are generated from the same IC set."
+                )
+
+            # Static datasets serialize all channels (keys + keys_ext).
+            # If adaptive trajectories only contain modeled states (keys), append keys_ext as constants from ICs.
+            if trajectories.shape[2] == self.keys_length and self.keys_ext_length > 0:
+                ext_vals = ics[i, self.keys_length : len(self.keys)].astype(np.float32)
+                ext_traj = np.tile(ext_vals[None, :], (traj.shape[0], 1))
+                full_traj = np.concatenate((traj, ext_traj), axis=1)
+            else:
+                full_traj = traj
+
+            record: list[np.ndarray] = [time_grid]
+            for s in range(full_traj.shape[1]):
+                record.append(full_traj[:, s])
+            validate_raw_trajectory(record)
+            batch.append(record)
+
+            flush = (len(batch) >= self.save_freq) or (i == self.total_init_conditions - 1)
+            if flush:
+                end_idx = i
+                out_path = os.path.join(self.dataset_folder_path, f"{RAW_FILE_PREFIX}{end_idx}{RAW_FILE_SUFFIX}")
+                with open(out_path, "wb") as handle:
+                    pickle.dump(batch, handle)
+                batch = []
+                file_counter += 1
+
+        self._write_info_file(
+            num_files=file_counter,
+            total_trajectories=self.total_init_conditions,
+            extra_info=extra_info,
+        )
+        print(f"Saved dataset in {os.path.dirname(self.dataset_folder_path)} with {file_counter} raw files.")
 
     def load_dataset(self, relative_path: str):
         path = os.path.join(self.config.dirs.dataset_dir, self.model_flag, relative_path)

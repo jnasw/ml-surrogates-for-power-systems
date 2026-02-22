@@ -1,3 +1,7 @@
+defaults:
+  - qbc_active: default
+  - _self_
+
 wandb:
   project: "sm-surrogates-dataset"
   use: false
@@ -16,6 +20,17 @@ model:
   ic_num_samples: null # used when ic_generation_method=joint_lhs; null -> product(iterations)
   torch: false
   seed: 37
+
+surrogate:
+  hidden_dim: 128
+  hidden_layers: 3
+  batch_size: 64
+  epochs: 200
+  lr: 0.001
+  device: auto # auto | cuda | mps | cpu
+  use_cuda: true
+
+qbc_n_test: 0
 
 dirs:
   params_dir: ${hydra:runtime.cwd}/src/conf/params

@@ -1,0 +1,22 @@
+model:
+  model_flag: "SM4"
+  seed: 37
+
+dataset:
+  number: 1
+  include_val_in_train: false
+
+baseline:
+  hidden_dim: 256
+  hidden_layers: 4
+  dropout: 0.05
+  lr: 0.001
+  batch_size: 64
+  epochs: 300
+  device: auto # auto | cuda | mps | cpu
+  save_dir: ${hydra:runtime.cwd}/outputs/baseline
+  save_name: baseline_model.pt
+
+dirs:
+  init_conditions_dir: ${hydra:runtime.cwd}/src/conf/ic
+  dataset_dir: ${hydra:runtime.cwd}/data
