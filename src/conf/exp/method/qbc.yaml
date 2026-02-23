@@ -1,0 +1,12 @@
+# @package _global_
+experiment:
+  method: qbc_deep_ensemble
+
+model:
+  ic_generation_method: adaptive_iterative
+
+# QBC candidate/scoring behavior.
+active:
+  candidate_method: lhs
+  diversify: true
+  predict_batch_size: 2048

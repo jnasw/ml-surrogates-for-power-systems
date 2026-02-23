@@ -1,0 +1,10 @@
+# @package _global_
+experiment:
+  method: lhs_static
+
+model:
+  ic_generation_method: joint_lhs
+  sampling: Lhs
+
+# No adaptive loop/checkpoints needed for static LHS runs.
+qbc_enable_logging: false

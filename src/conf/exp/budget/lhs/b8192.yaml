@@ -1,0 +1,6 @@
+# @package _global_
+experiment:
+  budget: b8192
+
+model:
+  ic_num_samples: 8192
