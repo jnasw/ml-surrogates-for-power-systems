@@ -1,4 +1,4 @@
-"""Train/evaluate a fixed baseline surrogate on dataset_vN."""
+"""Train/evaluate a fixed baseline surrogate from preprocessed dataset outputs."""
 
 from __future__ import annotations
 
@@ -9,17 +9,34 @@ import hydra
 from hydra.utils import get_original_cwd
 
 from src.data.preprocessed_trajectory_loader import load_trajectory_dataset_from_preprocessed
+from src.data.preprocessed_trajectory_loader import load_trajectory_dataset_from_preprocessed_root
 from src.surrogate.baseline import BaselineConfig, evaluate_baseline, train_baseline_surrogate
 
 
 @hydra.main(config_path="src/conf", config_name="setup_baseline", version_base=None)
 def main(config) -> None:
-    dataset = load_trajectory_dataset_from_preprocessed(
-        dataset_dir=str(config.dirs.dataset_dir),
-        model_flag=str(config.model.model_flag),
-        dataset_number=int(config.dataset.number),
-        include_val_in_train=bool(getattr(config.dataset, "include_val_in_train", False)),
-    )
+    dataset_root_cfg = getattr(config.dataset, "root", None)
+    if dataset_root_cfg not in (None, ""):
+        dataset_root = str(dataset_root_cfg)
+        if not os.path.isabs(dataset_root):
+            dataset_root = os.path.join(get_original_cwd(), dataset_root)
+        print(f"[stage-3] Loading preprocessed dataset from root: {dataset_root}")
+        dataset = load_trajectory_dataset_from_preprocessed_root(
+            dataset_root=dataset_root,
+            include_val_in_train=bool(getattr(config.dataset, "include_val_in_train", False)),
+        )
+    else:
+        print(
+            "[stage-3] Loading preprocessed dataset from dataset_vN | "
+            f"model={config.model.model_flag} dataset_number={int(config.dataset.number)}"
+        )
+        dataset = load_trajectory_dataset_from_preprocessed(
+            dataset_dir=str(config.dirs.dataset_dir),
+            model_flag=str(config.model.model_flag),
+            dataset_number=int(config.dataset.number),
+            include_val_in_train=bool(getattr(config.dataset, "include_val_in_train", False)),
+        )
+    print(f"[stage-3] Dataset loaded | n_train={dataset.n_train} n_test={dataset.n_test}")
 
     bcfg = BaselineConfig(
         hidden_dim=int(config.baseline.hidden_dim),
@@ -30,8 +47,14 @@ def main(config) -> None:
         epochs=int(config.baseline.epochs),
         device=str(getattr(config.baseline, "device", "auto")),
     )
+    print(
+        "[stage-3] Training baseline | "
+        f"seed={int(config.model.seed)} hidden_dim={bcfg.hidden_dim} hidden_layers={bcfg.hidden_layers} "
+        f"batch_size={bcfg.batch_size} epochs={bcfg.epochs} lr={bcfg.lr}"
+    )
     model = train_baseline_surrogate(dataset=dataset, seed=int(config.model.seed), cfg=bcfg)
     metrics = evaluate_baseline(model=model, dataset=dataset)
+    print("[stage-3] Baseline training and evaluation finished.")
 
     save_dir_cfg = str(config.baseline.save_dir)
     save_dir = save_dir_cfg if os.path.isabs(save_dir_cfg) else os.path.join(get_original_cwd(), save_dir_cfg)
@@ -44,7 +67,12 @@ def main(config) -> None:
         json.dump(
             {
                 "model_flag": str(config.model.model_flag),
-                "dataset_number": int(config.dataset.number),
+                "dataset_number": (
+                    int(config.dataset.number)
+                    if dataset_root_cfg in (None, "")
+                    else None
+                ),
+                "dataset_root": (dataset_root if dataset_root_cfg not in (None, "") else None),
                 "n_train": dataset.n_train,
                 "n_test": dataset.n_test,
                 **metrics,

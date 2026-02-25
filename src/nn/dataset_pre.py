@@ -37,6 +37,7 @@ class Datapreprocessor:
         self.info_attributes: dict[str, Any] = {}
         self.test_split_mode = str(getattr(self.dataset_cfg, "test_split_mode", "internal")).lower()
         self.shared_test_dataset_number = getattr(self.dataset_cfg, "shared_test_dataset_number", None)
+        self.shared_test_dataset_root = getattr(self.dataset_cfg, "shared_test_dataset_root", None)
         self.shared_test_max_trajectories = getattr(self.dataset_cfg, "shared_test_max_trajectories", None)
         self.paired_other_dataset_number = getattr(self.dataset_cfg, "paired_other_dataset_number", None)
         self.ic_key_decimals = int(getattr(self.dataset_cfg, "ic_key_decimals", 8))
@@ -51,10 +52,24 @@ class Datapreprocessor:
         self.m2 = None
         self.min = None
         self.max = None
+        print(
+            "[preprocess] Initialized | "
+            f"folder={self.folder_path} raw_files={self.num_of_raw_files} "
+            f"trajectories={self.total_init_conditions} split_mode={self.test_split_mode}"
+        )
 
     def scrap_info(self) -> None:
-        number = int(self.dataset_cfg.number)
-        self.folder_path = os.path.join(self.cfg.dirs.dataset_dir, self.model_flag, f"dataset_v{number}")
+        dataset_root = getattr(self.dataset_cfg, "root", None)
+        if dataset_root not in (None, ""):
+            candidate = str(dataset_root)
+            self.folder_path = (
+                candidate
+                if os.path.isabs(candidate)
+                else os.path.join(str(self.cfg.dirs.dataset_dir), candidate)
+            )
+        else:
+            number = int(self.dataset_cfg.number)
+            self.folder_path = os.path.join(self.cfg.dirs.dataset_dir, self.model_flag, f"dataset_v{number}")
         self.info_path = os.path.join(self.folder_path, INFO_FILE_NAME)
 
         if not os.path.exists(self.info_path):
@@ -63,11 +78,21 @@ class Datapreprocessor:
         with open(self.info_path, "r", encoding="utf-8") as text_file:
             lines = text_file.readlines()
         validate_info_lines(lines)
+        info_map = self._parse_info_lines(lines)
 
-        self.num_of_raw_files = int(lines[0].split(":", 1)[1].strip())
-        self.total_init_conditions = int(lines[2].split(":", 1)[1].strip())
-        self.time_sim = float(lines[3].split(":", 1)[1].strip())
-        self.num_of_points_sim = int(lines[4].split(":", 1)[1].strip())
+        self.num_of_raw_files = int(info_map["Number of files"])
+        self.total_init_conditions = int(info_map["Number of different simulated trajectories"])
+        self.time_sim = float(info_map["Time horizon of the simulations"])
+        self.num_of_points_sim = int(info_map["Number of points in the each simulation"])
+
+    def _parse_info_lines(self, lines: list[str]) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for line in lines:
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            out[key.strip()] = value.strip()
+        return out
 
     def create_train_val_test_folder(self) -> None:
         if not os.path.exists(self.folder_path):
@@ -95,6 +120,10 @@ class Datapreprocessor:
         self.test_file_count = self._existing_split_count(self.test_folder, H5_DATA_SUFFIX)
         self.col_file_count = self._existing_split_count(self.train_folder, H5_COLLOCATION_SUFFIX)
         self.init_file_count = self._existing_split_count(self.train_folder, H5_INIT_SUFFIX)
+        print(
+            "[preprocess] Output folders ready | "
+            f"train_files={self.train_file_count} val_files={self.val_file_count} test_files={self.test_file_count}"
+        )
 
     def load_keys(self) -> None:
         modeling_guide_path = os.path.join(self.cfg.dirs.init_conditions_dir, "modellings_guide.yaml")
@@ -218,6 +247,7 @@ class Datapreprocessor:
         with open(self.info_path, "w", encoding="utf-8") as text_file:
             for key in ordered_keys:
                 text_file.write(f"{key}: {info_map[key]}\n")
+        print(f"[preprocess] Updated info.txt: {self.info_path}")
 
     def _load_raw_file(self, file_path: str, shuffle_flag: bool) -> list[Any]:
         with open(file_path, "rb") as handle:
@@ -296,20 +326,29 @@ class Datapreprocessor:
 
     def _load_dataset_info(self, dataset_number: int) -> tuple[str, int, float]:
         folder = os.path.join(self.cfg.dirs.dataset_dir, self.model_flag, f"dataset_v{int(dataset_number)}")
+        return self._load_dataset_info_from_folder(folder)
+
+    def _load_dataset_info_from_folder(self, folder: str) -> tuple[str, int, float]:
         info_path = os.path.join(folder, INFO_FILE_NAME)
         if not os.path.exists(info_path):
             raise FileNotFoundError(f"info.txt not found for shared dataset: {info_path}")
         with open(info_path, "r", encoding="utf-8") as text_file:
             lines = text_file.readlines()
         validate_info_lines(lines)
-        total_trajectories = int(lines[2].split(":", 1)[1].strip())
-        time_sim = float(lines[3].split(":", 1)[1].strip())
+        info_map = self._parse_info_lines(lines)
+        total_trajectories = int(info_map["Number of different simulated trajectories"])
+        time_sim = float(info_map["Time horizon of the simulations"])
         raw_path = os.path.join(folder, "raw")
         if not os.path.exists(raw_path):
             raise FileNotFoundError(f"Raw data folder not found for shared dataset: {raw_path}")
         return raw_path, total_trajectories, time_sim
 
     def get_preprocess_save_data(self) -> None:
+        print(
+            "[preprocess] Running supervised preprocessing | "
+            f"time={float(self.cfg.time)} split_ratio={float(self.dataset_cfg.split_ratio)} "
+            f"validation={bool(self.dataset_cfg.validation_flag)} mode={self.test_split_mode}"
+        )
         if self.test_split_mode not in {"internal", "shared_dataset", "paired_common_from_datasets"}:
             raise ValueError(
                 "dataset.test_split_mode must be one of: "
@@ -336,7 +375,9 @@ class Datapreprocessor:
         raw_files = sorted([f for f in os.listdir(self.raw_data_path) if f.endswith(".pkl")])
         if self.test_split_mode != "paired_common_from_datasets":
             traj_idx_global = 0
-            for raw_file in raw_files:
+            for raw_idx, raw_file in enumerate(raw_files):
+                if raw_idx == 0 or raw_idx % 10 == 0 or raw_idx == len(raw_files) - 1:
+                    print(f"[preprocess] Processing raw file {raw_idx + 1}/{len(raw_files)}: {raw_file}")
                 file_path = os.path.join(self.raw_data_path, raw_file)
                 trajectories = self._load_raw_file(file_path, bool(self.dataset_cfg.shuffle))
                 for trajectory in trajectories:
@@ -372,18 +413,29 @@ class Datapreprocessor:
                             self._flush_split_buffers(split_name, buffers_x, buffers_y)
 
         if self.test_split_mode == "shared_dataset":
-            if self.shared_test_dataset_number is None:
+            if self.shared_test_dataset_root in (None, "") and self.shared_test_dataset_number is None:
                 raise ValueError(
-                    "dataset.shared_test_dataset_number must be set when test_split_mode='shared_dataset'."
+                    "Set dataset.shared_test_dataset_root or dataset.shared_test_dataset_number when "
+                    "test_split_mode='shared_dataset'."
                 )
-            shared_raw_path, _, shared_time_sim = self._load_dataset_info(int(self.shared_test_dataset_number))
+            if self.shared_test_dataset_root not in (None, ""):
+                shared_root = str(self.shared_test_dataset_root)
+                if not os.path.isabs(shared_root):
+                    shared_root = os.path.abspath(os.path.join(str(self.cfg.dirs.dataset_dir), shared_root))
+                shared_raw_path, _, shared_time_sim = self._load_dataset_info_from_folder(shared_root)
+            else:
+                shared_raw_path, _, shared_time_sim = self._load_dataset_info(int(self.shared_test_dataset_number))
             max_test = None if self.shared_test_max_trajectories is None else int(self.shared_test_max_trajectories)
             if max_test is not None and max_test <= 0:
                 raise ValueError("dataset.shared_test_max_trajectories must be positive if set.")
 
             test_count = 0
             shared_files = sorted([f for f in os.listdir(shared_raw_path) if f.endswith(".pkl")])
-            for raw_file in shared_files:
+            for raw_idx, raw_file in enumerate(shared_files):
+                if raw_idx == 0 or raw_idx % 10 == 0 or raw_idx == len(shared_files) - 1:
+                    print(
+                        f"[preprocess] Processing shared-test raw file {raw_idx + 1}/{len(shared_files)}: {raw_file}"
+                    )
                 file_path = os.path.join(shared_raw_path, raw_file)
                 trajectories = self._load_raw_file(file_path, bool(self.dataset_cfg.shuffle))
                 for trajectory in trajectories:
@@ -431,7 +483,12 @@ class Datapreprocessor:
 
             non_test_flags: list[bool] = []
             raw_files = sorted([f for f in os.listdir(self.raw_data_path) if f.endswith(".pkl")])
-            for raw_file in raw_files:
+            for raw_idx, raw_file in enumerate(raw_files):
+                if raw_idx == 0 or raw_idx % 10 == 0 or raw_idx == len(raw_files) - 1:
+                    print(
+                        "[preprocess] Building paired common test map | "
+                        f"raw file {raw_idx + 1}/{len(raw_files)}: {raw_file}"
+                    )
                 file_path = os.path.join(self.raw_data_path, raw_file)
                 trajectories = self._load_raw_file(file_path, shuffle_flag=False)
                 for trajectory in trajectories:
@@ -448,7 +505,12 @@ class Datapreprocessor:
 
             non_test_idx = 0
             global_idx = 0
-            for raw_file in raw_files:
+            for raw_idx, raw_file in enumerate(raw_files):
+                if raw_idx == 0 or raw_idx % 10 == 0 or raw_idx == len(raw_files) - 1:
+                    print(
+                        "[preprocess] Rebuilding train/val without common-test ICs | "
+                        f"raw file {raw_idx + 1}/{len(raw_files)}: {raw_file}"
+                    )
                 file_path = os.path.join(self.raw_data_path, raw_file)
                 trajectories = self._load_raw_file(file_path, shuffle_flag=False)
                 for trajectory in trajectories:
@@ -497,6 +559,7 @@ class Datapreprocessor:
         self.set_info_attributes(
             dataset_test_split_mode=self.test_split_mode,
             dataset_shared_test_number=self.shared_test_dataset_number,
+            dataset_shared_test_root=self.shared_test_dataset_root,
             dataset_shared_test_max_trajectories=self.shared_test_max_trajectories,
             dataset_paired_other_number=self.paired_other_dataset_number,
             dataset_ic_key_decimals=self.ic_key_decimals,
@@ -508,6 +571,12 @@ class Datapreprocessor:
             num_of_validation_trajectories=trajectories_by_split[VAL_SPLIT],
             num_of_test_files=self.test_file_count,
             num_of_testing_trajectories=trajectories_by_split[TEST_SPLIT],
+        )
+        print(
+            "[preprocess] Supervised split complete | "
+            f"train_traj={trajectories_by_split[TRAIN_SPLIT]} "
+            f"val_traj={trajectories_by_split[VAL_SPLIT]} "
+            f"test_traj={trajectories_by_split[TEST_SPLIT]}"
         )
 
     def _flush_split_buffers(
@@ -531,12 +600,19 @@ class Datapreprocessor:
             self.train_file_count += 1
             self._update_train_stats(x_chunk)
             self._save_dataset(split, x_chunk, y_chunk, self.train_file_count, suffix=H5_DATA_SUFFIX)
+            out_idx = self.train_file_count
         elif split == VAL_SPLIT:
             self.val_file_count += 1
             self._save_dataset(split, x_chunk, y_chunk, self.val_file_count, suffix=H5_DATA_SUFFIX)
+            out_idx = self.val_file_count
         else:
             self.test_file_count += 1
             self._save_dataset(split, x_chunk, y_chunk, self.test_file_count, suffix=H5_DATA_SUFFIX)
+            out_idx = self.test_file_count
+        print(
+            f"[preprocess] Wrote {split} chunk #{out_idx} | "
+            f"x_shape={tuple(x_chunk.shape)} y_shape={tuple(y_chunk.shape)}"
+        )
 
     def create_col_points(self, init_condition_table: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         init_condition_table = np.asarray(init_condition_table, dtype=np.float32)
@@ -554,7 +630,9 @@ class Datapreprocessor:
 
     def create_save_col_data(self, save_flag: bool = True):
         if not bool(self.dataset_cfg.new_coll_points_flag):
+            print("[preprocess] Skipping collocation generation (dataset.new_coll_points_flag=false).")
             return None
+        print("[preprocess] Generating collocation/init datasets.")
 
         ode_model = ODEModelling(self.cfg)
         init_conditions = np.array(ode_model.build_initial_conditions(), dtype=np.float32)
@@ -576,10 +654,18 @@ class Datapreprocessor:
             self._save_dataset(TRAIN_SPLIT, x_col, None, self.col_file_count, suffix=H5_COLLOCATION_SUFFIX)
             self._save_dataset(TRAIN_SPLIT, x_init, y_init, self.init_file_count, suffix=H5_INIT_SUFFIX)
             saved_col_files += 1
+            print(
+                "[preprocess] Wrote collocation chunk | "
+                f"chunk={saved_col_files} ic_batch={chunk.shape[0]} x_col_shape={tuple(x_col.shape)}"
+            )
 
         self.set_info_attributes(
             num_of_train_col_files=self.col_file_count,
             num_of_training_col_trajectories=int(len(init_conditions)),
             num_of_train_init_files=self.init_file_count,
+        )
+        print(
+            "[preprocess] Collocation generation complete | "
+            f"chunks={saved_col_files} trajectories={int(len(init_conditions))}"
         )
         return None

@@ -1,0 +1,11 @@
+# @package _global_
+experiment:
+  budget: b4096
+
+# Final train size = 128 + 31*128 = 4096
+qbc_n0: 128
+qbc_n_test: 0
+qbc_M: 3
+qbc_P: 4096
+qbc_K: 128
+qbc_T: 31

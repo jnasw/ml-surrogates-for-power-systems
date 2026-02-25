@@ -10,11 +10,20 @@
 
 set -euo pipefail
 
+<<<<<<< HEAD
 # Run matrix (6 jobs):
 # method: qbc
 # budgets: b8192, b16384
 # seeds: s01,s02,s03
 
+=======
+# Run matrix (12 jobs):
+# methods: lhs_static, qbc_deep_ensemble
+# budgets: b8192, b16384
+# seeds: s01,s02,s03
+
+METHODS=("lhs_static" "qbc_deep_ensemble")
+>>>>>>> c209f76588b46aa058418ada6d48a49bf5c00f6d
 BUDGETS=("b8192" "b16384")
 SEEDS=("s01" "s02" "s03")
 

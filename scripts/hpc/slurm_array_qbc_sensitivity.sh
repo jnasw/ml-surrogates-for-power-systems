@@ -56,16 +56,14 @@ echo "[RUN] ${RUN_ID} (task=${TASK_ID}/${TOTAL})"
 
 mkdir -p outputs/slurm_logs
 
-python create_dataset.py \
-  +exp=base \
-  +exp/phase=qbc_sensitivity \
-  +exp/method=qbc \
-  +exp/budget/qbc=b1024 \
-  +exp/seed="${SEED}" \
-  qbc_M="${M}" \
-  qbc_P="${P}" \
-  qbc_n0="${N0}" \
-  qbc_K="${K}" \
-  qbc_T="${T}" \
-  hydra.run.dir="${PWD}/outputs/experiments/hydra/${RUN_ID}" \
-  hydra.job.chdir=false
+python run_experiment.py \
+  --method qbc_deep_ensemble \
+  --budget b1024 \
+  --seed "${SEED}" \
+  --phase qbc_sensitivity \
+  --experiment-id thesis_sm4_v1 \
+  --stage1-override "qbc_M=${M}" \
+  --stage1-override "qbc_P=${P}" \
+  --stage1-override "qbc_n0=${N0}" \
+  --stage1-override "qbc_K=${K}" \
+  --stage1-override "qbc_T=${T}"

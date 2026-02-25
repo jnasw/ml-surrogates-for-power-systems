@@ -1,0 +1,11 @@
+# @package _global_
+experiment:
+  budget: b2208
+
+# Final train size = qbc_n0 + qbc_T * qbc_K = 128 + 32*65 = 2208
+qbc_n0: 128
+qbc_n_test: 0
+qbc_M: 3
+qbc_P: 4096
+qbc_K: 65
+qbc_T: 32

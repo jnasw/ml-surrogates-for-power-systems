@@ -12,7 +12,6 @@ import numpy as np
 from omegaconf import OmegaConf
 
 from src.active.ensemble import DeepEnsemble, load_ensemble_checkpoint, save_ensemble_checkpoint
-from src.active.qbc_loop import QBCRoundSummary
 from src.data.trajectory_dataset import TrajectoryDataset
 
 
@@ -38,7 +37,7 @@ class ExperimentLogger:
 
     def log_round(
         self,
-        summary: QBCRoundSummary,
+        summary: Any,
         x_cand: np.ndarray,
         scores: np.ndarray,
         selected_idx: np.ndarray,
@@ -55,6 +54,15 @@ class ExperimentLogger:
         payload["selected_indices"] = summary.selected_indices.tolist()
         with open(self.history_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(payload) + "\n")
+
+    def save_round_arrays(self, round_idx: int, **arrays: Any) -> None:
+        """Save additional round-level arrays for custom acquisition analyses."""
+        round_dir = os.path.join(self.rounds_dir, f"round_{int(round_idx):03d}")
+        os.makedirs(round_dir, exist_ok=True)
+        for key, value in arrays.items():
+            if value is None:
+                continue
+            np.save(os.path.join(round_dir, f"{key}.npy"), np.asarray(value))
 
     def save_dataset_checkpoint(self, dataset: TrajectoryDataset, tag: str) -> str:
         path = os.path.join(self.ckpt_dir, f"dataset_{tag}.npz")
