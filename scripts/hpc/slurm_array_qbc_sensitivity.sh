@@ -3,10 +3,10 @@
 #SBATCH --output=outputs/slurm_logs/%x_%A_%a.out
 #SBATCH --error=outputs/slurm_logs/%x_%A_%a.err
 #SBATCH --time=12:00:00
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=24G
 #SBATCH --gres=gpu:1
-#SBATCH --array=0-17
+#SBATCH --array=0-17%3
 
 set -euo pipefail
 
@@ -25,7 +25,13 @@ N_P=${#P_VALUES[@]}
 N_SEEDS=${#SEEDS[@]}
 TOTAL=$((N_M * N_P * N_SEEDS))
 
-TASK_ID=${SLURM_ARRAY_TASK_ID:-0}
+if [[ -n "${SLURM_ARRAY_TASK_ID:-}" ]]; then
+  TASK_ID=${SLURM_ARRAY_TASK_ID}
+elif [[ -n "${LSB_JOBINDEX:-}" ]]; then
+  TASK_ID=$((LSB_JOBINDEX - 1))
+else
+  TASK_ID=0
+fi
 if (( TASK_ID < 0 || TASK_ID >= TOTAL )); then
   echo "Invalid task id ${TASK_ID}; expected 0..$((TOTAL - 1))"
   exit 1
