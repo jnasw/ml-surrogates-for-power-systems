@@ -1,0 +1,39 @@
+campaign:
+  name: local_value_4k
+  experiment_id: thesis_sm4_local_value_4k
+  phase: main
+  model_flag: SM4
+  skip_preprocess: false
+  skip_baseline: false
+  baseline_epochs: 20
+  continue_on_error: true
+
+# 4 methods x 2 seeds = 8 runs (local-feasible, still meaningful).
+axes:
+  method: [lhs_static, qbc_deep_ensemble, marker_directed, qbc_marker_hybrid]
+  budget: [b4096]
+  seed: [s01, s02]
+
+exclude: []
+
+stage_overrides:
+  # Keep adaptive compute controlled while preserving a 4096 final dataset size.
+  # final_size = qbc_n0 + qbc_T * qbc_K = 512 + 14*256 = 4096
+  stage1:
+    - qbc_n0=512
+    - qbc_P=1024
+    - qbc_K=256
+    - qbc_T=14
+    - qbc_M=3
+    - surrogate.epochs=40
+    - time=0.5
+    - num_of_points=200
+  # Force a large test set: 50/50 split, no val => ~2048 train / ~2048 test.
+  stage2:
+    - dataset.validation_flag=false
+    - dataset.split_ratio=0.5
+    - dataset.new_coll_points_flag=false
+    - time=0.5
+    - num_of_points=200
+  stage3:
+    - baseline.batch_size=128

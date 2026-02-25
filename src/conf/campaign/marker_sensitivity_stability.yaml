@@ -1,0 +1,75 @@
+campaign:
+  name: marker_sens_stability
+  experiment_id: thesis_sm4_marker_sens_stability
+  phase: qbc_sensitivity
+  model_flag: SM4
+  skip_preprocess: false
+  skip_baseline: false
+  baseline_epochs: 20
+  continue_on_error: true
+
+shared_test:
+  enabled: true
+  method: lhs_static
+  budget: b4096
+  seed: s01
+  max_trajectories: 2048
+  stage1_overrides:
+    - time=0.5
+    - num_of_points=200
+
+axes:
+  method: [marker_directed]
+  budget: [b4096]
+  seed: [s01, s02, s03, s04, s05]
+  # Replace with top configs from smoke ranking before launch.
+  cfg: [cfg01_base, cfg02_diverse_heavy, cfg05_high_pca]
+
+exclude: []
+
+stage_overrides:
+  stage1:
+    - qbc_n0=512
+    - qbc_P=1024
+    - qbc_K=256
+    - qbc_T=14
+    - surrogate.deterministic=true
+    - surrogate.device=cpu
+    - time=0.5
+    - num_of_points=200
+  stage2:
+    - dataset.validation_flag=false
+    - dataset.new_coll_points_flag=false
+    - time=0.5
+    - num_of_points=200
+  stage3:
+    - baseline.batch_size=128
+
+run_overrides:
+  - match: {cfg: cfg02_diverse_heavy}
+    stage1:
+      - active.marker.weights.diversity=0.80
+      - active.marker.weights.sparsity=0.20
+      - active.marker.greedy_score_weight=0.60
+      - active.marker.preselect_factor=7
+  - match: {cfg: cfg03_sparse_heavy}
+    stage1:
+      - active.marker.weights.diversity=0.40
+      - active.marker.weights.sparsity=0.60
+      - active.marker.k_density=25
+      - active.marker.greedy_score_weight=0.80
+  - match: {cfg: cfg04_low_pca}
+    stage1:
+      - active.marker.pca_explained_variance=0.80
+  - match: {cfg: cfg05_high_pca}
+    stage1:
+      - active.marker.pca_explained_variance=0.98
+  - match: {cfg: cfg06_anchor_off}
+    stage1:
+      - active.marker.include_anchor_state_markers=false
+  - match: {cfg: cfg07_sobol}
+    stage1:
+      - active.candidate_method=sobol
+  - match: {cfg: cfg08_random}
+    stage1:
+      - active.candidate_method=random

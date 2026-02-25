@@ -11,11 +11,11 @@
 set -euo pipefail
 
 # Run matrix (12 jobs):
-# methods: lhs_static, qbc
+# methods: lhs_static, qbc_deep_ensemble
 # budgets: b8192, b16384
 # seeds: s01,s02,s03
 
-METHODS=("lhs_static" "qbc")
+METHODS=("lhs_static" "qbc_deep_ensemble")
 BUDGETS=("b8192" "b16384")
 SEEDS=("s01" "s02" "s03")
 
@@ -39,22 +39,14 @@ METHOD=${METHODS[$method_idx]}
 BUDGET=${BUDGETS[$budget_idx]}
 SEED=${SEEDS[$seed_idx]}
 
-if [[ "${METHOD}" == "lhs_static" ]]; then
-  BUDGET_GROUP="lhs"
-else
-  BUDGET_GROUP="qbc"
-fi
-
 RUN_ID="${METHOD}_${BUDGET}_${SEED}"
 echo "[RUN] ${RUN_ID} (task=${TASK_ID}/${TOTAL})"
 
 mkdir -p outputs/slurm_logs
 
-python create_dataset.py \
-  +exp=base \
-  +exp/phase=scaling \
-  +exp/method="${METHOD}" \
-  +exp/budget/"${BUDGET_GROUP}"="${BUDGET}" \
-  +exp/seed="${SEED}" \
-  hydra.run.dir="${PWD}/outputs/experiments/hydra/${RUN_ID}" \
-  hydra.job.chdir=false
+python run_experiment.py \
+  --method "${METHOD}" \
+  --budget "${BUDGET}" \
+  --seed "${SEED}" \
+  --phase scaling \
+  --experiment-id thesis_sm4_v1

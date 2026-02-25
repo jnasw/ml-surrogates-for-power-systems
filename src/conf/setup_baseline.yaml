@@ -3,6 +3,7 @@ model:
   seed: 37
 
 dataset:
+  root: null # optional absolute/relative path to data/<MODEL>/dataset_vN; overrides dataset.number when set
   number: 1
   include_val_in_train: false
 

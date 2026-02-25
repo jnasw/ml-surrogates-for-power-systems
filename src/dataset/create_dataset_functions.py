@@ -50,9 +50,16 @@ class ODEModelling:
         dataset_dir = self.config.dirs.dataset_dir
         model_dir = os.path.join(dataset_dir, self.model_flag)
         dataset_version_dir = self._next_dataset_version_folder(model_dir)
+        self.dataset_root_path = dataset_version_dir
         self.dataset_folder_path = os.path.join(dataset_version_dir, "raw")
         os.makedirs(self.dataset_folder_path, exist_ok=False)
         print(f"Created dataset folder: {dataset_version_dir}")
+
+    def get_dataset_root_path(self) -> str:
+        """Return the dataset root path after the first save operation."""
+        if not hasattr(self, "dataset_root_path"):
+            raise RuntimeError("Dataset root path is not available before saving data.")
+        return str(self.dataset_root_path)
 
     def _write_info_file(self, num_files: int, total_trajectories: int, extra_info: dict[str, Any] | None = None) -> None:
         info_path = os.path.join(os.path.dirname(self.dataset_folder_path), INFO_FILE_NAME)
