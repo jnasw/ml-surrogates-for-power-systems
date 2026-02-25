@@ -76,23 +76,25 @@ QBC budgets use `N = qbc_n0 + qbc_T * qbc_K`:
 
 ## Slurm Array Scripts
 
-- Main comparison (30 jobs):
-  - `scripts/hpc/slurm_array_dataset_main.sh`
-  - Matrix: `2 methods x 3 budgets x 5 seeds`
+- Main comparison split by resource profile:
+  - QBC GPU jobs (15): `scripts/hpc/slurm_array_dataset_main.sh`
+  - LHS CPU jobs (15): `scripts/hpc/slurm_array_dataset_main_lhs_cpu.sh`
 - QBC sensitivity (18 jobs):
   - `scripts/hpc/slurm_array_qbc_sensitivity.sh`
   - Matrix: `M in {3,5,8} x P in {256,1024} x 3 seeds`, fixed budget `b1024`
-- Scaling (12 jobs):
-  - `scripts/hpc/slurm_array_scaling.sh`
-  - Matrix: `2 methods x 2 budgets x 3 seeds`
+- Scaling split by resource profile:
+  - QBC GPU jobs (6): `scripts/hpc/slurm_array_scaling.sh`
+  - LHS CPU jobs (6): `scripts/hpc/slurm_array_scaling_lhs_cpu.sh`
 
 ## Launch Commands
 
 ```bash
 mkdir -p outputs/slurm_logs
 sbatch scripts/hpc/slurm_array_dataset_main.sh
+sbatch scripts/hpc/slurm_array_dataset_main_lhs_cpu.sh
 sbatch scripts/hpc/slurm_array_qbc_sensitivity.sh
 sbatch scripts/hpc/slurm_array_scaling.sh
+sbatch scripts/hpc/slurm_array_scaling_lhs_cpu.sh
 ```
 
 ## Single-Run Example (no Slurm)
