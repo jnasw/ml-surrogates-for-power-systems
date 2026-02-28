@@ -1,0 +1,22 @@
+# @package _global_
+experiment:
+  method: qbc_marker_hybrid
+
+model:
+  ic_generation_method: adaptive_iterative
+
+active:
+  candidate_method: lhs
+  acquisition_strategy: qbc_marker_hybrid
+  predict_batch_size: 2048
+  hybrid:
+    pca_explained_variance: 0.90
+    k_density: 15
+    preselect_factor: 5
+    greedy_score_weight: 0.7
+    settling_fraction: 0.05
+    include_anchor_state_markers: true
+    weights:
+      uncertainty: 0.4
+      diversity: 0.4
+      sparsity: 0.2

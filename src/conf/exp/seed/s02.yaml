@@ -1,6 +1,0 @@
-# @package _global_
-experiment:
-  seed: s02
-
-model:
-  seed: 202

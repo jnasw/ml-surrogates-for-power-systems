@@ -1,0 +1,40 @@
+# canonical budget registry
+# final_n is the intended final train set size
+# lhs uses final_n as model.ic_num_samples
+# adaptive methods use n0, k, t, p
+b256:
+  final_n: 256
+  n0: 32
+  k: 32
+  t: 7
+  p: 512
+b1024:
+  final_n: 1024
+  n0: 64
+  k: 64
+  t: 15
+  p: 2048
+b2208:
+  final_n: 2208
+  n0: 128
+  k: 65
+  t: 32
+  p: 4096
+b4096:
+  final_n: 4096
+  n0: 128
+  k: 128
+  t: 31
+  p: 4096
+b8192:
+  final_n: 8192
+  n0: 256
+  k: 256
+  t: 31
+  p: 8192
+b16384:
+  final_n: 16384
+  n0: 512
+  k: 512
+  t: 31
+  p: 16384

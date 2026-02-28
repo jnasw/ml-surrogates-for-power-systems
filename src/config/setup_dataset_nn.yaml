@@ -1,0 +1,46 @@
+wandb:
+  project: "sm-surrogates-preprocess"
+  use: false
+
+time: 1.0
+num_of_points: 1000
+PINN_flag: true
+
+model:
+  model_flag: "SM4"
+  machine_num: 1
+  init_condition_bounds: 1
+  sampling: "Lhs" # Lhs | Linear | Random
+  ic_generation_method: "full_factorial" # full_factorial | joint_lhs | adaptive_iterative
+  ic_num_samples: null # used when ic_generation_method=joint_lhs; null -> product(iterations)
+  torch: true
+  seed: 37
+
+dataset:
+  root: null # optional absolute/relative path to data/<MODEL>/dataset_vN; overrides dataset.number when set
+  number: 1
+  shuffle: true
+  split_ratio: 0.8
+  validation_flag: true
+  test_split_mode: "internal" # internal | shared_dataset | paired_common_from_datasets
+  shared_test_dataset_number: null # required when test_split_mode=shared_dataset
+  shared_test_dataset_root: null # optional absolute path to shared test dataset root (.../<MODEL>/dataset_vN)
+  shared_test_max_trajectories: null # optional cap for shared test trajectories
+  paired_other_dataset_number: null # required when test_split_mode=paired_common_from_datasets
+  ic_key_decimals: 8 # IC dedup precision in paired_common_from_datasets mode
+  transform_input: "None" # None | Std | MinMax | MinMax2
+  new_coll_points_flag: true
+
+surrogate:
+  hidden_dim: 128
+  hidden_layers: 3
+  batch_size: 64
+  epochs: 200
+  lr: 0.001
+  device: auto # auto | cuda | mps | cpu
+  use_cuda: true
+
+dirs:
+  params_dir: ${hydra:runtime.cwd}/src/config/params
+  init_conditions_dir: ${hydra:runtime.cwd}/src/config/ic
+  dataset_dir: ${hydra:runtime.cwd}/data

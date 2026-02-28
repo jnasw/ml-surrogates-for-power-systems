@@ -1,0 +1,26 @@
+# @package _global_
+# Representative preset (~4k trajectories).
+experiment:
+  preset: default
+
+model:
+  ic_num_samples: 4096
+
+qbc_n0: 128
+qbc_P: 4096
+qbc_K: 128
+qbc_T: 31
+qbc_M: 3
+qbc_n_test: 0
+
+qbc_enable_logging: false
+qbc_run_dir: ${hydra:runtime.cwd}/outputs/qbc/${experiment.preset}/${experiment.method}
+
+dirs:
+  dataset_dir: ${hydra:runtime.cwd}/outputs/datasets/${experiment.preset}/${experiment.method}
+
+hydra:
+  run:
+    dir: ${hydra:runtime.cwd}/outputs/hydra/${experiment.preset}/${experiment.method}/${now:%Y%m%d_%H%M%S}
+  job:
+    chdir: false

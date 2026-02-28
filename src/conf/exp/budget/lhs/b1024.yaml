@@ -1,6 +1,0 @@
-# @package _global_
-experiment:
-  budget: b1024
-
-model:
-  ic_num_samples: 1024

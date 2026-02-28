@@ -1,0 +1,30 @@
+# @package _global_
+# Fast local smoke preset for stage-1 generation checks.
+experiment:
+  preset: smoke
+
+model:
+  ic_num_samples: 128
+
+time: 0.05
+num_of_points: 20
+save_freq: 4
+
+qbc_n0: 16
+qbc_P: 128
+qbc_K: 16
+qbc_T: 7
+qbc_M: 2
+qbc_n_test: 0
+
+qbc_enable_logging: false
+qbc_run_dir: ${hydra:runtime.cwd}/outputs/qbc/${experiment.preset}/${experiment.method}
+
+dirs:
+  dataset_dir: ${hydra:runtime.cwd}/outputs/datasets/${experiment.preset}/${experiment.method}
+
+hydra:
+  run:
+    dir: ${hydra:runtime.cwd}/outputs/hydra/${experiment.preset}/${experiment.method}/${now:%Y%m%d_%H%M%S}
+  job:
+    chdir: false

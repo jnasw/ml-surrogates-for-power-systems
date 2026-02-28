@@ -1,0 +1,41 @@
+hpo:
+  id: qbc_deep_ensemble_policy_search
+  method: qbc_deep_ensemble
+  stage: stage1_policy_search
+  preset: main
+  experiment_id: thesis_qbc_hpo_stage1
+  model_flag: SM4
+  output_root: outputs/hpo
+  skip_preprocess: true
+  skip_baseline: true
+  baseline_epochs: null
+
+matrix:
+  axes:
+    budget: [b1024]
+    seed: [s01, s02, s03]
+    stage1:
+      qbc_M: [3, 5]
+      active.disagreement.metric: [variance_mean, mean_pairwise_l2]
+      active.diversity.preselect_factor: [3, 5]
+      active.diversity.uncertainty_weight: [0.6, 0.8]
+  fixed_overrides:
+    stage1:
+      - qbc_enable_logging=true
+      - active.log_every=5
+      - qbc_n0=64
+      - qbc_K=64
+      - qbc_T=15
+      - qbc_P=2048
+    stage2: []
+    stage3: []
+  derive:
+    stage1:
+      uncertainty_distance_complement: true
+      uncertainty_key: active.diversity.uncertainty_weight
+      distance_key: active.diversity.distance_weight
+  constraints:
+    enforce_final_n_from_budget: true
+    n0_key: qbc_n0
+    k_key: qbc_K
+    t_key: qbc_T

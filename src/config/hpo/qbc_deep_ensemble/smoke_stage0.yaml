@@ -1,0 +1,42 @@
+hpo:
+  id: qbc_deep_ensemble_smoke
+  method: qbc_deep_ensemble
+  stage: stage0_smoke
+  preset: smoke
+  experiment_id: thesis_qbc_hpo_smoke
+  model_flag: SM4
+  output_root: outputs/hpo
+  skip_preprocess: true
+  skip_baseline: true
+  baseline_epochs: null
+
+matrix:
+  axes:
+    budget: [b256]
+    seed: [s01]
+    stage1:
+      qbc_M: [2]
+      active.disagreement.metric: [variance_mean]
+      active.diversity.preselect_factor: [5]
+      active.diversity.uncertainty_weight: [0.7]
+      qbc_n0: [16]
+      qbc_K: [16]
+      qbc_T: [15]
+      qbc_P: [128]
+  fixed_overrides:
+    stage1:
+      - qbc_enable_logging=true
+      - active.log_every=5
+    stage2: []
+    stage3: []
+  derive:
+    stage1:
+      uncertainty_distance_complement: true
+      uncertainty_key: active.diversity.uncertainty_weight
+      distance_key: active.diversity.distance_weight
+  constraints:
+    enforce_final_n_from_budget: true
+    n0_key: qbc_n0
+    k_key: qbc_K
+    t_key: qbc_T
+

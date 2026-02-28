@@ -1,0 +1,25 @@
+# @package _global_
+experiment:
+  preset: main
+
+model:
+  ic_num_samples: 1024
+
+qbc_n0: 64
+qbc_P: 1024
+qbc_K: 64
+qbc_T: 15
+qbc_M: 3
+qbc_n_test: 0
+
+qbc_enable_logging: false
+qbc_run_dir: ${hydra:runtime.cwd}/outputs/qbc/${experiment.preset}/${experiment.method}
+
+dirs:
+  dataset_dir: ${hydra:runtime.cwd}/outputs/datasets/${experiment.preset}/${experiment.method}
+
+hydra:
+  run:
+    dir: ${hydra:runtime.cwd}/outputs/hydra/${experiment.preset}/${experiment.method}/${now:%Y%m%d_%H%M%S}
+  job:
+    chdir: false

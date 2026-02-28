@@ -17,11 +17,11 @@ The project uses a two-stage data pipeline:
    - Consumes stage-2 HDF5 output (not raw `pkl` files).
 
 For end-to-end execution, use:
-- `run_experiment.py` (stage-1 -> stage-2 -> baseline in one command, with run manifest).
+- `tools/pipeline/run_experiment.py` (stage-1 -> stage-2 -> baseline in one command, with run manifest).
 
 ### Sampling modes in stage-1
 
-Configure `model.ic_generation_method` in `src/conf/setup_dataset.yaml`:
+Configure `model.ic_generation_method` in `src/config/setup_dataset.yaml`:
 
 - `full_factorial`: per-variable sampling with cartesian product.
 - `joint_lhs`: D-dimensional LHS over the full IC vector.
@@ -76,18 +76,17 @@ Then run `run_baseline.py` once per dataset version and compare the saved metric
 Run a full pipeline experiment:
 
 ```bash
-python run_experiment.py \
+python tools/pipeline/run_experiment.py \
   --method qbc_marker_hybrid \
   --budget b256 \
   --seed s01 \
-  --phase main \
   --experiment-id thesis_sm4_local
 ```
 
 Artifacts are stored under:
 
 ```text
-outputs/experiments/<experiment-id>/<phase>/<method>/<budget>/<seed>/
+outputs/experiments/<experiment-id>/<preset>/<method>/<budget>/<seed>/
 ```
 
 Key files:
@@ -97,35 +96,29 @@ Key files:
 - `qbc/` (adaptive round history/checkpoints when applicable)
 - `baseline/metrics.json` (baseline results when enabled)
 
-Quick local matrix (small smoke runs):
-
-```bash
-scripts/local/run_local_experiment_matrix.sh
-```
-
 Aggregate all run manifests:
 
 ```bash
-python scripts/summarize_experiments.py --root outputs/experiments --out outputs/experiments_summary.csv
+python tools/analysis/summarize_experiments.py --root outputs/experiments --out outputs/experiments_summary.csv
 ```
 
 Run a declarative campaign matrix from YAML:
 
 ```bash
-python run_campaign.py --config src/conf/campaign/local_smoke.yaml
+python tools/pipeline/run_campaign.py --config src/config/campaign/local_smoke.yaml
 ```
 
 Campaigns can optionally bootstrap a shared/common test source dataset automatically
-via a `shared_test` block (see `src/conf/campaign/local_value_4k_common_test.yaml`).
+via a `shared_test` block (see `src/config/campaign/local_value_4k_common_test.yaml`).
 
 Dry-run the campaign (print commands only):
 
 ```bash
-python run_campaign.py --config src/conf/campaign/local_smoke.yaml --dry-run
+python tools/pipeline/run_campaign.py --config src/config/campaign/local_smoke.yaml --dry-run
 ```
 
 Export dashboard-ready tables (run-level + round-level):
 
 ```bash
-python scripts/export_dashboard_data.py --root outputs/experiments --out-dir outputs/dashboard
+python tools/analysis/export_dashboard_data.py --root outputs/experiments --out-dir outputs/dashboard
 ```

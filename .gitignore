@@ -208,6 +208,10 @@ __marimo__/
 
 # Project-generated artifacts
 outputs/
-data/
+/data/
+!/src/data/
+!/src/data/**
 *.npz
 *.npy
+obsolete/
+tests/

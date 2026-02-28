@@ -1,0 +1,41 @@
+hpo:
+  id: qbc_deep_ensemble_schedule_search
+  method: qbc_deep_ensemble
+  stage: stage2_schedule_search
+  preset: default
+  experiment_id: thesis_qbc_hpo_stage2
+  model_flag: SM4
+  output_root: outputs/hpo
+  skip_preprocess: true
+  skip_baseline: true
+  baseline_epochs: null
+
+matrix:
+  axes:
+    budget: [b4096]
+    seed: [s01, s02, s03]
+    stage1:
+      qbc_n0: [128]
+      qbc_K: [128]
+      qbc_T: [31]
+      qbc_P: [2048, 4096, 8192]
+  fixed_overrides:
+    stage1:
+      - qbc_enable_logging=true
+      - active.log_every=5
+      - qbc_M=5
+      - active.disagreement.metric=variance_mean
+      - active.diversity.preselect_factor=5
+      - active.diversity.uncertainty_weight=0.7
+    stage2: []
+    stage3: []
+  derive:
+    stage1:
+      uncertainty_distance_complement: true
+      uncertainty_key: active.diversity.uncertainty_weight
+      distance_key: active.diversity.distance_weight
+  constraints:
+    enforce_final_n_from_budget: true
+    n0_key: qbc_n0
+    k_key: qbc_K
+    t_key: qbc_T

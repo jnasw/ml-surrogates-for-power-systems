@@ -1,0 +1,23 @@
+campaign:
+  name: local_smoke
+  experiment_id: thesis_sm4_campaign_local
+  preset: main
+  model_flag: SM4
+  skip_preprocess: false
+  skip_baseline: false
+  baseline_epochs: 50
+  continue_on_error: true
+
+axes:
+  method: [lhs_static, qbc_deep_ensemble, marker_directed, qbc_marker_hybrid]
+  budget: [b256]
+  seed: [s01, s02]
+
+# Optional exclusion rules (exact match on keys present in each rule).
+exclude: []
+
+stage_overrides:
+  stage1: []
+  stage2:
+    - dataset.new_coll_points_flag=false
+  stage3: []

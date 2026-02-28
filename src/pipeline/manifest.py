@@ -20,7 +20,7 @@ def init_manifest(
     budget: str,
     seed_label: str,
     seed_value: int,
-    phase: str,
+    preset: str,
     experiment_id: str,
     model_flag: str,
     git_commit: str | None,
@@ -33,7 +33,7 @@ def init_manifest(
         "run_root": run_root,
         "experiment": {
             "id": experiment_id,
-            "phase": phase,
+            "preset": preset,
             "method": method,
             "budget": budget,
             "seed_label": seed_label,

@@ -1,6 +1,0 @@
-# @package _global_
-experiment:
-  seed: s04
-
-model:
-  seed: 404

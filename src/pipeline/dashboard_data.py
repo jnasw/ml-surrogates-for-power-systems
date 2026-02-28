@@ -37,7 +37,7 @@ def load_run_table(root: str) -> list[dict[str, Any]]:
                 "budget": exp.get("budget"),
                 "seed_label": exp.get("seed_label"),
                 "seed_value": exp.get("seed_value"),
-                "phase": exp.get("phase"),
+                "preset": exp.get("preset", exp.get("phase")),
                 "model_flag": exp.get("model_flag"),
                 "dataset_root": art.get("dataset_root"),
                 "qbc_history": art.get("qbc_history"),
@@ -65,9 +65,8 @@ def load_round_table(root: str) -> list[dict[str, Any]]:
         if not p.exists():
             continue
         for row in _read_csv(str(p)):
-            row["phase"] = exp.get("phase")
+            row["preset"] = exp.get("preset", exp.get("phase"))
             row["model_flag"] = exp.get("model_flag")
             row["manifest_path"] = manifest_path
             out.append(row)
     return out
-
