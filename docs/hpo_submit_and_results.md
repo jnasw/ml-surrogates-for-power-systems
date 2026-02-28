@@ -10,7 +10,7 @@ This document gives exact commands to submit QBC deep ensemble HPO jobs and wher
   - `src/config/hpo/qbc_deep_ensemble/policy_search_stage1.yaml`
   - `src/config/hpo/qbc_deep_ensemble/schedule_search_stage2.yaml`
 
-## 1) Submit Commands
+## 1) Submit Commands (`bsub < file.sh`)
 
 Run from repo root:
 
@@ -21,30 +21,63 @@ cd /Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems
 Smoke check (1 job):
 
 ```bash
-bash tools/hpo/smoke_hpo_lsf.sh \
-  src/config/hpo/qbc_deep_ensemble/smoke_stage0.yaml
+bsub < tools/hpo/jobs/qbc_smoke_stage0.lsf.sh
 ```
 
-Stage 1 policy search (array):
+Stage 1 policy search:
 
 ```bash
-bash tools/hpo/submit_hpo_lsf_array.sh \
-  src/config/hpo/qbc_deep_ensemble/policy_search_stage1.yaml
+bsub < tools/hpo/jobs/qbc_policy_search_stage1.lsf.sh
 ```
 
-Stage 2 schedule search (array):
+Stage 2 schedule search:
 
 ```bash
-bash tools/hpo/submit_hpo_lsf_array.sh \
-  src/config/hpo/qbc_deep_ensemble/schedule_search_stage2.yaml
+bsub < tools/hpo/jobs/qbc_schedule_search_stage2.lsf.sh
 ```
 
-Submit with explicit resources:
+Override config or python at submit time:
 
 ```bash
-QUEUE=gpua100 N_CORES=1 MEM_GB=24 WALL_HOURS=08 PYTHON_BIN=python3 \
-bash tools/hpo/submit_hpo_lsf_array.sh \
-  src/config/hpo/qbc_deep_ensemble/policy_search_stage1.yaml
+HPO_CONFIG=src/config/hpo/qbc_deep_ensemble/policy_search_stage1.yaml \
+PYTHON_BIN=python3 \
+bsub < tools/hpo/jobs/qbc_policy_search_stage1.lsf.sh
+```
+
+These scripts are fully self-contained:
+- build matrix
+- execute rows
+- write all logs/artifacts
+
+No wrapper call is required.
+
+## Job Scripts
+
+- `tools/hpo/jobs/qbc_smoke_stage0.lsf.sh`
+- `tools/hpo/jobs/qbc_policy_search_stage1.lsf.sh`
+- `tools/hpo/jobs/qbc_schedule_search_stage2.lsf.sh`
+
+You can edit `#BSUB` lines directly in each file (`queue`, `walltime`, `mem`, job name, stdout/stderr).
+
+## Direct `bsub` Custom Command (Optional)
+
+If you need a one-off custom submit:
+
+```bash
+python3 tools/hpo/build_hpo_matrix.py \
+  --config src/config/hpo/qbc_deep_ensemble/policy_search_stage1.yaml \
+  --env-out /tmp/hpo_env.sh
+source /tmp/hpo_env.sh
+
+bsub \
+  -J "hpo-qbc[1-${TOTAL_ROWS}]" \
+  -q gpua100 \
+  -n 1 \
+  -M $((24 * 1024)) \
+  -W 08:00 \
+  -oo "outputs/lsf_logs/hpo-qbc.%J.%I.out" \
+  -eo "outputs/lsf_logs/hpo-qbc.%J.%I.err" \
+  "env MATRIX_PATH='${MATRIX_PATH}' PYTHON_BIN='python3' bash tools/hpo/run_hpo_lsf_array_row.sh"
 ```
 
 ## 2) What Gets Created

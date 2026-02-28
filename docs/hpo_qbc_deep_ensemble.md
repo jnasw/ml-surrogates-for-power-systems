@@ -9,6 +9,10 @@ For exact submit commands and detailed output paths, see:
 
 - Matrix builder: `tools/hpo/build_hpo_matrix.py`
 - Row runner: `tools/hpo/run_hpo_matrix_row.py`
+- LSF job scripts (submit with `bsub < ...`):
+  - `tools/hpo/jobs/qbc_smoke_stage0.lsf.sh`
+  - `tools/hpo/jobs/qbc_policy_search_stage1.lsf.sh`
+  - `tools/hpo/jobs/qbc_schedule_search_stage2.lsf.sh`
 - LSF array submit: `tools/hpo/submit_hpo_lsf_array.sh`
 - LSF array row runner: `tools/hpo/run_hpo_lsf_array_row.sh`
 - LSF smoke submit: `tools/hpo/smoke_hpo_lsf.sh`
@@ -57,25 +61,24 @@ python3 tools/hpo/run_hpo_matrix_row.py \
 
 ## LSF Usage
 
+Preferred: submit the job scripts directly.
+
 Smoke (single row):
 
 ```bash
-bash tools/hpo/smoke_hpo_lsf.sh \
-  src/config/hpo/qbc_deep_ensemble/smoke_stage0.yaml
+bsub < tools/hpo/jobs/qbc_smoke_stage0.lsf.sh
 ```
 
-Stage-1 policy search (array):
+Stage-1 policy search:
 
 ```bash
-bash tools/hpo/submit_hpo_lsf_array.sh \
-  src/config/hpo/qbc_deep_ensemble/policy_search_stage1.yaml
+bsub < tools/hpo/jobs/qbc_policy_search_stage1.lsf.sh
 ```
 
-Stage-2 schedule search (array):
+Stage-2 schedule search:
 
 ```bash
-bash tools/hpo/submit_hpo_lsf_array.sh \
-  src/config/hpo/qbc_deep_ensemble/schedule_search_stage2.yaml
+bsub < tools/hpo/jobs/qbc_schedule_search_stage2.lsf.sh
 ```
 
 Optional resource overrides:
