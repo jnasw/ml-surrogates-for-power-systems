@@ -1,0 +1,42 @@
+hpo:
+  id: marker_directed_smoke
+  method: marker_directed
+  stage: stage0_smoke
+  preset: smoke
+  experiment_id: thesis_marker_hpo_smoke
+  model_flag: SM4
+  output_root: outputs/hpo
+  skip_preprocess: true
+  skip_baseline: true
+  baseline_epochs: null
+
+matrix:
+  axes:
+    budget: [b256]
+    seed: [s01]
+    stage1:
+      active.marker.preselect_factor: [3]
+      active.marker.weights.diversity: [0.6]
+      active.marker.weights.sparsity: [0.4]
+      qbc_n0: [32]
+      qbc_K: [32]
+      qbc_T: [7]
+      qbc_P: [256]
+  fixed_overrides:
+    stage1:
+      - qbc_enable_logging=true
+      - active.log_every=5
+      - active.candidate_method=lhs
+      - active.marker.pca_explained_variance=0.9
+      - active.marker.k_density=15
+      - active.marker.greedy_score_weight=0.7
+      - active.marker.settling_fraction=0.05
+      - active.marker.include_anchor_state_markers=true
+    stage2: []
+    stage3: []
+  constraints:
+    enforce_final_n_from_budget: true
+    n0_key: qbc_n0
+    k_key: qbc_K
+    t_key: qbc_T
+

@@ -1,14 +1,20 @@
 # HPO Submit Commands And Result Paths
 
-This document gives exact commands to submit QBC deep ensemble HPO jobs and where outputs are written.
+This document gives exact commands to submit HPO jobs and where outputs are written.
 
 ## Scope
 
-- Method: `qbc_deep_ensemble`
-- Configs:
-  - `src/config/hpo/qbc_deep_ensemble/smoke_stage0.yaml`
-  - `src/config/hpo/qbc_deep_ensemble/policy_search_stage1.yaml`
-  - `src/config/hpo/qbc_deep_ensemble/schedule_search_stage2.yaml`
+- `qbc_deep_ensemble`
+- `marker_directed`
+
+Config files:
+
+- `src/config/hpo/qbc_deep_ensemble/smoke_stage0.yaml`
+- `src/config/hpo/qbc_deep_ensemble/policy_search_stage1.yaml`
+- `src/config/hpo/qbc_deep_ensemble/schedule_search_stage2.yaml`
+- `src/config/hpo/marker_directed/smoke_stage0.yaml`
+- `src/config/hpo/marker_directed/policy_search_stage1.yaml`
+- `src/config/hpo/marker_directed/schedule_search_stage2.yaml`
 
 ## 1) Submit Commands (`bsub < file.sh`)
 
@@ -36,6 +42,24 @@ Stage 2 schedule search:
 bsub < tools/hpo/jobs/qbc_schedule_search_stage2.lsf.sh
 ```
 
+Marker smoke:
+
+```bash
+bsub < tools/hpo/jobs/marker_smoke_stage0.lsf.sh
+```
+
+Marker stage 1 policy search:
+
+```bash
+bsub < tools/hpo/jobs/marker_policy_search_stage1.lsf.sh
+```
+
+Marker stage 2 schedule search:
+
+```bash
+bsub < tools/hpo/jobs/marker_schedule_search_stage2.lsf.sh
+```
+
 Override config or python at submit time:
 
 ```bash
@@ -56,35 +80,22 @@ No wrapper call is required.
 - `tools/hpo/jobs/qbc_smoke_stage0.lsf.sh`
 - `tools/hpo/jobs/qbc_policy_search_stage1.lsf.sh`
 - `tools/hpo/jobs/qbc_schedule_search_stage2.lsf.sh`
+- `tools/hpo/jobs/marker_smoke_stage0.lsf.sh`
+- `tools/hpo/jobs/marker_policy_search_stage1.lsf.sh`
+- `tools/hpo/jobs/marker_schedule_search_stage2.lsf.sh`
 
 You can edit `#BSUB` lines directly in each file (`queue`, `walltime`, `mem`, job name, stdout/stderr).
 
-## Direct `bsub` Custom Command (Optional)
+## Notes
 
-If you need a one-off custom submit:
-
-```bash
-python3 tools/hpo/build_hpo_matrix.py \
-  --config src/config/hpo/qbc_deep_ensemble/policy_search_stage1.yaml \
-  --env-out /tmp/hpo_env.sh
-source /tmp/hpo_env.sh
-
-bsub \
-  -J "hpo-qbc[1-${TOTAL_ROWS}]" \
-  -q gpua100 \
-  -n 1 \
-  -M $((24 * 1024)) \
-  -W 08:00 \
-  -oo "outputs/lsf_logs/hpo-qbc.%J.%I.out" \
-  -eo "outputs/lsf_logs/hpo-qbc.%J.%I.err" \
-  "env MATRIX_PATH='${MATRIX_PATH}' PYTHON_BIN='python3' bash tools/hpo/run_hpo_lsf_array_row.sh"
-```
+- Job scripts are the single submit interface.
+- Keep resource settings in `#BSUB` headers for reproducibility.
 
 ## 2) What Gets Created
 
 When a matrix is built, this root is created:
 
-`outputs/hpo/qbc_deep_ensemble/<stage>/<hpo_id_or_hpo_id_timestamp>/`
+`outputs/hpo/<method>/<stage>/<hpo_id_or_hpo_id_timestamp>/`
 
 Inside that root:
 
@@ -94,11 +105,8 @@ Inside that root:
 
 LSF scheduler logs:
 
-- `outputs/lsf_logs/<job_name>.<job_id>.<array_idx>.out`
-- `outputs/lsf_logs/<job_name>.<job_id>.<array_idx>.err`
-- Smoke uses:
-  - `outputs/lsf_logs/<job_name>.<job_id>.out`
-  - `outputs/lsf_logs/<job_name>.<job_id>.err`
+- `outputs/lsf_logs/<job_name>.<job_id>.out`
+- `outputs/lsf_logs/<job_name>.<job_id>.err`
 
 ## 3) Per-Run Result Structure
 
@@ -128,7 +136,7 @@ If preprocess/baseline are enabled in HPO config:
 Show latest HPO roots:
 
 ```bash
-find outputs/hpo/qbc_deep_ensemble -maxdepth 3 -type d | sort
+find outputs/hpo -maxdepth 3 -type d | sort
 ```
 
 Check matrix size:

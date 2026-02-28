@@ -1,0 +1,41 @@
+hpo:
+  id: marker_directed_policy_search
+  method: marker_directed
+  stage: stage1_policy_search
+  preset: main
+  experiment_id: thesis_marker_hpo_stage1
+  model_flag: SM4
+  output_root: outputs/hpo
+  skip_preprocess: true
+  skip_baseline: true
+  baseline_epochs: null
+
+matrix:
+  axes:
+    budget: [b1024]
+    seed: [s01, s02, s03]
+    stage1:
+      active.marker.pca_explained_variance: [0.9, 0.95]
+      active.marker.k_density: [10, 20]
+      active.marker.preselect_factor: [3, 5]
+      active.marker.greedy_score_weight: [0.7, 0.9]
+      active.marker.weights.diversity: [0.4, 0.6, 0.8]
+  fixed_overrides:
+    stage1:
+      - qbc_enable_logging=true
+      - active.log_every=5
+      - active.candidate_method=lhs
+      - active.marker.settling_fraction=0.05
+      - active.marker.include_anchor_state_markers=true
+      - active.marker.weights.sparsity=0.4
+      - qbc_n0=64
+      - qbc_K=64
+      - qbc_T=15
+      - qbc_P=2048
+    stage2: []
+    stage3: []
+  constraints:
+    enforce_final_n_from_budget: true
+    n0_key: qbc_n0
+    k_key: qbc_K
+    t_key: qbc_T

@@ -4,6 +4,8 @@ This is the current HPC-ready HPO workflow for `qbc_deep_ensemble`.
 
 For exact submit commands and detailed output paths, see:
 `docs/hpo_submit_and_results.md`.
+Marker-specific pipeline doc:
+`docs/hpo_marker_directed.md`.
 
 ## Files
 
@@ -13,9 +15,6 @@ For exact submit commands and detailed output paths, see:
   - `tools/hpo/jobs/qbc_smoke_stage0.lsf.sh`
   - `tools/hpo/jobs/qbc_policy_search_stage1.lsf.sh`
   - `tools/hpo/jobs/qbc_schedule_search_stage2.lsf.sh`
-- LSF array submit: `tools/hpo/submit_hpo_lsf_array.sh`
-- LSF array row runner: `tools/hpo/run_hpo_lsf_array_row.sh`
-- LSF smoke submit: `tools/hpo/smoke_hpo_lsf.sh`
 - QBC configs:
   - `src/config/hpo/qbc_deep_ensemble/smoke_stage0.yaml`
   - `src/config/hpo/qbc_deep_ensemble/policy_search_stage1.yaml`
@@ -81,12 +80,7 @@ Stage-2 schedule search:
 bsub < tools/hpo/jobs/qbc_schedule_search_stage2.lsf.sh
 ```
 
-Optional resource overrides:
-
-```bash
-QUEUE=gpua100 N_CORES=1 MEM_GB=24 WALL_HOURS=08 \
-bash tools/hpo/submit_hpo_lsf_array.sh <config.yaml>
-```
+Resource overrides are done by editing the `#BSUB` lines in each job file.
 
 ## Notes
 
