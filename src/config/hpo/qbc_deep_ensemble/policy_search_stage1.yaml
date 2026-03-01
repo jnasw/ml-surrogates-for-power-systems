@@ -16,7 +16,7 @@ matrix:
     seed: [s01, s02, s03]
     stage1:
       qbc_M: [3, 5]
-      active.disagreement.metric: [variance_mean, mean_pairwise_l2]
+      active.disagreement.metric: [variance_mean, member_l2_mean]
       active.diversity.preselect_factor: [3, 5]
       active.diversity.uncertainty_weight: [0.6, 0.8]
   fixed_overrides:

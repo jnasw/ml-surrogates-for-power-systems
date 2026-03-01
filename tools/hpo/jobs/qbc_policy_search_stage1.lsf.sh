@@ -12,8 +12,25 @@ set -euo pipefail
 REPO_ROOT="${LSB_SUBCWD:-$PWD}"
 cd "${REPO_ROOT}"
 
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+if [[ -f "${REPO_ROOT}/.venv/bin/activate" ]]; then
+  # shellcheck source=/dev/null
+  source "${REPO_ROOT}/.venv/bin/activate"
+fi
+
+if [[ -z "${PYTHON_BIN:-}" ]]; then
+  if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
+    PYTHON_BIN="${REPO_ROOT}/.venv/bin/python"
+  else
+    PYTHON_BIN="python3"
+  fi
+fi
 HPO_CONFIG="${HPO_CONFIG:-src/config/hpo/qbc_deep_ensemble/policy_search_stage1.yaml}"
+
+if ! "${PYTHON_BIN}" -c "import omegaconf" >/dev/null 2>&1; then
+  echo "[ERROR] omegaconf is missing for interpreter: ${PYTHON_BIN}"
+  echo "[ERROR] submit with PYTHON_BIN=/path/to/venv/bin/python bsub < ...lsf.sh"
+  exit 1
+fi
 
 mkdir -p outputs/lsf_logs
 
@@ -41,4 +58,3 @@ for ((ROW=0; ROW< TOTAL_ROWS; ROW++)); do
     --row-index "${ROW}" \
     --python-bin "${PYTHON_BIN}"
 done
-
