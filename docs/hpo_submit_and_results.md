@@ -68,10 +68,18 @@ PYTHON_BIN=python3 \
 bsub < tools/hpo/jobs/qbc_policy_search_stage1.lsf.sh
 ```
 
+Disable per-row raw-data pruning (debug mode):
+
+```bash
+PRUNE_ROW_RAW_DATA=false \
+bsub < tools/hpo/jobs/qbc_policy_search_stage1.lsf.sh
+```
+
 These scripts are fully self-contained:
 - build matrix
 - execute rows
 - write all logs/artifacts
+- prune `run_root/data` after each completed row (stage1/stage2 jobs)
 
 No wrapper call is required.
 

@@ -25,6 +25,7 @@ if [[ -z "${PYTHON_BIN:-}" ]]; then
   fi
 fi
 HPO_CONFIG="${HPO_CONFIG:-src/config/hpo/marker_directed/policy_search_stage1.yaml}"
+PRUNE_ROW_RAW_DATA="${PRUNE_ROW_RAW_DATA:-true}"
 
 if ! "${PYTHON_BIN}" -c "import omegaconf" >/dev/null 2>&1; then
   echo "[ERROR] omegaconf is missing for interpreter: ${PYTHON_BIN}"
@@ -57,4 +58,21 @@ for ((ROW=0; ROW< TOTAL_ROWS; ROW++)); do
     --matrix "${MATRIX_PATH}" \
     --row-index "${ROW}" \
     --python-bin "${PYTHON_BIN}"
+  if [[ "${PRUNE_ROW_RAW_DATA}" == "true" ]]; then
+    RUN_ROOT="$("${PYTHON_BIN}" - "${MATRIX_PATH}" "${ROW}" <<'PY'
+import csv
+import sys
+
+matrix_path = sys.argv[1]
+row_idx = int(sys.argv[2])
+with open(matrix_path, "r", encoding="utf-8") as f:
+    rows = list(csv.DictReader(f, delimiter="\t"))
+print(rows[row_idx]["run_root"])
+PY
+)"
+    if [[ -n "${RUN_ROOT}" ]]; then
+      rm -rf "${RUN_ROOT}/data"
+      echo "[hpo] pruned raw data for row ${ROW}: ${RUN_ROOT}/data"
+    fi
+  fi
 done
