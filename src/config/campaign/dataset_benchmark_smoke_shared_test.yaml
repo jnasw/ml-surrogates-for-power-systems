@@ -1,0 +1,46 @@
+campaign:
+  name: dataset_benchmark_smoke_shared_test
+  experiment_id: thesis_sm4_dataset_benchmark_smoke_shared_test_v1
+  preset: smoke
+  model_flag: SM4
+  skip_preprocess: false
+  skip_baseline: false
+  baseline_epochs: 1
+  continue_on_error: false
+
+# Minimal shared-test bootstrap to verify full pipeline wiring.
+shared_test:
+  enabled: true
+  method: lhs_static
+  budget: b256
+  seed: s01
+  max_trajectories: 64
+  stage1_overrides:
+    - model.ic_generation_method=joint_lhs
+    - time=0.2
+    - num_of_points=80
+
+# 4 methods x 1 seed = 4 runs.
+axes:
+  method: [lhs_static, qbc_deep_ensemble, marker_directed, qbc_marker_hybrid]
+  budget: [b256]
+  seed: [s01]
+
+exclude: []
+
+stage_overrides:
+  stage1:
+    - qbc_enable_logging=true
+    - active.log_every=2
+    - qbc_M=2
+    - qbc_P=256
+    - surrogate.epochs=3
+    - time=0.2
+    - num_of_points=80
+  stage2:
+    - dataset.validation_flag=false
+    - dataset.new_coll_points_flag=false
+    - time=0.2
+    - num_of_points=80
+  stage3:
+    - baseline.batch_size=64

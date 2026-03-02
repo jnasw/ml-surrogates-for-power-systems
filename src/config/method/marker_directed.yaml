@@ -9,6 +9,12 @@ model:
 active:
   candidate_method: lhs
   marker:
+    # Number of ensemble members used for marker held-out evaluation.
+    # Only used when qbc_n_test > 0.
+    eval_members: ${qbc_M}
+    # If false, compute marker eval metrics only on final round.
+    # If true, compute on every round (higher compute cost).
+    eval_every_round: false
     pca_explained_variance: 0.90
     k_density: 15
     preselect_factor: 5
