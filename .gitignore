@@ -2,6 +2,7 @@
 __pycache__/
 *.py[codz]
 *$py.class
+*.pyc
 
 # C extensions
 *.so
@@ -211,6 +212,9 @@ outputs/
 /data/
 !/src/data/
 !/src/data/**
+# Re-ignore Python cache artifacts under src/data after the explicit include above.
+src/data/**/__pycache__/
+src/data/**/*.pyc
 *.npz
 *.npy
 obsolete/
