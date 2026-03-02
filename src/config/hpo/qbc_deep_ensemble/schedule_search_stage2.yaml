@@ -24,9 +24,10 @@ matrix:
       - qbc_enable_logging=true
       - active.log_every=5
       - qbc_M=5
-      - active.disagreement.metric=variance_mean
-      - active.diversity.preselect_factor=5
-      - active.diversity.uncertainty_weight=0.7
+      - active.disagreement.metric=member_l2_mean
+      - active.diversity.preselect_factor=3
+      - active.diversity.uncertainty_weight=0.6
+      - active.diversity.distance_weight=0.4
     stage2: []
     stage3: []
   derive:

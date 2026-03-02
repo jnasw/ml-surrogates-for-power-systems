@@ -47,3 +47,8 @@ Resource overrides are controlled by editing `#BSUB` lines in each job file.
   (`pca_explained_variance`, `k_density`, `preselect_factor`, `greedy_score_weight`, marker weights).
 - Stage 2 (`b4096`, 3 seeds): schedule search with fixed marker policy and varying `qbc_P`.
 
+## Stage-1 Evaluation Metrics
+
+- Stage-1 marker HPO now sets `qbc_n_test=256`, creating a held-out set for adaptive runs.
+- Marker loop now logs `eval_mse`/`eval_rmse` to `qbc/history.jsonl` (final round by default).
+- Recommended winner metric order: final `eval_rmse` (lower is better), then `eval_mse`, then proxy score only as fallback.

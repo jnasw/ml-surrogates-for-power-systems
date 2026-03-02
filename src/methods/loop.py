@@ -170,6 +170,8 @@ class MarkerRoundSummary:
     marker_diversity_weight: float
     marker_sparsity_weight: float
     mean_selected_to_train_distance: float
+    eval_mse: float | None = None
+    eval_rmse: float | None = None
     train_seconds: float | None = None
     candidate_generation_seconds: float | None = None
     candidate_simulation_seconds: float | None = None
@@ -398,6 +400,9 @@ def run_marker_loop(
     k_density = int(_cfg_get(config, "active.marker.k_density", 15))
     settling_fraction = float(_cfg_get(config, "active.marker.settling_fraction", 0.05))
     include_anchor = bool(_cfg_get(config, "active.marker.include_anchor_state_markers", True))
+    eval_members = int(_cfg_get(config, "active.marker.eval_members", int(getattr(config, "qbc_M", 3))))
+    eval_every_round = bool(_cfg_get(config, "active.marker.eval_every_round", False))
+    eval_batch_size = int(_cfg_get(config, "active.predict_batch_size", 2048))
     log_every = int(_cfg_get(config, "active.log_every", 5))
 
     if not (0.0 < explained <= 1.0):
@@ -416,6 +421,8 @@ def run_marker_loop(
         raise ValueError("active.marker.k_density must be >= 1.")
     if not (0.0 < settling_fraction <= 1.0):
         raise ValueError("active.marker.settling_fraction must be in (0, 1].")
+    if eval_members < 1:
+        raise ValueError("active.marker.eval_members must be >= 1.")
     if log_every < 1:
         raise ValueError("active.log_every must be >= 1.")
 
@@ -451,6 +458,22 @@ def run_marker_loop(
 
         y_train = dataset.train_trajs
         model_train_size = dataset.n_train
+        eval_metrics: dict[str, float] = {}
+        train_seconds = 0.0
+        eval_seconds = 0.0
+        should_eval = dataset.n_test > 0 and (eval_every_round or round_idx == T - 1)
+        if should_eval:
+            t_train_start = time.perf_counter()
+            ensemble = train_ensemble(
+                dataset=dataset,
+                M=eval_members,
+                base_seed=base_seed + 1000 * round_idx,
+                config=config,
+            )
+            train_seconds = float(time.perf_counter() - t_train_start)
+            t_eval_start = time.perf_counter()
+            eval_metrics = _evaluate_ensemble_mean(ensemble=ensemble, dataset=dataset, batch_size=eval_batch_size)
+            eval_seconds = float(time.perf_counter() - t_eval_start)
 
         t_acq_start = time.perf_counter()
         m_train, _ = compute_marker_matrix(
@@ -495,9 +518,13 @@ def run_marker_loop(
         selected_trajs = y_cand[selected_idx]
         dataset.append(selected_ics, selected_trajs)
         if log_this_round:
+            eval_suffix = (
+                f" eval_rmse={float(eval_metrics['rmse']):.6f}" if "rmse" in eval_metrics else ""
+            )
             print(
                 f"[marker][round {round_idx:03d}] selected={selected_ics.shape[0]} "
                 f"mean_score={float(np.mean(base_scores)):.6f} max_score={float(np.max(base_scores)):.6f} "
+                f"{eval_suffix}"
                 f"new_train_size={dataset.n_train} "
                 f"(cand={candidate_generation_seconds:.3f}s, cand_sim={candidate_simulation_seconds:.3f}s, "
                 f"acq={acquisition_seconds:.3f}s, total={float(time.perf_counter() - t_round_start):.3f}s)"
@@ -524,12 +551,14 @@ def run_marker_loop(
             marker_diversity_weight=float(w_div),
             marker_sparsity_weight=float(w_sparse),
             mean_selected_to_train_distance=float(np.mean(diversity[selected_idx])),
-            train_seconds=0.0,
+            eval_mse=eval_metrics.get("mse"),
+            eval_rmse=eval_metrics.get("rmse"),
+            train_seconds=train_seconds,
             candidate_generation_seconds=candidate_generation_seconds,
             candidate_simulation_seconds=candidate_simulation_seconds,
             acquisition_seconds=acquisition_seconds,
             selected_simulation_seconds=0.0,
-            eval_seconds=0.0,
+            eval_seconds=eval_seconds,
             round_seconds=float(time.perf_counter() - t_round_start),
         )
         history.append(summary)

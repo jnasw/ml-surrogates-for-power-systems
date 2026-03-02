@@ -24,6 +24,7 @@ matrix:
     stage1:
       - qbc_enable_logging=true
       - active.log_every=5
+      - qbc_n_test=256
       - active.candidate_method=lhs
       - active.marker.settling_fraction=0.05
       - active.marker.include_anchor_state_markers=true

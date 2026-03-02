@@ -24,13 +24,13 @@ matrix:
       - qbc_enable_logging=true
       - active.log_every=5
       - active.candidate_method=lhs
-      - active.marker.pca_explained_variance=0.95
-      - active.marker.k_density=20
-      - active.marker.preselect_factor=5
       - active.marker.greedy_score_weight=0.9
-      - active.marker.settling_fraction=0.05
       - active.marker.include_anchor_state_markers=true
-      - active.marker.weights.diversity=0.6
+      - active.marker.k_density=20
+      - active.marker.pca_explained_variance=0.9
+      - active.marker.preselect_factor=3
+      - active.marker.settling_fraction=0.05
+      - active.marker.weights.diversity=0.8
       - active.marker.weights.sparsity=0.4
     stage2: []
     stage3: []

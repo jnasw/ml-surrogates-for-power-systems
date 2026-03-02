@@ -86,4 +86,6 @@ Resource overrides are done by editing the `#BSUB` lines in each job file.
 
 - `active.diversity.distance_weight` is auto-derived as `1 - active.diversity.uncertainty_weight`.
 - `qbc_n0 + qbc_K * qbc_T == budget.final_n` is validated when enabled in config constraints.
+- Stage-1 HPO now sets `qbc_n_test=256` to enable held-out `eval_mse`/`eval_rmse` in `qbc/history.jsonl`.
+- Winner selection should prefer lower final `eval_rmse` (fallback: `eval_mse`, then proxy score only if eval fields are absent).
 - Scripts are generic and reusable for marker/hybrid by adding method-scoped configs under `src/config/hpo/<method>/`.
