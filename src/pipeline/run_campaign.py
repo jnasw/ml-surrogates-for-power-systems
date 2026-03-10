@@ -6,6 +6,7 @@ import argparse
 import itertools
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -57,6 +58,45 @@ def _apply_exclusions(
     return keep
 
 
+def _expected_run_root(
+    *,
+    repo_root: str,
+    experiment_id: str,
+    preset: str,
+    method: str,
+    budget: str,
+    seed: str,
+) -> str:
+    return os.path.join(
+        repo_root,
+        "outputs",
+        "experiments",
+        experiment_id,
+        preset,
+        method,
+        budget,
+        seed,
+    )
+
+
+def _is_manifest_completed(run_manifest_path: str) -> bool:
+    if not os.path.exists(run_manifest_path):
+        return False
+    try:
+        with open(run_manifest_path, "r", encoding="utf-8") as f:
+            m = json.load(f)
+    except Exception:
+        return False
+    stages_enabled = dict(m.get("stages_enabled", {}))
+    stages = dict(m.get("stages", {}))
+    for stage_name, enabled in stages_enabled.items():
+        if not bool(enabled):
+            continue
+        if stages.get(stage_name, {}).get("status") != "completed":
+            return False
+    return True
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Run campaign from YAML matrix.")
     p.add_argument("--config", required=True, help="Campaign YAML path.")
@@ -76,6 +116,11 @@ def main() -> None:
     skip_baseline = bool(getattr(cfg.campaign, "skip_baseline", False))
     baseline_epochs = getattr(cfg.campaign, "baseline_epochs", None)
     continue_on_error = bool(getattr(cfg.campaign, "continue_on_error", True))
+    skip_completed_runs = bool(getattr(cfg.campaign, "skip_completed_runs", True))
+    cleanup_cfg = dict(_to_container_if_config(getattr(cfg, "cleanup", {}), {}))
+    prune_run_raw_data = bool(cleanup_cfg.get("prune_run_raw_data", False))
+    prune_run_qbc_artifacts = bool(cleanup_cfg.get("prune_run_qbc_artifacts", False))
+    prune_shared_test_raw_data = bool(cleanup_cfg.get("prune_shared_test_raw_data", False))
 
     axes = _to_container_if_config(cfg.axes, {})
     if not isinstance(axes, dict) or not axes:
@@ -112,6 +157,12 @@ def main() -> None:
             "skip_baseline": skip_baseline,
             "baseline_epochs": baseline_epochs,
             "continue_on_error": continue_on_error,
+            "skip_completed_runs": skip_completed_runs,
+            "cleanup": {
+                "prune_run_raw_data": prune_run_raw_data,
+                "prune_run_qbc_artifacts": prune_run_qbc_artifacts,
+                "prune_shared_test_raw_data": prune_shared_test_raw_data,
+            },
             "created_at_utc": _utc_now_iso(),
         },
         "runs": [],
@@ -133,6 +184,7 @@ def main() -> None:
                 os.path.join(campaign_root, "shared_test_source"),
             )
         )
+        shared_test_reuse_if_exists = bool(shared_test_cfg.get("reuse_if_exists", True))
 
         shared_cmd = [
             sys.executable,
@@ -162,6 +214,7 @@ def main() -> None:
             "command": shared_cmd,
             "status": "pending",
             "run_root": st_run_root,
+            "reuse_if_exists": shared_test_reuse_if_exists,
         }
         with open(campaign_manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
@@ -170,15 +223,18 @@ def main() -> None:
         if args.dry_run:
             manifest["shared_test"]["status"] = "dry_run"
         else:
-            proc = subprocess.run(shared_cmd, cwd=repo_root, text=True, check=False)
-            manifest["shared_test"]["return_code"] = int(proc.returncode)
-            if proc.returncode != 0:
-                manifest["shared_test"]["status"] = "failed"
-                with open(campaign_manifest_path, "w", encoding="utf-8") as f:
-                    json.dump(manifest, f, indent=2)
-                raise RuntimeError("Shared-test source generation failed.")
-            manifest["shared_test"]["status"] = "completed"
             shared_manifest_path = os.path.join(st_run_root, "run_manifest.json")
+            if shared_test_reuse_if_exists and _is_manifest_completed(shared_manifest_path):
+                manifest["shared_test"]["status"] = "reused_existing"
+            else:
+                proc = subprocess.run(shared_cmd, cwd=repo_root, text=True, check=False)
+                manifest["shared_test"]["return_code"] = int(proc.returncode)
+                if proc.returncode != 0:
+                    manifest["shared_test"]["status"] = "failed"
+                    with open(campaign_manifest_path, "w", encoding="utf-8") as f:
+                        json.dump(manifest, f, indent=2)
+                    raise RuntimeError("Shared-test source generation failed.")
+                manifest["shared_test"]["status"] = "completed"
             with open(shared_manifest_path, "r", encoding="utf-8") as f:
                 shared_manifest = json.load(f)
             shared_dataset_root = str(shared_manifest["artifacts"]["dataset_root"])
@@ -271,6 +327,26 @@ def main() -> None:
             manifest["runs"].append(run_item)
             continue
 
+        run_root = _expected_run_root(
+            repo_root=repo_root,
+            experiment_id=experiment_id,
+            preset=preset,
+            method=method,
+            budget=budget,
+            seed=seed,
+        )
+        run_manifest_path = os.path.join(run_root, "run_manifest.json")
+        if skip_completed_runs and _is_manifest_completed(run_manifest_path):
+            run_item["status"] = "skipped_existing"
+            run_item["completed_at_utc"] = _utc_now_iso()
+            run_item["existing_run_root"] = run_root
+            run_item["existing_run_manifest"] = run_manifest_path
+            manifest["runs"].append(run_item)
+            with open(campaign_manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, indent=2)
+            print(f"[campaign] skipped existing completed run: {run_root}")
+            continue
+
         proc = subprocess.run(cmd, cwd=repo_root, text=True, check=False)
         run_item["return_code"] = int(proc.returncode)
         run_item["status"] = "completed" if proc.returncode == 0 else "failed"
@@ -282,6 +358,31 @@ def main() -> None:
 
         if proc.returncode != 0 and not continue_on_error:
             break
+
+        if proc.returncode == 0:
+            if prune_run_raw_data:
+                data_dir = os.path.join(run_root, "data")
+                if os.path.exists(data_dir):
+                    shutil.rmtree(data_dir, ignore_errors=True)
+                    print(f"[campaign] pruned raw data: {data_dir}")
+            if prune_run_qbc_artifacts:
+                qbc_rounds_dir = os.path.join(run_root, "qbc", "rounds")
+                qbc_ckpt_dir = os.path.join(run_root, "qbc", "checkpoints")
+                removed_any = False
+                for path in (qbc_rounds_dir, qbc_ckpt_dir):
+                    if os.path.exists(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                        removed_any = True
+                if removed_any:
+                    print(f"[campaign] pruned qbc artifacts: {run_root}/qbc/{{rounds,checkpoints}}")
+
+    if shared_test_enabled and prune_shared_test_raw_data and not args.dry_run:
+        shared_test_run_root = str(manifest.get("shared_test", {}).get("run_root", "")).strip()
+        if shared_test_run_root:
+            shared_data_dir = os.path.join(shared_test_run_root, "data")
+            if os.path.exists(shared_data_dir):
+                shutil.rmtree(shared_data_dir, ignore_errors=True)
+                print(f"[campaign] pruned shared-test raw data: {shared_data_dir}")
 
     with open(campaign_manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)

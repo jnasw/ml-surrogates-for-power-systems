@@ -3,7 +3,7 @@
 #BSUB -q gpua100
 #BSUB -n 1
 #BSUB -W 12:00
-#BSUB -R "rusage[mem=24GB]"
+#BSUB -R "rusage[mem=10GB]"
 #BSUB -oo outputs/lsf_logs/hpo_qbc_stage1_policy.%J.out
 #BSUB -eo outputs/lsf_logs/hpo_qbc_stage1_policy.%J.err
 

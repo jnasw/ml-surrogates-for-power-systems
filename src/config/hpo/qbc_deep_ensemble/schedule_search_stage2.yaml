@@ -28,6 +28,8 @@ matrix:
       - active.diversity.preselect_factor=3
       - active.diversity.uncertainty_weight=0.6
       - active.diversity.distance_weight=0.4
+      - qbc_n_test=256
+      - active.candidate_method=lhs   # optional explicit pin (already default, but safer)
     stage2: []
     stage3: []
   derive:

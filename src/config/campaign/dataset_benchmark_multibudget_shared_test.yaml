@@ -26,6 +26,11 @@ axes:
 
 exclude: []
 
+cleanup:
+  prune_run_raw_data: true
+  prune_run_qbc_artifacts: true
+  prune_shared_test_raw_data: true
+
 stage_overrides:
   stage1:
     - qbc_enable_logging=true

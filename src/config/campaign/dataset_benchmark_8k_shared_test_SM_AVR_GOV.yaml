@@ -1,8 +1,8 @@
 campaign:
-  name: dataset_benchmark_8k_shared_test
-  experiment_id: thesis_sm4_dataset_benchmark_8k_shared_test_v1
+  name: dataset_benchmark_8k_shared_test_SM_AVR_GOV
+  experiment_id: thesis_sm6_dataset_benchmark_8k_shared_test_SM_AVR_GOV_v1
   preset: default
-  model_flag: SM4
+  model_flag: SM_AVR_GOV
   skip_preprocess: false
   skip_baseline: false
   baseline_epochs: 80
