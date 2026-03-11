@@ -19,6 +19,12 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+PRUNED_DATA_NOTE = (
+    "This path records the dataset location used during the run. Campaign cleanup may prune the on-disk "
+    "dataset afterwards to control disk usage for large benchmark sweeps."
+)
+
+
 def _to_container_if_config(value: Any, default: Any) -> Any:
     if OmegaConf.is_config(value):
         out = OmegaConf.to_container(value, resolve=True)
@@ -108,6 +114,22 @@ def _is_manifest_completed(dataset_manifest_path: str) -> bool:
         if stages.get(stage_name, {}).get("status") != "completed":
             return False
     return True
+
+
+def _annotate_pruned_dataset_path(dataset_manifest_path: str) -> None:
+    if not os.path.exists(dataset_manifest_path):
+        return
+    try:
+        with open(dataset_manifest_path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    except Exception:
+        return
+    artifacts = manifest.setdefault("artifacts", {})
+    artifacts["dataset_root_note"] = PRUNED_DATA_NOTE
+    if "preprocessed_root" in artifacts:
+        artifacts["preprocessed_root_note"] = PRUNED_DATA_NOTE
+    with open(dataset_manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -395,6 +417,7 @@ def main() -> None:
                 data_dir = os.path.join(run_root, "data")
                 if os.path.exists(data_dir):
                     shutil.rmtree(data_dir, ignore_errors=True)
+                    _annotate_pruned_dataset_path(dataset_manifest_path)
                     print(f"[campaign] pruned raw data: {data_dir}")
             if prune_run_qbc_artifacts:
                 qbc_rounds_dir = os.path.join(run_root, "qbc", "rounds")
@@ -411,8 +434,10 @@ def main() -> None:
         shared_test_run_root = str(manifest.get("shared_test", {}).get("run_root", "")).strip()
         if shared_test_run_root:
             shared_data_dir = os.path.join(shared_test_run_root, "data")
+            shared_dataset_manifest_path = os.path.join(shared_test_run_root, "dataset_manifest.json")
             if os.path.exists(shared_data_dir):
                 shutil.rmtree(shared_data_dir, ignore_errors=True)
+                _annotate_pruned_dataset_path(shared_dataset_manifest_path)
                 print(f"[campaign] pruned shared-test raw data: {shared_data_dir}")
 
     with open(campaign_manifest_path, "w", encoding="utf-8") as f:

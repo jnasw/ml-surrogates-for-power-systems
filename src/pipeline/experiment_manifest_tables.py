@@ -1,4 +1,4 @@
-"""Load dataset-level and round-level tables from experiment manifests."""
+"""Load dataset-, baseline-, and round-level tables from experiment manifests."""
 
 from __future__ import annotations
 
@@ -22,7 +22,13 @@ def _read_csv(path: str) -> list[dict[str, Any]]:
         return list(csv.DictReader(f))
 
 
-def load_run_table(root: str) -> list[dict[str, Any]]:
+def _dataset_root_status(artifacts: dict[str, Any]) -> str | None:
+    if artifacts.get("dataset_root_note"):
+        return "pruned_after_run"
+    return None
+
+
+def load_dataset_table(root: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for manifest_path in discover_manifests(root):
         m = _read_json(manifest_path)
@@ -40,6 +46,7 @@ def load_run_table(root: str) -> list[dict[str, Any]]:
                 "preset": exp.get("preset", exp.get("phase")),
                 "model_flag": exp.get("model_flag"),
                 "dataset_root": art.get("dataset_root"),
+                "dataset_root_status": _dataset_root_status(art),
                 "qbc_history": art.get("qbc_history"),
                 "round_telemetry_csv": art.get("round_telemetry_csv"),
                 "baseline_summary_path": art.get("baseline_summary"),
@@ -53,6 +60,46 @@ def load_run_table(root: str) -> list[dict[str, Any]]:
                 "manifest_path": manifest_path,
             }
         )
+    return rows
+
+
+def load_run_table(root: str) -> list[dict[str, Any]]:
+    """Backward-compatible alias for dataset-level rows."""
+    return load_dataset_table(root)
+
+
+def load_baseline_table(root: str) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for manifest_path in discover_manifests(root):
+        m = _read_json(manifest_path)
+        exp = m.get("experiment", {})
+        art = m.get("artifacts", {})
+        for baseline_seed_label, baseline_run in sorted(dict(m.get("baseline_runs", {})).items()):
+            metrics = dict(baseline_run.get("metrics_payload", {}))
+            rows.append(
+                {
+                    "dataset_id": m.get("dataset_id"),
+                    "run_root": m.get("run_root"),
+                    "method": exp.get("method"),
+                    "budget": exp.get("budget"),
+                    "dataset_seed_label": exp.get("dataset_seed_label"),
+                    "dataset_seed_value": exp.get("dataset_seed_value"),
+                    "baseline_seed_label": baseline_run.get("baseline_seed_label", baseline_seed_label),
+                    "baseline_seed_value": baseline_run.get("baseline_seed_value"),
+                    "preset": exp.get("preset", exp.get("phase")),
+                    "model_flag": exp.get("model_flag"),
+                    "dataset_root": art.get("dataset_root"),
+                    "dataset_root_status": _dataset_root_status(art),
+                    "baseline_root": baseline_run.get("baseline_root"),
+                    "baseline_status": baseline_run.get("status"),
+                    "metrics_path": baseline_run.get("metrics_path"),
+                    "n_train": metrics.get("n_train"),
+                    "n_test": metrics.get("n_test"),
+                    "mse": metrics.get("mse"),
+                    "rmse": metrics.get("rmse"),
+                    "manifest_path": manifest_path,
+                }
+            )
     return rows
 
 
@@ -72,6 +119,7 @@ def load_round_table(root: str) -> list[dict[str, Any]]:
             row["preset"] = exp.get("preset", exp.get("phase"))
             row["model_flag"] = exp.get("model_flag")
             row["dataset_seed_label"] = exp.get("dataset_seed_label")
+            row["dataset_root_status"] = _dataset_root_status(art)
             row["manifest_path"] = manifest_path
             out.append(row)
     return out
