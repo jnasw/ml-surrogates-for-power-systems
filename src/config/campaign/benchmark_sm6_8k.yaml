@@ -1,6 +1,6 @@
 campaign:
-  name: dataset_benchmark_8k_shared_test_SM6
-  experiment_id: thesis_sm6_dataset_benchmark_8k_shared_test_SM6_v1
+  name: benchmark_sm6_8k
+  experiment_id: thesis_sm6_benchmark_8k_v1
   preset: default
   model_flag: SM6
   skip_preprocess: false
@@ -14,16 +14,18 @@ shared_test:
   enabled: true
   method: lhs_static
   budget: b8192
-  seed: s01
+  dataset_seed: ds01
   max_trajectories: 4096
   stage1_overrides:
     - model.ic_generation_method=joint_lhs
 
-# 4 methods x 3 seeds = 12 runs.
+# 4 methods x 5 dataset seeds = 20 dataset runs, each with 3 baseline subruns.
 axes:
   method: [lhs_static, qbc_deep_ensemble, marker_directed, qbc_marker_hybrid]
   budget: [b8192]
-  seed: [s01, s02, s03]
+  dataset_seed: [ds01, ds02, ds03, ds04, ds05]
+
+baseline_seeds: [bs01, bs02, bs03]
 
 exclude: []
 

@@ -21,7 +21,7 @@ def _resolve_run_manifest(
     preset: str,
     method: str,
     budget: str,
-    seed: str,
+    dataset_seed: str,
 ) -> Path:
     return (
         repo_root
@@ -31,7 +31,7 @@ def _resolve_run_manifest(
         / preset
         / method
         / budget
-        / seed
+        / dataset_seed
         / "dataset_manifest.json"
     )
 
@@ -63,18 +63,19 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     rows: list[dict[str, Any]] = []
-    for run in campaign.get("runs", []):
+    run_items = campaign.get("dataset_runs", campaign.get("runs", []))
+    for run in run_items:
         method = str(run.get("method", "")).strip()
         budget = str(run.get("budget", "")).strip()
-        seed = str(run.get("seed", "")).strip()
+        dataset_seed = str(run.get("dataset_seed", run.get("seed", ""))).strip()
         status = str(run.get("status", ""))
-        if not method or not budget or not seed:
+        if not method or not budget or not dataset_seed:
             continue
 
         row: dict[str, Any] = {
             "method": method,
             "budget": budget,
-            "dataset_seed": seed,
+            "dataset_seed": dataset_seed,
             "mse_mean": "",
             "mse_std": "",
             "rmse_mean": "",
@@ -91,7 +92,7 @@ def main() -> None:
             preset=preset,
             method=method,
             budget=budget,
-            seed=seed,
+            dataset_seed=dataset_seed,
         )
         if not run_manifest_path.exists():
             rows.append(row)

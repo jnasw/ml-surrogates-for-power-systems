@@ -109,7 +109,7 @@ python tools/pipeline/run_campaign.py --config src/config/campaign/local_smoke.y
 ```
 
 Campaigns can optionally bootstrap a shared/common test source dataset automatically
-via a `shared_test` block (see `src/config/campaign/local_value_4k_common_test.yaml`).
+via a `shared_test` block (see `src/config/campaign/local.yaml`).
 
 Dry-run the campaign (print commands only):
 

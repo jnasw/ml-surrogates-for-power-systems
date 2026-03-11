@@ -25,7 +25,7 @@ if [[ -z "${PYTHON_BIN:-}" ]]; then
   fi
 fi
 
-CAMPAIGN_CONFIG="${CAMPAIGN_CONFIG:-src/config/campaign/dataset_benchmark_8k_shared_test_SM_AVR_GOV.yaml}"
+CAMPAIGN_CONFIG="${CAMPAIGN_CONFIG:-src/config/campaign/benchmark_sm_avr_gov_8k.yaml}"
 METRICS_OUT="${METRICS_OUT:-}"
 CAMPAIGN_DRY_RUN="${CAMPAIGN_DRY_RUN:-false}"
 

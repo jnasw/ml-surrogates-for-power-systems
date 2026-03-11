@@ -44,6 +44,19 @@ def _build_matrix(axes: dict[str, list[Any]]) -> list[dict[str, str]]:
     return out
 
 
+def _normalize_dataset_axes(raw_axes: dict[str, list[Any]]) -> dict[str, list[Any]]:
+    axes = dict(raw_axes)
+    if "dataset_seed" in axes and "seed" in axes:
+        raise ValueError("Define only one of 'axes.dataset_seed' or legacy 'axes.seed', not both.")
+    if "seed" in axes:
+        axes["dataset_seed"] = axes.pop("seed")
+    if "baseline_seed" in axes:
+        raise ValueError("Use top-level 'baseline_seeds', not 'axes.baseline_seed'.")
+    if "dataset_seed" not in axes:
+        raise ValueError("campaign config must define 'axes.dataset_seed' (or legacy 'axes.seed').")
+    return axes
+
+
 def _apply_exclusions(
     combos: list[dict[str, str]],
     excludes: list[dict[str, Any]],
@@ -125,7 +138,11 @@ def main() -> None:
     axes = _to_container_if_config(cfg.axes, {})
     if not isinstance(axes, dict) or not axes:
         raise ValueError("campaign config must define non-empty 'axes'.")
-    combos = _build_matrix(axes={k: list(v) for k, v in axes.items()})
+    axes = _normalize_dataset_axes({k: list(v) for k, v in axes.items()})
+    combos = _build_matrix(axes=axes)
+    baseline_seeds = [str(x) for x in _to_container_if_config(getattr(cfg, "baseline_seeds", []), [])]
+    if not skip_baseline and not baseline_seeds:
+        raise ValueError("campaign config must define non-empty 'baseline_seeds' unless skip_baseline=true.")
 
     excludes = list(_to_container_if_config(getattr(cfg, "exclude", []), []))
     combos = _apply_exclusions(combos, excludes)
@@ -153,6 +170,8 @@ def main() -> None:
             "experiment_id": experiment_id,
             "preset": preset,
             "model_flag": model_flag,
+            "axes": axes,
+            "baseline_seeds": baseline_seeds,
             "skip_preprocess": skip_preprocess,
             "skip_baseline": skip_baseline,
             "baseline_epochs": baseline_epochs,
@@ -165,7 +184,7 @@ def main() -> None:
             },
             "created_at_utc": _utc_now_iso(),
         },
-        "runs": [],
+        "dataset_runs": [],
     }
 
     # Optional shared-test bootstrap: generate one dataset once, then use it for
@@ -175,7 +194,7 @@ def main() -> None:
     if shared_test_enabled:
         st_method = str(shared_test_cfg.get("method", "lhs_static"))
         st_budget = str(shared_test_cfg.get("budget", "b4096"))
-        st_seed = str(shared_test_cfg.get("seed", "s01"))
+        st_dataset_seed = str(shared_test_cfg.get("dataset_seed", shared_test_cfg.get("seed", "s01")))
         st_max = shared_test_cfg.get("max_trajectories", None)
         st_stage1_overrides = [str(x) for x in shared_test_cfg.get("stage1_overrides", [])]
         st_run_root = str(
@@ -193,8 +212,8 @@ def main() -> None:
             st_method,
             "--budget",
             st_budget,
-            "--seed",
-            st_seed,
+            "--dataset-seed",
+            st_dataset_seed,
             "--preset",
             preset,
             "--experiment-id",
@@ -215,6 +234,7 @@ def main() -> None:
             "status": "pending",
             "run_root": st_run_root,
             "reuse_if_exists": shared_test_reuse_if_exists,
+            "dataset_seed": st_dataset_seed,
         }
         with open(campaign_manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
@@ -266,16 +286,18 @@ def main() -> None:
     for idx, combo in enumerate(combos):
         method = combo.get("method")
         budget = combo.get("budget")
-        seed = combo.get("seed")
-        if not method or not budget or not seed:
-            raise ValueError("Each matrix row must define method, budget, seed.")
+        dataset_seed = combo.get("dataset_seed")
+        if not method or not budget or not dataset_seed:
+            raise ValueError("Each matrix row must define method, budget, dataset_seed.")
 
         combo_stage1 = list(stage1_overrides)
         combo_stage2 = list(stage2_overrides)
         combo_stage3 = list(stage3_overrides)
+        combo_match = dict(combo)
+        combo_match.setdefault("seed", dataset_seed)
         for rule in run_override_rules:
             match = dict(rule.get("match", {}))
-            if _matches(combo, match):
+            if _matches(combo_match, match):
                 combo_stage1.extend([str(x) for x in rule.get("stage1", [])])
                 combo_stage2.extend([str(x) for x in rule.get("stage2", [])])
                 combo_stage3.extend([str(x) for x in rule.get("stage3", [])])
@@ -287,8 +309,8 @@ def main() -> None:
             method,
             "--budget",
             budget,
-            "--seed",
-            seed,
+            "--dataset-seed",
+            dataset_seed,
             "--preset",
             preset,
             "--experiment-id",
@@ -296,6 +318,8 @@ def main() -> None:
             "--model-flag",
             model_flag,
         ]
+        for baseline_seed in baseline_seeds:
+            cmd.extend(["--baseline-seed", baseline_seed])
         if skip_preprocess:
             cmd.append("--skip-preprocess")
         if skip_baseline:
@@ -313,18 +337,25 @@ def main() -> None:
             "index": idx,
             "method": method,
             "budget": budget,
-            "seed": seed,
+            "dataset_seed": dataset_seed,
+            "baseline_seeds": list(baseline_seeds),
             "combo": combo,
             "command": cmd,
             "started_at_utc": _utc_now_iso(),
         }
-        combo_text = " ".join([f"{k}={v}" for k, v in combo.items() if k not in {"method", "budget", "seed"}])
+        combo_text = " ".join(
+            [f"{k}={v}" for k, v in combo.items() if k not in {"method", "budget", "dataset_seed"}]
+        )
         combo_suffix = f" {combo_text}" if combo_text else ""
-        print(f"[campaign] ({idx + 1}/{len(combos)}) method={method} budget={budget} seed={seed}{combo_suffix}")
+        print(
+            f"[campaign] ({idx + 1}/{len(combos)}) "
+            f"method={method} budget={budget} dataset_seed={dataset_seed} "
+            f"baseline_seeds={','.join(baseline_seeds)}{combo_suffix}"
+        )
         if args.dry_run:
             run_item["status"] = "dry_run"
             run_item["completed_at_utc"] = _utc_now_iso()
-            manifest["runs"].append(run_item)
+            manifest["dataset_runs"].append(run_item)
             continue
 
         run_root = _expected_run_root(
@@ -333,7 +364,7 @@ def main() -> None:
             preset=preset,
             method=method,
             budget=budget,
-            seed=seed,
+            dataset_seed=dataset_seed,
         )
         dataset_manifest_path = os.path.join(run_root, "dataset_manifest.json")
         if skip_completed_runs and _is_manifest_completed(dataset_manifest_path):
@@ -341,7 +372,7 @@ def main() -> None:
             run_item["completed_at_utc"] = _utc_now_iso()
             run_item["existing_run_root"] = run_root
             run_item["existing_dataset_manifest"] = dataset_manifest_path
-            manifest["runs"].append(run_item)
+            manifest["dataset_runs"].append(run_item)
             with open(campaign_manifest_path, "w", encoding="utf-8") as f:
                 json.dump(manifest, f, indent=2)
             print(f"[campaign] skipped existing completed run: {run_root}")
@@ -351,7 +382,7 @@ def main() -> None:
         run_item["return_code"] = int(proc.returncode)
         run_item["status"] = "completed" if proc.returncode == 0 else "failed"
         run_item["completed_at_utc"] = _utc_now_iso()
-        manifest["runs"].append(run_item)
+        manifest["dataset_runs"].append(run_item)
 
         with open(campaign_manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)

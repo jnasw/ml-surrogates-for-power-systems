@@ -11,7 +11,9 @@ campaign:
 axes:
   method: [lhs_static, qbc_deep_ensemble, marker_directed, qbc_marker_hybrid]
   budget: [b256]
-  seed: [s01, s02]
+  dataset_seed: [ds01, ds02]
+
+baseline_seeds: [bs01]
 
 # Optional exclusion rules (exact match on keys present in each rule).
 exclude: []

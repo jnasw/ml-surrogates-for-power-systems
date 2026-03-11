@@ -1,6 +1,6 @@
 campaign:
-  name: dataset_benchmark_smoke_shared_test
-  experiment_id: thesis_sm4_dataset_benchmark_smoke_shared_test_v1
+  name: benchmark_sm4_smoke
+  experiment_id: thesis_sm4_benchmark_sm4_smoke_v1
   preset: smoke
   model_flag: SM4
   skip_preprocess: false
@@ -13,18 +13,20 @@ shared_test:
   enabled: true
   method: lhs_static
   budget: b256
-  seed: s01
+  dataset_seed: ds01
   max_trajectories: 64
   stage1_overrides:
     - model.ic_generation_method=joint_lhs
     - time=0.2
     - num_of_points=80
 
-# 4 methods x 1 seed = 4 runs.
+# 4 methods x 1 dataset seed = 4 dataset runs, each with 2 baseline subruns.
 axes:
   method: [lhs_static, qbc_deep_ensemble, marker_directed, qbc_marker_hybrid]
   budget: [b256]
-  seed: [s01]
+  dataset_seed: [ds01]
+
+baseline_seeds: [bs01, bs02]
 
 exclude: []
 
