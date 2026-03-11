@@ -1,10 +1,11 @@
-"""Run end-to-end experiments: dataset generation -> preprocess -> baseline."""
+"""Run dataset-centric experiments: dataset generation -> preprocess -> baseline subruns."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import statistics
 import subprocess
 import sys
 from datetime import datetime
@@ -12,7 +13,7 @@ from typing import Any
 
 from omegaconf import OmegaConf
 
-from src.pipeline.manifest import init_manifest, save_manifest, set_stage_status, utc_now_iso
+from src.pipeline.manifest import init_dataset_manifest, save_manifest, set_stage_status, utc_now_iso
 from src.pipeline.telemetry import (
     build_round_telemetry_rows,
     write_rows_csv,
@@ -116,6 +117,103 @@ def _run_stage(
     save_manifest(manifest_path, manifest)
 
 
+def _set_baseline_run_status(
+    manifest: dict[str, Any],
+    *,
+    baseline_seed_label: str,
+    baseline_seed_value: int,
+    baseline_root: str,
+    status: str,
+    command: list[str] | None = None,
+    log_file: str | None = None,
+    started_at_utc: str | None = None,
+    completed_at_utc: str | None = None,
+    return_code: int | None = None,
+    error: str | None = None,
+    metrics_path: str | None = None,
+    metrics_payload: dict[str, Any] | None = None,
+) -> None:
+    entry = manifest["baseline_runs"].get(baseline_seed_label, {})
+    entry["baseline_seed_label"] = baseline_seed_label
+    entry["baseline_seed_value"] = int(baseline_seed_value)
+    entry["baseline_root"] = baseline_root
+    entry["status"] = status
+    if command is not None:
+        entry["command"] = command
+    if log_file is not None:
+        entry["log_file"] = log_file
+    if started_at_utc is not None:
+        entry["started_at_utc"] = started_at_utc
+    if completed_at_utc is not None:
+        entry["completed_at_utc"] = completed_at_utc
+    if return_code is not None:
+        entry["return_code"] = int(return_code)
+    if error is not None:
+        entry["error"] = error
+    if metrics_path is not None:
+        entry["metrics_path"] = metrics_path
+    if metrics_payload is not None:
+        entry["metrics_payload"] = metrics_payload
+    manifest["baseline_runs"][baseline_seed_label] = entry
+
+
+def _write_baseline_summary(manifest: dict[str, Any], baseline_root: str) -> str | None:
+    completed = [
+        run for run in manifest.get("baseline_runs", {}).values() if run.get("status") == "completed"
+    ]
+    if not completed:
+        manifest["baseline_summary"] = {}
+        return None
+
+    def _metric_values(metric_name: str) -> list[float]:
+        out: list[float] = []
+        for run in completed:
+            payload = dict(run.get("metrics_payload", {}))
+            value = payload.get(metric_name)
+            if value is not None:
+                out.append(float(value))
+        return out
+
+    mse_vals = _metric_values("mse")
+    rmse_vals = _metric_values("rmse")
+    n_train = next(
+        (
+            int(run.get("metrics_payload", {}).get("n_train"))
+            for run in completed
+            if run.get("metrics_payload", {}).get("n_train") is not None
+        ),
+        None,
+    )
+    n_test = next(
+        (
+            int(run.get("metrics_payload", {}).get("n_test"))
+            for run in completed
+            if run.get("metrics_payload", {}).get("n_test") is not None
+        ),
+        None,
+    )
+    summary = {
+        "n_runs": len(completed),
+        "baseline_seed_labels": [str(run["baseline_seed_label"]) for run in completed],
+        "mse_mean": statistics.mean(mse_vals) if mse_vals else None,
+        "mse_std": statistics.stdev(mse_vals) if len(mse_vals) > 1 else 0.0 if mse_vals else None,
+        "mse_min": min(mse_vals) if mse_vals else None,
+        "mse_max": max(mse_vals) if mse_vals else None,
+        "rmse_mean": statistics.mean(rmse_vals) if rmse_vals else None,
+        "rmse_std": statistics.stdev(rmse_vals) if len(rmse_vals) > 1 else 0.0 if rmse_vals else None,
+        "rmse_min": min(rmse_vals) if rmse_vals else None,
+        "rmse_max": max(rmse_vals) if rmse_vals else None,
+        "n_train": n_train,
+        "n_test": n_test,
+    }
+    manifest["baseline_summary"] = summary
+    os.makedirs(baseline_root, exist_ok=True)
+    out_path = os.path.join(baseline_root, "summary.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+    return out_path
+
+
 def _find_dataset_root(dataset_base_dir: str, model_flag: str) -> str:
     model_dir = os.path.join(dataset_base_dir, model_flag)
     if not os.path.exists(model_dir):
@@ -139,14 +237,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run full experiment pipeline in one command.")
     parser.add_argument("--method", required=True, choices=sorted(METHOD_TO_CONFIG.keys()))
     parser.add_argument("--budget", required=True, help="Budget label from src/config/registry/budgets.yaml")
-    parser.add_argument("--seed", required=True, help="Seed label from src/config/registry/seeds.yaml")
+    parser.add_argument(
+        "--dataset-seed",
+        default=None,
+        help="Dataset generation seed label from src/config/registry/seeds.yaml.",
+    )
+    parser.add_argument(
+        "--seed",
+        dest="legacy_seed",
+        default=None,
+        help="Legacy alias for --dataset-seed.",
+    )
+    parser.add_argument(
+        "--baseline-seed",
+        action="append",
+        default=[],
+        help="Baseline training seed label from src/config/registry/seeds.yaml (repeatable).",
+    )
     parser.add_argument("--preset", default="default", help="Preset config name under src/config/preset.")
     parser.add_argument("--experiment-id", default="thesis_sm4_pipeline_v1")
     parser.add_argument("--model-flag", default="SM4")
     parser.add_argument(
         "--run-root",
         default=None,
-        help="Optional explicit run root. Default: outputs/experiments/<id>/<preset>/<method>/<budget>/<seed>",
+        help="Optional explicit run root. Default: outputs/experiments/<id>/<preset>/<method>/<budget>/<dataset-seed>",
     )
     parser.add_argument("--skip-preprocess", action="store_true")
     parser.add_argument("--skip-baseline", action="store_true")
@@ -179,7 +293,16 @@ def main() -> None:
 
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     method_config_name = METHOD_TO_CONFIG[args.method]
-    seed_value = _load_seed_value(repo_root=repo_root, seed_label=args.seed)
+    dataset_seed_label = str(args.dataset_seed or args.legacy_seed or "").strip()
+    if not dataset_seed_label:
+        raise ValueError("Missing dataset seed. Use --dataset-seed.")
+    dataset_seed_value = _load_seed_value(repo_root=repo_root, seed_label=dataset_seed_label)
+    baseline_seed_labels = [str(x).strip() for x in list(args.baseline_seed) if str(x).strip()]
+    if not args.skip_baseline and not baseline_seed_labels:
+        baseline_seed_labels = [dataset_seed_label]
+    baseline_seed_values = {
+        seed_label: _load_seed_value(repo_root=repo_root, seed_label=seed_label) for seed_label in baseline_seed_labels
+    }
     budget_cfg = _load_budget(repo_root=repo_root, budget_label=args.budget)
 
     if args.run_root:
@@ -193,7 +316,7 @@ def main() -> None:
             args.preset,
             args.method,
             args.budget,
-            args.seed,
+            dataset_seed_label,
         )
 
     data_root = os.path.join(run_root, "data")
@@ -203,15 +326,15 @@ def main() -> None:
     baseline_root = os.path.join(run_root, "baseline")
     os.makedirs(run_root, exist_ok=True)
 
-    run_id = f"{args.method}_{args.budget}_{args.seed}"
-    manifest_path = os.path.join(run_root, "run_manifest.json")
-    manifest = init_manifest(
-        run_id=run_id,
+    dataset_id = f"{args.method}_{args.budget}_{dataset_seed_label}"
+    manifest_path = os.path.join(run_root, "dataset_manifest.json")
+    manifest = init_dataset_manifest(
+        dataset_id=dataset_id,
         run_root=run_root,
         method=args.method,
         budget=args.budget,
-        seed_label=args.seed,
-        seed_value=seed_value,
+        dataset_seed_label=dataset_seed_label,
+        dataset_seed_value=dataset_seed_value,
         preset=args.preset,
         experiment_id=args.experiment_id,
         model_flag=args.model_flag,
@@ -233,8 +356,8 @@ def main() -> None:
         f"experiment.id={args.experiment_id}",
         f"experiment.preset={args.preset}",
         f"experiment.budget={args.budget}",
-        f"experiment.seed={args.seed}",
-        f"model.seed={seed_value}",
+        f"experiment.seed={dataset_seed_label}",
+        f"model.seed={dataset_seed_value}",
         f"model.model_flag={args.model_flag}",
         f"dirs.dataset_dir={data_root}",
         f"qbc_run_dir={qbc_root}",
@@ -270,10 +393,10 @@ def main() -> None:
         telemetry_rows = build_round_telemetry_rows(
             history_jsonl_path=history_path,
             rounds_dir=rounds_dir,
-            run_id=run_id,
+            run_id=dataset_id,
             method=args.method,
             budget=args.budget,
-            seed_label=args.seed,
+            dataset_seed_label=dataset_seed_label,
         )
         telemetry_csv = os.path.join(run_root, "telemetry", "round_telemetry.csv")
         write_rows_csv(telemetry_rows, telemetry_csv)
@@ -306,35 +429,128 @@ def main() -> None:
         save_manifest(manifest_path, manifest)
 
     if not args.skip_baseline:
-        stage3_cmd = [
-            sys.executable,
-            "10_run_baseline.py",
-            f"model.model_flag={args.model_flag}",
-            f"model.seed={seed_value}",
-            f"dataset.root={dataset_root}",
-            f"baseline.save_dir={baseline_root}",
-            f"baseline.save_name={args.baseline_save_name}",
-            f"hydra.run.dir={os.path.join(hydra_root, 'stage3_' + datetime.now().strftime('%Y%m%d_%H%M%S'))}",
-            "hydra.job.chdir=false",
-        ]
-        if args.baseline_epochs is not None:
-            stage3_cmd.append(f"baseline.epochs={int(args.baseline_epochs)}")
-        stage3_cmd.extend(list(args.stage3_override))
-        _run_stage(
-            name="stage3_baseline",
-            command=stage3_cmd,
-            cwd=repo_root,
-            log_path=os.path.join(logs_root, "stage3_baseline.log"),
-            manifest=manifest,
-            manifest_path=manifest_path,
+        set_stage_status(
+            manifest,
+            stage="stage3_baseline",
+            status="running",
+            started_at_utc=utc_now_iso(),
+            command=[
+                "baseline_subruns",
+                f"dataset_seed={dataset_seed_label}",
+                f"baseline_seeds={','.join(baseline_seed_labels)}",
+            ],
+            log_file=os.path.join(logs_root, "stage3_baseline.log"),
+            extra={"baseline_seed_labels": baseline_seed_labels},
         )
-        metrics_path = os.path.join(baseline_root, "metrics.json")
-        if os.path.exists(metrics_path):
-            manifest["artifacts"]["baseline_metrics"] = metrics_path
-            manifest["artifacts"]["baseline_metrics_payload"] = _read_json(metrics_path)
-            save_manifest(manifest_path, manifest)
+        save_manifest(manifest_path, manifest)
 
-    print(f"Run completed: {run_id}")
+        try:
+            for baseline_seed_label in baseline_seed_labels:
+                baseline_seed_value = baseline_seed_values[baseline_seed_label]
+                baseline_run_root = os.path.join(baseline_root, baseline_seed_label)
+                baseline_log_path = os.path.join(logs_root, f"stage3_baseline_{baseline_seed_label}.log")
+                stage3_cmd = [
+                    sys.executable,
+                    "10_run_baseline.py",
+                    f"model.model_flag={args.model_flag}",
+                    f"model.seed={baseline_seed_value}",
+                    f"dataset.root={dataset_root}",
+                    f"baseline.save_dir={baseline_run_root}",
+                    f"baseline.save_name={args.baseline_save_name}",
+                    (
+                        "hydra.run.dir="
+                        + os.path.join(
+                            hydra_root,
+                            "stage3_" + baseline_seed_label + "_" + datetime.now().strftime("%Y%m%d_%H%M%S"),
+                        )
+                    ),
+                    "hydra.job.chdir=false",
+                ]
+                if args.baseline_epochs is not None:
+                    stage3_cmd.append(f"baseline.epochs={int(args.baseline_epochs)}")
+                stage3_cmd.extend(list(args.stage3_override))
+
+                _set_baseline_run_status(
+                    manifest,
+                    baseline_seed_label=baseline_seed_label,
+                    baseline_seed_value=baseline_seed_value,
+                    baseline_root=baseline_run_root,
+                    status="running",
+                    command=stage3_cmd,
+                    log_file=baseline_log_path,
+                    started_at_utc=utc_now_iso(),
+                )
+                save_manifest(manifest_path, manifest)
+
+                os.makedirs(os.path.dirname(baseline_log_path), exist_ok=True)
+                with open(baseline_log_path, "w", encoding="utf-8") as logf:
+                    proc = subprocess.run(
+                        stage3_cmd,
+                        cwd=repo_root,
+                        stdout=logf,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        check=False,
+                    )
+
+                if proc.returncode != 0:
+                    _set_baseline_run_status(
+                        manifest,
+                        baseline_seed_label=baseline_seed_label,
+                        baseline_seed_value=baseline_seed_value,
+                        baseline_root=baseline_run_root,
+                        status="failed",
+                        completed_at_utc=utc_now_iso(),
+                        return_code=proc.returncode,
+                        error=f"Baseline subrun failed. See log: {baseline_log_path}",
+                    )
+                    save_manifest(manifest_path, manifest)
+                    raise RuntimeError(
+                        f"Baseline subrun '{baseline_seed_label}' failed with code {proc.returncode}. "
+                        f"See {baseline_log_path}"
+                    )
+
+                metrics_path = os.path.join(baseline_run_root, "metrics.json")
+                metrics_payload = _read_json(metrics_path) if os.path.exists(metrics_path) else {}
+                _set_baseline_run_status(
+                    manifest,
+                    baseline_seed_label=baseline_seed_label,
+                    baseline_seed_value=baseline_seed_value,
+                    baseline_root=baseline_run_root,
+                    status="completed",
+                    completed_at_utc=utc_now_iso(),
+                    return_code=0,
+                    metrics_path=metrics_path if os.path.exists(metrics_path) else None,
+                    metrics_payload=metrics_payload,
+                )
+                save_manifest(manifest_path, manifest)
+        except Exception as exc:
+            set_stage_status(
+                manifest,
+                stage="stage3_baseline",
+                status="failed",
+                completed_at_utc=utc_now_iso(),
+                error=str(exc),
+                extra={"baseline_seed_labels": baseline_seed_labels},
+            )
+            save_manifest(manifest_path, manifest)
+            raise
+
+        baseline_summary_path = _write_baseline_summary(manifest, baseline_root)
+        if baseline_summary_path is not None:
+            manifest["artifacts"]["baseline_summary"] = baseline_summary_path
+        save_manifest(manifest_path, manifest)
+        set_stage_status(
+            manifest,
+            stage="stage3_baseline",
+            status="completed",
+            completed_at_utc=utc_now_iso(),
+            return_code=0,
+            extra={"baseline_seed_labels": baseline_seed_labels},
+        )
+        save_manifest(manifest_path, manifest)
+
+    print(f"Run completed: {dataset_id}")
     print(f"Manifest: {manifest_path}")
 
 

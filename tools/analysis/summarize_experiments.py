@@ -13,25 +13,28 @@ def _flatten_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     exp = manifest.get("experiment", {})
     stages = manifest.get("stages", {})
     artifacts = manifest.get("artifacts", {})
-    baseline = artifacts.get("baseline_metrics_payload", {})
+    baseline = manifest.get("baseline_summary", {})
     return {
-        "run_id": manifest.get("run_id"),
+        "dataset_id": manifest.get("dataset_id"),
         "run_root": manifest.get("run_root"),
         "method": exp.get("method"),
         "budget": exp.get("budget"),
-        "seed_label": exp.get("seed_label"),
-        "seed_value": exp.get("seed_value"),
+        "dataset_seed_label": exp.get("dataset_seed_label"),
+        "dataset_seed_value": exp.get("dataset_seed_value"),
         "model_flag": exp.get("model_flag"),
         "stage1_status": stages.get("stage1_create_dataset", {}).get("status"),
         "stage2_status": stages.get("stage2_preprocess", {}).get("status"),
         "stage3_status": stages.get("stage3_baseline", {}).get("status"),
         "dataset_root": artifacts.get("dataset_root"),
         "qbc_history": artifacts.get("qbc_history"),
-        "baseline_metrics": artifacts.get("baseline_metrics"),
+        "baseline_summary": artifacts.get("baseline_summary"),
+        "baseline_runs_count": baseline.get("n_runs"),
         "n_train": baseline.get("n_train"),
         "n_test": baseline.get("n_test"),
-        "mse": baseline.get("mse"),
-        "rmse": baseline.get("rmse"),
+        "mse_mean": baseline.get("mse_mean"),
+        "mse_std": baseline.get("mse_std"),
+        "rmse_mean": baseline.get("rmse_mean"),
+        "rmse_std": baseline.get("rmse_std"),
     }
 
 
@@ -40,7 +43,7 @@ def main() -> None:
     parser.add_argument(
         "--root",
         default="outputs/experiments",
-        help="Root folder to scan for run_manifest.json files.",
+        help="Root folder to scan for dataset_manifest.json files.",
     )
     parser.add_argument(
         "--out",
@@ -50,7 +53,7 @@ def main() -> None:
     args = parser.parse_args()
 
     root = Path(args.root).resolve()
-    manifests = sorted(root.glob("**/run_manifest.json"))
+    manifests = sorted(root.glob("**/dataset_manifest.json"))
     rows: list[dict[str, Any]] = []
     for path in manifests:
         with path.open("r", encoding="utf-8") as f:

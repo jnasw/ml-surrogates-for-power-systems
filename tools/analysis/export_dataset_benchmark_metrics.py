@@ -32,7 +32,7 @@ def _resolve_run_manifest(
         / method
         / budget
         / seed
-        / "run_manifest.json"
+        / "dataset_manifest.json"
     )
 
 
@@ -74,9 +74,11 @@ def main() -> None:
         row: dict[str, Any] = {
             "method": method,
             "budget": budget,
-            "seed": seed,
-            "mse": "",
-            "rmse": "",
+            "dataset_seed": seed,
+            "mse_mean": "",
+            "mse_std": "",
+            "rmse_mean": "",
+            "rmse_std": "",
         }
 
         if status != "completed":
@@ -96,14 +98,19 @@ def main() -> None:
             continue
 
         run_manifest = _read_json(run_manifest_path)
-        metrics = run_manifest.get("artifacts", {}).get("baseline_metrics_payload", {})
-        row["mse"] = metrics.get("mse", "")
-        row["rmse"] = metrics.get("rmse", "")
+        metrics = run_manifest.get("baseline_summary", {})
+        row["mse_mean"] = metrics.get("mse_mean", "")
+        row["mse_std"] = metrics.get("mse_std", "")
+        row["rmse_mean"] = metrics.get("rmse_mean", "")
+        row["rmse_std"] = metrics.get("rmse_std", "")
         rows.append(row)
 
-    rows.sort(key=lambda r: (r["method"], r["budget"], r["seed"]))
+    rows.sort(key=lambda r: (r["method"], r["budget"], r["dataset_seed"]))
     with out_path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["method", "budget", "seed", "mse", "rmse"])
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["method", "budget", "dataset_seed", "mse_mean", "mse_std", "rmse_mean", "rmse_std"],
+        )
         writer.writeheader()
         writer.writerows(rows)
     print(f"Wrote {len(rows)} rows to {out_path}")

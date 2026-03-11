@@ -1,4 +1,4 @@
-"""Load run-level and round-level tables for dashboards."""
+"""Load dataset-level and round-level tables from experiment manifests."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 
 
 def discover_manifests(root: str) -> list[str]:
-    return sorted(str(p) for p in Path(root).resolve().glob("**/run_manifest.json"))
+    return sorted(str(p) for p in Path(root).resolve().glob("**/dataset_manifest.json"))
 
 
 def _read_json(path: str) -> dict[str, Any]:
@@ -28,24 +28,28 @@ def load_run_table(root: str) -> list[dict[str, Any]]:
         m = _read_json(manifest_path)
         exp = m.get("experiment", {})
         art = m.get("artifacts", {})
-        base = art.get("baseline_metrics_payload", {})
+        base = m.get("baseline_summary", {})
         rows.append(
             {
-                "run_id": m.get("run_id"),
+                "dataset_id": m.get("dataset_id"),
                 "run_root": m.get("run_root"),
                 "method": exp.get("method"),
                 "budget": exp.get("budget"),
-                "seed_label": exp.get("seed_label"),
-                "seed_value": exp.get("seed_value"),
+                "dataset_seed_label": exp.get("dataset_seed_label"),
+                "dataset_seed_value": exp.get("dataset_seed_value"),
                 "preset": exp.get("preset", exp.get("phase")),
                 "model_flag": exp.get("model_flag"),
                 "dataset_root": art.get("dataset_root"),
                 "qbc_history": art.get("qbc_history"),
                 "round_telemetry_csv": art.get("round_telemetry_csv"),
+                "baseline_summary_path": art.get("baseline_summary"),
+                "baseline_runs_count": base.get("n_runs"),
                 "n_train": base.get("n_train"),
                 "n_test": base.get("n_test"),
-                "mse": base.get("mse"),
-                "rmse": base.get("rmse"),
+                "mse_mean": base.get("mse_mean"),
+                "mse_std": base.get("mse_std"),
+                "rmse_mean": base.get("rmse_mean"),
+                "rmse_std": base.get("rmse_std"),
                 "manifest_path": manifest_path,
             }
         )
@@ -67,6 +71,7 @@ def load_round_table(root: str) -> list[dict[str, Any]]:
         for row in _read_csv(str(p)):
             row["preset"] = exp.get("preset", exp.get("phase"))
             row["model_flag"] = exp.get("model_flag")
+            row["dataset_seed_label"] = exp.get("dataset_seed_label")
             row["manifest_path"] = manifest_path
             out.append(row)
     return out

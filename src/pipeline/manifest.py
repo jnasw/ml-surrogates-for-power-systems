@@ -1,4 +1,4 @@
-"""Manifest utilities for end-to-end experiment pipeline runs."""
+"""Manifest utilities for dataset-centric experiment pipeline runs."""
 
 from __future__ import annotations
 
@@ -12,14 +12,14 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def init_manifest(
+def init_dataset_manifest(
     *,
-    run_id: str,
+    dataset_id: str,
     run_root: str,
     method: str,
     budget: str,
-    seed_label: str,
-    seed_value: int,
+    dataset_seed_label: str,
+    dataset_seed_value: int,
     preset: str,
     experiment_id: str,
     model_flag: str,
@@ -27,7 +27,7 @@ def init_manifest(
     stages_enabled: dict[str, bool],
 ) -> dict[str, Any]:
     return {
-        "run_id": run_id,
+        "dataset_id": dataset_id,
         "created_at_utc": utc_now_iso(),
         "updated_at_utc": utc_now_iso(),
         "run_root": run_root,
@@ -36,14 +36,16 @@ def init_manifest(
             "preset": preset,
             "method": method,
             "budget": budget,
-            "seed_label": seed_label,
-            "seed_value": seed_value,
+            "dataset_seed_label": dataset_seed_label,
+            "dataset_seed_value": dataset_seed_value,
             "model_flag": model_flag,
         },
         "git": {"commit": git_commit},
         "stages_enabled": stages_enabled,
         "stages": {},
         "artifacts": {},
+        "baseline_runs": {},
+        "baseline_summary": {},
     }
 
 
@@ -65,6 +67,7 @@ def set_stage_status(
     completed_at_utc: str | None = None,
     return_code: int | None = None,
     error: str | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     entry = manifest["stages"].get(stage, {})
     entry["status"] = status
@@ -80,5 +83,6 @@ def set_stage_status(
         entry["return_code"] = int(return_code)
     if error is not None:
         entry["error"] = error
+    if extra is not None:
+        entry.update(extra)
     manifest["stages"][stage] = entry
-

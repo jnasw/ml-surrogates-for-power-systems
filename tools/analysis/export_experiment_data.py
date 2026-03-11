@@ -1,4 +1,4 @@
-"""Export dashboard-ready run/round tables from manifests."""
+"""Export experiment run/round tables from dataset manifests."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.pipeline.dashboard_data import load_round_table, load_run_table
+from src.pipeline.experiment_manifest_tables import load_round_table, load_run_table
 
 
 def _write_csv(rows: list[dict[str, Any]], out_path: str) -> None:
@@ -35,7 +35,7 @@ def _write_csv(rows: list[dict[str, Any]], out_path: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Export dashboard-ready CSV tables.")
+    parser = argparse.ArgumentParser(description="Export experiment CSV tables.")
     parser.add_argument("--root", default="outputs/experiments", help="Manifest root.")
     parser.add_argument("--out-dir", default="outputs/dashboard", help="Output directory for csv files.")
     args = parser.parse_args()

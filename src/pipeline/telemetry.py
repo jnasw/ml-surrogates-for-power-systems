@@ -54,7 +54,7 @@ def build_round_telemetry_rows(
     run_id: str,
     method: str,
     budget: str,
-    seed_label: str,
+    dataset_seed_label: str,
 ) -> list[dict[str, Any]]:
     """Build flat per-round telemetry rows from logger artifacts."""
     history_rows = _read_jsonl(history_jsonl_path)
@@ -80,7 +80,8 @@ def build_round_telemetry_rows(
                 "run_id": run_id,
                 "method": method,
                 "budget": budget,
-                "seed_label": seed_label,
+                "dataset_seed_label": dataset_seed_label,
+                "seed_label": dataset_seed_label,
                 "round_idx": ridx,
                 "train_size_before": int(row.get("train_size", -1)),
                 "selected_count": int(len(row.get("selected_indices", []))),

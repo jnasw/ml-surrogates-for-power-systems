@@ -117,8 +117,8 @@ Dry-run the campaign (print commands only):
 python tools/pipeline/run_campaign.py --config src/config/campaign/local_smoke.yaml --dry-run
 ```
 
-Export dashboard-ready tables (run-level + round-level):
+Export experiment tables (run-level + round-level):
 
 ```bash
-python tools/analysis/export_dashboard_data.py --root outputs/experiments --out-dir outputs/dashboard
+python tools/analysis/export_experiment_data.py --root outputs/experiments --out-dir outputs/dashboard
 ```

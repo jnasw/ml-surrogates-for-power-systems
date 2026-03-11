@@ -65,7 +65,7 @@ def _expected_run_root(
     preset: str,
     method: str,
     budget: str,
-    seed: str,
+    dataset_seed: str,
 ) -> str:
     return os.path.join(
         repo_root,
@@ -75,15 +75,15 @@ def _expected_run_root(
         preset,
         method,
         budget,
-        seed,
+        dataset_seed,
     )
 
 
-def _is_manifest_completed(run_manifest_path: str) -> bool:
-    if not os.path.exists(run_manifest_path):
+def _is_manifest_completed(dataset_manifest_path: str) -> bool:
+    if not os.path.exists(dataset_manifest_path):
         return False
     try:
-        with open(run_manifest_path, "r", encoding="utf-8") as f:
+        with open(dataset_manifest_path, "r", encoding="utf-8") as f:
             m = json.load(f)
     except Exception:
         return False
@@ -223,7 +223,7 @@ def main() -> None:
         if args.dry_run:
             manifest["shared_test"]["status"] = "dry_run"
         else:
-            shared_manifest_path = os.path.join(st_run_root, "run_manifest.json")
+            shared_manifest_path = os.path.join(st_run_root, "dataset_manifest.json")
             if shared_test_reuse_if_exists and _is_manifest_completed(shared_manifest_path):
                 manifest["shared_test"]["status"] = "reused_existing"
             else:
@@ -335,12 +335,12 @@ def main() -> None:
             budget=budget,
             seed=seed,
         )
-        run_manifest_path = os.path.join(run_root, "run_manifest.json")
-        if skip_completed_runs and _is_manifest_completed(run_manifest_path):
+        dataset_manifest_path = os.path.join(run_root, "dataset_manifest.json")
+        if skip_completed_runs and _is_manifest_completed(dataset_manifest_path):
             run_item["status"] = "skipped_existing"
             run_item["completed_at_utc"] = _utc_now_iso()
             run_item["existing_run_root"] = run_root
-            run_item["existing_run_manifest"] = run_manifest_path
+            run_item["existing_dataset_manifest"] = dataset_manifest_path
             manifest["runs"].append(run_item)
             with open(campaign_manifest_path, "w", encoding="utf-8") as f:
                 json.dump(manifest, f, indent=2)
