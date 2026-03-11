@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
+from time import monotonic
 from typing import Any
 
 from omegaconf import OmegaConf
@@ -164,6 +165,8 @@ def main() -> None:
 
     excludes = list(_to_container_if_config(getattr(cfg, "exclude", []), []))
     combos = _apply_exclusions(combos, excludes)
+    total_dataset_runs = len(combos)
+    total_baseline_subruns = total_dataset_runs * len(baseline_seeds) if not skip_baseline else 0
 
     stage_overrides = dict(_to_container_if_config(getattr(cfg, "stage_overrides", {}), {}))
     stage1_overrides = [str(x) for x in stage_overrides.get("stage1", [])]
@@ -227,7 +230,7 @@ def main() -> None:
 
         shared_cmd = [
             sys.executable,
-            "tools/pipeline/run_experiment.py",
+            "tools/benchmark/run_experiment.py",
             "--method",
             st_method,
             "--budget",
@@ -259,7 +262,7 @@ def main() -> None:
         with open(campaign_manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
 
-        print("[campaign] Preparing shared test source dataset...")
+        print("[campaign] preparing shared test source dataset...", flush=True)
         if args.dry_run:
             manifest["shared_test"]["status"] = "dry_run"
         else:
@@ -303,6 +306,8 @@ def main() -> None:
         with open(campaign_manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
 
+    campaign_started = monotonic()
+    completed_dataset_durations: list[float] = []
     for idx, combo in enumerate(combos):
         method = combo.get("method")
         budget = combo.get("budget")
@@ -322,7 +327,7 @@ def main() -> None:
 
         cmd = [
             sys.executable,
-            "tools/pipeline/run_experiment.py",
+            "tools/benchmark/run_experiment.py",
             "--method",
             method,
             "--budget",
@@ -335,7 +340,14 @@ def main() -> None:
             experiment_id,
             "--model-flag",
             model_flag,
+            "--dataset-run-index",
+            str(idx + 1),
+            "--dataset-run-total",
+            str(total_dataset_runs),
         ]
+        if not skip_baseline:
+            cmd.extend(["--baseline-run-offset", str(idx * len(baseline_seeds))])
+            cmd.extend(["--baseline-run-total", str(total_baseline_subruns)])
         for baseline_seed in baseline_seeds:
             cmd.extend(["--baseline-seed", baseline_seed])
         if skip_preprocess:
@@ -365,10 +377,16 @@ def main() -> None:
             [f"{k}={v}" for k, v in combo.items() if k not in {"method", "budget", "dataset_seed"}]
         )
         combo_suffix = f" {combo_text}" if combo_text else ""
+        baseline_span_text = ""
+        if not skip_baseline and baseline_seeds:
+            first_baseline_idx = idx * len(baseline_seeds) + 1
+            last_baseline_idx = first_baseline_idx + len(baseline_seeds) - 1
+            baseline_span_text = f" baseline_subruns={first_baseline_idx}-{last_baseline_idx}/{total_baseline_subruns}"
         print(
-            f"[campaign] ({idx + 1}/{len(combos)}) "
+            f"[campaign] dataset_run={idx + 1}/{total_dataset_runs} "
             f"method={method} budget={budget} dataset_seed={dataset_seed} "
-            f"baseline_seeds={','.join(baseline_seeds)}{combo_suffix}"
+            f"baseline_seeds={','.join(baseline_seeds)}{baseline_span_text}{combo_suffix}",
+            flush=True,
         )
         if args.dry_run:
             run_item["status"] = "dry_run"
@@ -393,17 +411,35 @@ def main() -> None:
             manifest["dataset_runs"].append(run_item)
             with open(campaign_manifest_path, "w", encoding="utf-8") as f:
                 json.dump(manifest, f, indent=2)
-            print(f"[campaign] skipped existing completed run: {run_root}")
+            print(
+                f"[campaign] skipped existing completed run: {run_root}",
+                flush=True,
+            )
             continue
 
+        run_started = monotonic()
         proc = subprocess.run(cmd, cwd=repo_root, text=True, check=False)
+        elapsed = monotonic() - run_started
         run_item["return_code"] = int(proc.returncode)
         run_item["status"] = "completed" if proc.returncode == 0 else "failed"
         run_item["completed_at_utc"] = _utc_now_iso()
+        run_item["duration_seconds"] = elapsed
         manifest["dataset_runs"].append(run_item)
+        completed_dataset_durations.append(elapsed)
 
         with open(campaign_manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
+
+        elapsed_campaign = monotonic() - campaign_started
+        avg_dataset_duration = sum(completed_dataset_durations) / len(completed_dataset_durations)
+        remaining_dataset_runs = total_dataset_runs - (idx + 1)
+        eta_seconds = avg_dataset_duration * remaining_dataset_runs
+        print(
+            f"[campaign] dataset_run={idx + 1}/{total_dataset_runs} "
+            f"status={run_item['status']} duration={elapsed:.1f}s "
+            f"elapsed_total={elapsed_campaign / 60.0:.1f}m eta_dataset_only={eta_seconds / 60.0:.1f}m",
+            flush=True,
+        )
 
         if proc.returncode != 0 and not continue_on_error:
             break
@@ -414,7 +450,7 @@ def main() -> None:
                 if os.path.exists(data_dir):
                     shutil.rmtree(data_dir, ignore_errors=True)
                     _annotate_pruned_dataset_path(dataset_manifest_path)
-                    print(f"[campaign] pruned raw data: {data_dir}")
+                    print(f"[campaign] pruned raw data: {data_dir}", flush=True)
             if prune_run_qbc_artifacts:
                 qbc_rounds_dir = os.path.join(run_root, "qbc", "rounds")
                 qbc_ckpt_dir = os.path.join(run_root, "qbc", "checkpoints")
@@ -424,7 +460,7 @@ def main() -> None:
                         shutil.rmtree(path, ignore_errors=True)
                         removed_any = True
                 if removed_any:
-                    print(f"[campaign] pruned qbc artifacts: {run_root}/qbc/{{rounds,checkpoints}}")
+                    print(f"[campaign] pruned qbc artifacts: {run_root}/qbc/{{rounds,checkpoints}}", flush=True)
 
     if shared_test_enabled and prune_shared_test_raw_data and not args.dry_run:
         shared_test_run_root = str(manifest.get("shared_test", {}).get("run_root", "")).strip()
@@ -434,11 +470,11 @@ def main() -> None:
             if os.path.exists(shared_data_dir):
                 shutil.rmtree(shared_data_dir, ignore_errors=True)
                 _annotate_pruned_dataset_path(shared_dataset_manifest_path)
-                print(f"[campaign] pruned shared-test raw data: {shared_data_dir}")
+                print(f"[campaign] pruned shared-test raw data: {shared_data_dir}", flush=True)
 
     with open(campaign_manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
-    print(f"[campaign] Manifest: {campaign_manifest_path}")
+    print(f"[campaign] manifest: {campaign_manifest_path}", flush=True)
 
 
 if __name__ == "__main__":

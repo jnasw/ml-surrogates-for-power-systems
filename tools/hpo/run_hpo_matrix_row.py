@@ -48,7 +48,7 @@ def _bool_from_str(text: str) -> bool:
 def build_command(row: dict[str, str], python_bin: str) -> list[str]:
     cmd = [
         python_bin,
-        "tools/pipeline/run_experiment.py",
+        "tools/benchmark/run_experiment.py",
         "--method",
         row["method"],
         "--budget",

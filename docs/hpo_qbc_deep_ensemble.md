@@ -37,7 +37,7 @@ Each row run writes:
 - `hpo_row.json`
 - `hpo_command.sh`
 - `hpo_status.json`
-- plus the full pipeline artifacts from `tools/pipeline/run_experiment.py`
+- plus the full pipeline artifacts from `tools/benchmark/run_experiment.py`
 
 ## Local Sanity Checks
 

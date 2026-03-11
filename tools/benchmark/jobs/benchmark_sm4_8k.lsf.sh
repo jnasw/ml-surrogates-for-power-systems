@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-#BSUB -J dataset_benchmark_smoke_shared_test
+#BSUB -J benchmark_sm4_8k
 #BSUB -q gpua100
 #BSUB -n 1
-#BSUB -W 01:00
-#BSUB -R "rusage[mem=2GB]"
-#BSUB -oo outputs/lsf_logs/dataset_benchmark_smoke_shared_test.%J.out
-#BSUB -eo outputs/lsf_logs/dataset_benchmark_smoke_shared_test.%J.err
+#BSUB -W 24:00
+#BSUB -R "rusage[mem=8GB]"
+#BSUB -oo outputs/lsf_logs/benchmark_sm4_8k.%J.out
+#BSUB -eo outputs/lsf_logs/benchmark_sm4_8k.%J.err
 
 set -euo pipefail
 
@@ -25,7 +25,7 @@ if [[ -z "${PYTHON_BIN:-}" ]]; then
   fi
 fi
 
-CAMPAIGN_CONFIG="${CAMPAIGN_CONFIG:-src/config/campaign/benchmark_sm4_smoke.yaml}"
+CAMPAIGN_CONFIG="${CAMPAIGN_CONFIG:-src/config/campaign/benchmark_sm4_8k.yaml}"
 METRICS_OUT="${METRICS_OUT:-}"
 CAMPAIGN_DRY_RUN="${CAMPAIGN_DRY_RUN:-false}"
 
@@ -41,7 +41,7 @@ TMP_LOG="$(mktemp)"
 trap 'rm -f "${TMP_LOG}"' EXIT
 
 CAMPAIGN_CMD=(
-  "${PYTHON_BIN}" tools/pipeline/run_campaign.py
+  "${PYTHON_BIN}" tools/benchmark/run_campaign.py
   --config "${CAMPAIGN_CONFIG}"
 )
 if [[ "${CAMPAIGN_DRY_RUN}" == "true" ]]; then
@@ -60,9 +60,9 @@ if [[ -z "${METRICS_OUT}" ]]; then
   METRICS_OUT="$(dirname "${CAMPAIGN_MANIFEST}")/dataset_benchmark_metrics.csv"
 fi
 
-"${PYTHON_BIN}" tools/analysis/export_dataset_benchmark_metrics.py \
+"${PYTHON_BIN}" tools/benchmark/export_metrics.py \
   --campaign-manifest "${CAMPAIGN_MANIFEST}" \
   --out "${METRICS_OUT}"
 
-echo "[dataset_benchmark_smoke] campaign_manifest=${CAMPAIGN_MANIFEST}"
-echo "[dataset_benchmark_smoke] metrics_csv=${METRICS_OUT}"
+echo "[benchmark_sm4_8k] campaign_manifest=${CAMPAIGN_MANIFEST}"
+echo "[benchmark_sm4_8k] metrics_csv=${METRICS_OUT}"

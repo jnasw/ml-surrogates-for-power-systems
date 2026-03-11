@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-#BSUB -J dataset_benchmark_8k_shared_test
+#BSUB -J benchmark_sm_avr_gov_8k
 #BSUB -q gpua100
 #BSUB -n 1
 #BSUB -W 24:00
 #BSUB -R "rusage[mem=8GB]"
-#BSUB -oo outputs/lsf_logs/dataset_benchmark_8k_shared_test.%J.out
-#BSUB -eo outputs/lsf_logs/dataset_benchmark_8k_shared_test.%J.err
+#BSUB -oo outputs/lsf_logs/benchmark_sm_avr_gov_8k.%J.out
+#BSUB -eo outputs/lsf_logs/benchmark_sm_avr_gov_8k.%J.err
 
 set -euo pipefail
 
@@ -41,7 +41,7 @@ TMP_LOG="$(mktemp)"
 trap 'rm -f "${TMP_LOG}"' EXIT
 
 CAMPAIGN_CMD=(
-  "${PYTHON_BIN}" tools/pipeline/run_campaign.py
+  "${PYTHON_BIN}" tools/benchmark/run_campaign.py
   --config "${CAMPAIGN_CONFIG}"
 )
 if [[ "${CAMPAIGN_DRY_RUN}" == "true" ]]; then
@@ -60,9 +60,9 @@ if [[ -z "${METRICS_OUT}" ]]; then
   METRICS_OUT="$(dirname "${CAMPAIGN_MANIFEST}")/dataset_benchmark_metrics.csv"
 fi
 
-"${PYTHON_BIN}" tools/analysis/export_dataset_benchmark_metrics.py \
+"${PYTHON_BIN}" tools/benchmark/export_metrics.py \
   --campaign-manifest "${CAMPAIGN_MANIFEST}" \
   --out "${METRICS_OUT}"
 
-echo "[dataset_benchmark] campaign_manifest=${CAMPAIGN_MANIFEST}"
-echo "[dataset_benchmark] metrics_csv=${METRICS_OUT}"
+echo "[benchmark_sm_avr_gov_8k] campaign_manifest=${CAMPAIGN_MANIFEST}"
+echo "[benchmark_sm_avr_gov_8k] metrics_csv=${METRICS_OUT}"

@@ -132,7 +132,7 @@ For each row (`runs/<cfg_id>/`), HPO writes:
 - `hpo_command.sh`
 - `hpo_status.json`
 
-Then `tools/pipeline/run_experiment.py` writes:
+Then `tools/benchmark/run_experiment.py` writes:
 
 - `dataset_manifest.json`
 - `logs/stage1_create_dataset.log`

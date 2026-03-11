@@ -9,6 +9,7 @@ import statistics
 import subprocess
 import sys
 from datetime import datetime
+from time import monotonic
 from typing import Any
 
 from omegaconf import OmegaConf
@@ -82,6 +83,8 @@ def _run_stage(
     manifest_path: str,
 ) -> None:
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    stage_started = monotonic()
+    print(f"[experiment] starting {name}", flush=True)
     set_stage_status(
         manifest,
         stage=name,
@@ -96,6 +99,7 @@ def _run_stage(
         proc = subprocess.run(command, cwd=cwd, stdout=logf, stderr=subprocess.STDOUT, text=True, check=False)
 
     if proc.returncode != 0:
+        elapsed = monotonic() - stage_started
         set_stage_status(
             manifest,
             stage=name,
@@ -105,8 +109,11 @@ def _run_stage(
             error=f"Stage '{name}' failed. See log: {log_path}",
         )
         save_manifest(manifest_path, manifest)
-        raise RuntimeError(f"Stage '{name}' failed with code {proc.returncode}. See {log_path}")
+        raise RuntimeError(
+            f"Stage '{name}' failed with code {proc.returncode} after {elapsed:.1f}s. See {log_path}"
+        )
 
+    elapsed = monotonic() - stage_started
     set_stage_status(
         manifest,
         stage=name,
@@ -115,6 +122,7 @@ def _run_stage(
         return_code=0,
     )
     save_manifest(manifest_path, manifest)
+    print(f"[experiment] completed {name} in {elapsed:.1f}s", flush=True)
 
 
 def _set_baseline_run_status(
@@ -260,6 +268,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-baseline", action="store_true")
     parser.add_argument("--baseline-epochs", type=int, default=None)
     parser.add_argument("--baseline-save-name", default="baseline.pt")
+    parser.add_argument("--dataset-run-index", type=int, default=None)
+    parser.add_argument("--dataset-run-total", type=int, default=None)
+    parser.add_argument("--baseline-run-offset", type=int, default=0)
+    parser.add_argument("--baseline-run-total", type=int, default=None)
     parser.add_argument(
         "--stage1-override",
         action="append",
@@ -296,6 +308,9 @@ def main() -> None:
         seed_label: _load_seed_value(repo_root=repo_root, seed_label=seed_label) for seed_label in baseline_seed_labels
     }
     budget_cfg = _load_budget(repo_root=repo_root, budget_label=args.budget)
+    dataset_progress = None
+    if args.dataset_run_index is not None and args.dataset_run_total is not None:
+        dataset_progress = f"{int(args.dataset_run_index)}/{int(args.dataset_run_total)}"
 
     if args.run_root:
         run_root = _resolve_path(args.run_root, repo_root)
@@ -338,6 +353,27 @@ def main() -> None:
         },
     )
     save_manifest(manifest_path, manifest)
+    print(
+        "[experiment] dataset run"
+        + (f" {dataset_progress}" if dataset_progress else "")
+        + f": method={args.method} budget={args.budget} dataset_seed={dataset_seed_label}",
+        flush=True,
+    )
+    if not args.skip_baseline:
+        if args.baseline_run_total:
+            first_global = args.baseline_run_offset + 1
+            last_global = args.baseline_run_offset + len(baseline_seed_labels)
+            print(
+                f"[experiment] baseline subruns {first_global}-{last_global}/{int(args.baseline_run_total)}: "
+                + ",".join(baseline_seed_labels),
+                flush=True,
+            )
+        else:
+            print(
+                f"[experiment] baseline subruns 1-{len(baseline_seed_labels)}/{len(baseline_seed_labels)}: "
+                + ",".join(baseline_seed_labels),
+                flush=True,
+            )
 
     stage1_cmd = [
         sys.executable,
@@ -437,10 +473,23 @@ def main() -> None:
         save_manifest(manifest_path, manifest)
 
         try:
-            for baseline_seed_label in baseline_seed_labels:
+            total_local_baselines = len(baseline_seed_labels)
+            for local_idx, baseline_seed_label in enumerate(baseline_seed_labels, start=1):
                 baseline_seed_value = baseline_seed_values[baseline_seed_label]
                 baseline_run_root = os.path.join(baseline_root, baseline_seed_label)
                 baseline_log_path = os.path.join(logs_root, f"stage3_baseline_{baseline_seed_label}.log")
+                baseline_started = monotonic()
+                global_idx = args.baseline_run_offset + local_idx
+                global_text = (
+                    f"{global_idx}/{int(args.baseline_run_total)}"
+                    if args.baseline_run_total
+                    else f"{local_idx}/{total_local_baselines}"
+                )
+                print(
+                    f"[experiment] baseline subrun {global_text} "
+                    f"(dataset {local_idx}/{total_local_baselines}) seed={baseline_seed_label} starting",
+                    flush=True,
+                )
                 stage3_cmd = [
                     sys.executable,
                     "10_run_baseline.py",
@@ -486,6 +535,7 @@ def main() -> None:
                     )
 
                 if proc.returncode != 0:
+                    elapsed = monotonic() - baseline_started
                     _set_baseline_run_status(
                         manifest,
                         baseline_seed_label=baseline_seed_label,
@@ -498,12 +548,14 @@ def main() -> None:
                     )
                     save_manifest(manifest_path, manifest)
                     raise RuntimeError(
-                        f"Baseline subrun '{baseline_seed_label}' failed with code {proc.returncode}. "
+                        f"Baseline subrun '{baseline_seed_label}' failed with code {proc.returncode} "
+                        f"after {elapsed:.1f}s. "
                         f"See {baseline_log_path}"
                     )
 
                 metrics_path = os.path.join(baseline_run_root, "metrics.json")
                 metrics_payload = _read_json(metrics_path) if os.path.exists(metrics_path) else {}
+                elapsed = monotonic() - baseline_started
                 _set_baseline_run_status(
                     manifest,
                     baseline_seed_label=baseline_seed_label,
@@ -516,6 +568,14 @@ def main() -> None:
                     metrics_payload=metrics_payload,
                 )
                 save_manifest(manifest_path, manifest)
+                rmse = metrics_payload.get("rmse")
+                rmse_text = f" rmse={float(rmse):.6f}" if rmse is not None else ""
+                print(
+                    f"[experiment] baseline subrun {global_text} "
+                    f"(dataset {local_idx}/{total_local_baselines}) seed={baseline_seed_label} "
+                    f"completed in {elapsed:.1f}s{rmse_text}",
+                    flush=True,
+                )
         except Exception as exc:
             set_stage_status(
                 manifest,
@@ -542,8 +602,8 @@ def main() -> None:
         )
         save_manifest(manifest_path, manifest)
 
-    print(f"Run completed: {dataset_id}")
-    print(f"Manifest: {manifest_path}")
+    print(f"[experiment] run completed: {dataset_id}", flush=True)
+    print(f"[experiment] manifest: {manifest_path}", flush=True)
 
 
 if __name__ == "__main__":
