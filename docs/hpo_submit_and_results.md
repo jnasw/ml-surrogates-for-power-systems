@@ -134,7 +134,7 @@ For each row (`runs/<cfg_id>/`), HPO writes:
 
 Then `tools/pipeline/run_experiment.py` writes:
 
-- `run_manifest.json`
+- `dataset_manifest.json`
 - `logs/stage1_create_dataset.log`
 - `data/` (stage-1 dataset outputs)
 - `qbc/` (adaptive loop history and round checkpoints, including `history.jsonl` when available)
@@ -143,8 +143,9 @@ Then `tools/pipeline/run_experiment.py` writes:
 If preprocess/baseline are enabled in HPO config:
 
 - `logs/stage2_preprocess.log`
-- `logs/stage3_baseline.log`
-- `baseline/metrics.json` (if stage-3 ran successfully)
+- `logs/stage3_baseline_<baseline-seed>.log`
+- `baseline/<baseline-seed>/metrics.json` (if stage-3 ran successfully)
+- `baseline/summary.json`
 - `telemetry/round_telemetry.csv` (+ parquet if dependencies available)
 
 ## 4) Useful Checks

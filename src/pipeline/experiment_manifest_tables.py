@@ -116,6 +116,11 @@ def load_round_table(root: str) -> list[dict[str, Any]]:
         if not p.exists():
             continue
         for row in _read_csv(str(p)):
+            if "run_id" in row and "dataset_id" not in row:
+                row["dataset_id"] = row.pop("run_id")
+            if "seed_label" in row and "dataset_seed_label" not in row:
+                row["dataset_seed_label"] = row["seed_label"]
+            row.pop("seed_label", None)
             row["preset"] = exp.get("preset", exp.get("phase"))
             row["model_flag"] = exp.get("model_flag")
             row["dataset_seed_label"] = exp.get("dataset_seed_label")

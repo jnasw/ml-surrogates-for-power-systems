@@ -239,14 +239,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--budget", required=True, help="Budget label from src/config/registry/budgets.yaml")
     parser.add_argument(
         "--dataset-seed",
-        default=None,
+        required=True,
         help="Dataset generation seed label from src/config/registry/seeds.yaml.",
-    )
-    parser.add_argument(
-        "--seed",
-        dest="legacy_seed",
-        default=None,
-        help="Legacy alias for --dataset-seed.",
     )
     parser.add_argument(
         "--baseline-seed",
@@ -293,9 +287,7 @@ def main() -> None:
 
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     method_config_name = METHOD_TO_CONFIG[args.method]
-    dataset_seed_label = str(args.dataset_seed or args.legacy_seed or "").strip()
-    if not dataset_seed_label:
-        raise ValueError("Missing dataset seed. Use --dataset-seed.")
+    dataset_seed_label = str(args.dataset_seed).strip()
     dataset_seed_value = _load_seed_value(repo_root=repo_root, seed_label=dataset_seed_label)
     baseline_seed_labels = [str(x).strip() for x in list(args.baseline_seed) if str(x).strip()]
     if not args.skip_baseline and not baseline_seed_labels:
@@ -393,7 +385,7 @@ def main() -> None:
         telemetry_rows = build_round_telemetry_rows(
             history_jsonl_path=history_path,
             rounds_dir=rounds_dir,
-            run_id=dataset_id,
+            dataset_id=dataset_id,
             method=args.method,
             budget=args.budget,
             dataset_seed_label=dataset_seed_label,

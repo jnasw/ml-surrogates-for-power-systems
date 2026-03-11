@@ -52,14 +52,10 @@ def _build_matrix(axes: dict[str, list[Any]]) -> list[dict[str, str]]:
 
 def _normalize_dataset_axes(raw_axes: dict[str, list[Any]]) -> dict[str, list[Any]]:
     axes = dict(raw_axes)
-    if "dataset_seed" in axes and "seed" in axes:
-        raise ValueError("Define only one of 'axes.dataset_seed' or legacy 'axes.seed', not both.")
-    if "seed" in axes:
-        axes["dataset_seed"] = axes.pop("seed")
     if "baseline_seed" in axes:
         raise ValueError("Use top-level 'baseline_seeds', not 'axes.baseline_seed'.")
     if "dataset_seed" not in axes:
-        raise ValueError("campaign config must define 'axes.dataset_seed' (or legacy 'axes.seed').")
+        raise ValueError("campaign config must define 'axes.dataset_seed'.")
     return axes
 
 
@@ -216,7 +212,9 @@ def main() -> None:
     if shared_test_enabled:
         st_method = str(shared_test_cfg.get("method", "lhs_static"))
         st_budget = str(shared_test_cfg.get("budget", "b4096"))
-        st_dataset_seed = str(shared_test_cfg.get("dataset_seed", shared_test_cfg.get("seed", "s01")))
+        st_dataset_seed = str(shared_test_cfg.get("dataset_seed", "")).strip()
+        if not st_dataset_seed:
+            raise ValueError("shared_test.dataset_seed must be defined when shared_test.enabled=true.")
         st_max = shared_test_cfg.get("max_trajectories", None)
         st_stage1_overrides = [str(x) for x in shared_test_cfg.get("stage1_overrides", [])]
         st_run_root = str(
@@ -315,11 +313,9 @@ def main() -> None:
         combo_stage1 = list(stage1_overrides)
         combo_stage2 = list(stage2_overrides)
         combo_stage3 = list(stage3_overrides)
-        combo_match = dict(combo)
-        combo_match.setdefault("seed", dataset_seed)
         for rule in run_override_rules:
             match = dict(rule.get("match", {}))
-            if _matches(combo_match, match):
+            if _matches(combo, match):
                 combo_stage1.extend([str(x) for x in rule.get("stage1", [])])
                 combo_stage2.extend([str(x) for x in rule.get("stage2", [])])
                 combo_stage3.extend([str(x) for x in rule.get("stage3", [])])

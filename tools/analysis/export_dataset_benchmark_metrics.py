@@ -14,7 +14,7 @@ def _read_json(path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
-def _resolve_run_manifest(
+def _resolve_dataset_manifest(
     *,
     repo_root: Path,
     experiment_id: str,
@@ -67,7 +67,7 @@ def main() -> None:
     for run in run_items:
         method = str(run.get("method", "")).strip()
         budget = str(run.get("budget", "")).strip()
-        dataset_seed = str(run.get("dataset_seed", run.get("seed", ""))).strip()
+        dataset_seed = str(run.get("dataset_seed", "")).strip()
         status = str(run.get("status", ""))
         if not method or not budget or not dataset_seed:
             continue
@@ -86,7 +86,7 @@ def main() -> None:
             rows.append(row)
             continue
 
-        run_manifest_path = _resolve_run_manifest(
+        run_manifest_path = _resolve_dataset_manifest(
             repo_root=repo_root,
             experiment_id=experiment_id,
             preset=preset,

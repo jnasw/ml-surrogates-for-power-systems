@@ -17,7 +17,7 @@ The project uses a two-stage data pipeline:
    - Consumes stage-2 HDF5 output (not raw `pkl` files).
 
 For end-to-end execution, use:
-- `tools/pipeline/run_experiment.py` (stage-1 -> stage-2 -> baseline in one command, with run manifest).
+- `tools/pipeline/run_experiment.py` (stage-1 -> stage-2 -> repeated baseline subruns in one command, with dataset manifest).
 
 ### Sampling modes in stage-1
 
@@ -79,22 +79,25 @@ Run a full pipeline experiment:
 python tools/pipeline/run_experiment.py \
   --method qbc_marker_hybrid \
   --budget b256 \
-  --seed s01 \
+  --dataset-seed ds01 \
+  --baseline-seed bs01 \
+  --baseline-seed bs02 \
   --experiment-id thesis_sm4_local
 ```
 
 Artifacts are stored under:
 
 ```text
-outputs/experiments/<experiment-id>/<preset>/<method>/<budget>/<seed>/
+outputs/experiments/<experiment-id>/<preset>/<method>/<budget>/<dataset-seed>/
 ```
 
 Key files:
-- `run_manifest.json` (single source of truth for config, stage status, artifacts, metrics)
+- `dataset_manifest.json` (single source of truth for config, stage status, artifacts, metrics)
 - `logs/stage*.log` (stage logs)
 - `data/<MODEL>/dataset_vN` (raw + preprocessed)
 - `qbc/` (adaptive round history/checkpoints when applicable)
-- `baseline/metrics.json` (baseline results when enabled)
+- `baseline/<baseline-seed>/metrics.json` (per-baseline-run results)
+- `baseline/summary.json` (aggregate baseline stats across baseline seeds)
 
 Aggregate all run manifests:
 
@@ -117,7 +120,7 @@ Dry-run the campaign (print commands only):
 python tools/pipeline/run_campaign.py --config src/config/campaign/local_smoke.yaml --dry-run
 ```
 
-Export experiment tables (run-level + round-level):
+Export experiment tables (dataset-level + baseline-level + round-level):
 
 ```bash
 python tools/analysis/export_experiment_data.py --root outputs/experiments --out-dir outputs/dashboard

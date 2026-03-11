@@ -51,7 +51,7 @@ def build_round_telemetry_rows(
     *,
     history_jsonl_path: str,
     rounds_dir: str,
-    run_id: str,
+    dataset_id: str,
     method: str,
     budget: str,
     dataset_seed_label: str,
@@ -77,11 +77,10 @@ def build_round_telemetry_rows(
 
         out.append(
             {
-                "run_id": run_id,
+                "dataset_id": dataset_id,
                 "method": method,
                 "budget": budget,
                 "dataset_seed_label": dataset_seed_label,
-                "seed_label": dataset_seed_label,
                 "round_idx": ridx,
                 "train_size_before": int(row.get("train_size", -1)),
                 "selected_count": int(len(row.get("selected_indices", []))),

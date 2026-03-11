@@ -53,7 +53,7 @@ def build_command(row: dict[str, str], python_bin: str) -> list[str]:
         row["method"],
         "--budget",
         row["budget"],
-        "--seed",
+        "--dataset-seed",
         row["seed"],
         "--preset",
         row["preset"],
@@ -122,4 +122,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
