@@ -82,7 +82,7 @@ def main() -> None:
             "rmse_std": "",
         }
 
-        if status != "completed":
+        if status not in {"completed", "skipped_existing"}:
             rows.append(row)
             continue
 
