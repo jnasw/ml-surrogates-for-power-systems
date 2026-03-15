@@ -430,6 +430,7 @@ Recommended execution order:
 The workflow runner should be launched through one generic cluster script:
 
 - `tools/hpo_workflow/jobs/run_hpo_workflow.lsf.sh`
+- recommended submit wrapper: `tools/hpo_workflow/jobs/submit_workflow.sh`
 
 Required environment variable:
 
@@ -451,26 +452,30 @@ Optional environment variables:
 Example:
 
 ```bash
-export HPO_WORKFLOW_CONFIG=src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
-bsub < tools/hpo_workflow/jobs/run_hpo_workflow.lsf.sh
+tools/hpo_workflow/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
 ```
 
 Resume only the later stages:
 
 ```bash
-export HPO_WORKFLOW_CONFIG=src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
 export HPO_FROM_STAGE=refine
 export HPO_RESUME=true
-bsub < tools/hpo_workflow/jobs/run_hpo_workflow.lsf.sh
+tools/hpo_workflow/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
 ```
 
 Plan-only matrix materialization:
 
 ```bash
-export HPO_WORKFLOW_CONFIG=src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
 export HPO_PLAN_ONLY=true
-bsub < tools/hpo_workflow/jobs/run_hpo_workflow.lsf.sh
+tools/hpo_workflow/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
 ```
+
+The submit wrapper derives a more specific job name from the config path:
+
+- `src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml`
+  -> `hpo_qbc_deep_ensemble_sm4`
+- with `HPO_FROM_STAGE=refine`
+  -> `hpo_qbc_deep_ensemble_sm4_refine`
 
 Default retention policy for workflow HPO runs:
 
