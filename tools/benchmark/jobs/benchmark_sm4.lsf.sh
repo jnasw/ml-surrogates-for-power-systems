@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-#BSUB -J benchmark_sm6_8k
+#BSUB -J benchmark_sm4
 #BSUB -q gpua100
 #BSUB -n 1
 #BSUB -W 24:00
 #BSUB -R "rusage[mem=8GB]"
-#BSUB -oo outputs/lsf_logs/benchmark_sm6_8k.%J.out
-#BSUB -eo outputs/lsf_logs/benchmark_sm6_8k.%J.err
+#BSUB -oo outputs/lsf_logs/benchmark_sm4.%J.out
+#BSUB -eo outputs/lsf_logs/benchmark_sm4.%J.err
 
 set -euo pipefail
 
@@ -25,7 +25,7 @@ if [[ -z "${PYTHON_BIN:-}" ]]; then
   fi
 fi
 
-CAMPAIGN_CONFIG="${CAMPAIGN_CONFIG:-src/config/campaign/benchmark_sm6_8k.yaml}"
+CAMPAIGN_CONFIG="${CAMPAIGN_CONFIG:-src/config/campaign/benchmark_sm4.yaml}"
 METRICS_OUT="${METRICS_OUT:-}"
 CAMPAIGN_DRY_RUN="${CAMPAIGN_DRY_RUN:-false}"
 
@@ -64,5 +64,5 @@ fi
   --campaign-manifest "${CAMPAIGN_MANIFEST}" \
   --out "${METRICS_OUT}"
 
-echo "[benchmark_sm6_8k] campaign_manifest=${CAMPAIGN_MANIFEST}"
-echo "[benchmark_sm6_8k] metrics_csv=${METRICS_OUT}"
+echo "[benchmark_sm4] campaign_manifest=${CAMPAIGN_MANIFEST}"
+echo "[benchmark_sm4] metrics_csv=${METRICS_OUT}"

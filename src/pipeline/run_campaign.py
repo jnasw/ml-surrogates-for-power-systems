@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import csv
 from datetime import datetime, timezone
 from time import monotonic
 from typing import Any
@@ -72,6 +73,99 @@ def _apply_exclusions(
             continue
         keep.append(combo)
     return keep
+
+
+def _read_csv_rows(path: str) -> list[dict[str, str]]:
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def _resolve_hpo_run_overrides(cfg: Any, repo_root: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    hpo_cfg = dict(_to_container_if_config(getattr(cfg, "hpo_integration", {}), {}))
+    if not bool(hpo_cfg.get("enabled", False)):
+        return [], {"enabled": False, "resolved": []}
+
+    winners_csv = str(hpo_cfg.get("winners_csv", "results/hpo/hpo_winners.csv"))
+    winners_path = winners_csv if os.path.isabs(winners_csv) else os.path.join(repo_root, winners_csv)
+    if not os.path.exists(winners_path):
+        raise FileNotFoundError(f"hpo_integration winners_csv not found: {winners_path}")
+
+    winner_rows = _read_csv_rows(winners_path)
+    policies = list(_to_container_if_config(hpo_cfg.get("policies", []), []))
+    resolved_rules: list[dict[str, Any]] = []
+    resolved_meta: list[dict[str, Any]] = []
+
+    for policy in policies:
+        method = str(policy.get("method", "")).strip()
+        workflow_id = str(policy.get("workflow_id", "")).strip()
+        preferred_stages = [str(x) for x in policy.get("preferred_stages", [])]
+        stage1_keys = [str(x) for x in policy.get("stage1_keys", [])]
+        allow_missing = bool(policy.get("allow_missing", False))
+        if not method or not workflow_id or not preferred_stages or not stage1_keys:
+            raise ValueError("Each hpo_integration policy requires method, workflow_id, preferred_stages, and stage1_keys.")
+
+        selected_row: dict[str, str] | None = None
+        selected_stage = ""
+        for stage_name in preferred_stages:
+            matches = [row for row in winner_rows if row.get("workflow_id") == workflow_id and row.get("stage") == stage_name]
+            if matches:
+                selected_row = matches[-1]
+                selected_stage = stage_name
+                break
+
+        if selected_row is None:
+            if allow_missing:
+                resolved_meta.append(
+                    {
+                        "method": method,
+                        "workflow_id": workflow_id,
+                        "status": "missing_allowed",
+                        "preferred_stages": preferred_stages,
+                    }
+                )
+                continue
+            raise ValueError(
+                f"No HPO winner found for workflow_id='{workflow_id}' in stages {preferred_stages}. "
+                "Either run HPO first or set allow_missing=true for this policy."
+            )
+
+        stage1 = []
+        for key in stage1_keys:
+            value = str(selected_row.get(key, "")).strip()
+            if value:
+                stage1.append(f"{key}={value}")
+        if not stage1:
+            if allow_missing:
+                resolved_meta.append(
+                    {
+                        "method": method,
+                        "workflow_id": workflow_id,
+                        "status": "empty_allowed",
+                        "selected_stage": selected_stage,
+                    }
+                )
+                continue
+            raise ValueError(
+                f"HPO winner for workflow_id='{workflow_id}' stage='{selected_stage}' did not provide any configured stage1 keys."
+            )
+
+        resolved_rules.append(
+            {
+                "match": {"method": method},
+                "stage1": stage1,
+            }
+        )
+        resolved_meta.append(
+            {
+                "method": method,
+                "workflow_id": workflow_id,
+                "status": "resolved",
+                "selected_stage": selected_stage,
+                "stage1": stage1,
+            }
+        )
+
+    return resolved_rules, {"enabled": True, "winners_path": winners_path, "resolved": resolved_meta}
 
 
 def _expected_run_root(
@@ -167,14 +261,15 @@ def main() -> None:
     combos = _apply_exclusions(combos, excludes)
     total_dataset_runs = len(combos)
     total_baseline_subruns = total_dataset_runs * len(baseline_seeds) if not skip_baseline else 0
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
     stage_overrides = dict(_to_container_if_config(getattr(cfg, "stage_overrides", {}), {}))
     stage1_overrides = [str(x) for x in stage_overrides.get("stage1", [])]
     stage2_overrides = [str(x) for x in stage_overrides.get("stage2", [])]
     stage3_overrides = [str(x) for x in stage_overrides.get("stage3", [])]
     run_override_rules = list(_to_container_if_config(getattr(cfg, "run_overrides", []), []))
-
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    hpo_run_override_rules, hpo_integration_meta = _resolve_hpo_run_overrides(cfg, repo_root)
+    run_override_rules.extend(hpo_run_override_rules)
     campaign_root = os.path.join(
         repo_root,
         "outputs",
@@ -203,6 +298,7 @@ def main() -> None:
                 "prune_run_qbc_artifacts": prune_run_qbc_artifacts,
                 "prune_shared_test_raw_data": prune_shared_test_raw_data,
             },
+            "hpo_integration": hpo_integration_meta,
             "created_at_utc": _utc_now_iso(),
         },
         "dataset_runs": [],

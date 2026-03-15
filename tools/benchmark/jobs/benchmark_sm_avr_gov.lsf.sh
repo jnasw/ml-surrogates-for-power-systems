@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-#BSUB -J benchmark_sm_avr_gov_8k
+#BSUB -J benchmark_sm_avr_gov
 #BSUB -q gpua100
 #BSUB -n 1
 #BSUB -W 24:00
 #BSUB -R "rusage[mem=8GB]"
-#BSUB -oo outputs/lsf_logs/benchmark_sm_avr_gov_8k.%J.out
-#BSUB -eo outputs/lsf_logs/benchmark_sm_avr_gov_8k.%J.err
+#BSUB -oo outputs/lsf_logs/benchmark_sm_avr_gov.%J.out
+#BSUB -eo outputs/lsf_logs/benchmark_sm_avr_gov.%J.err
 
 set -euo pipefail
 
@@ -25,7 +25,7 @@ if [[ -z "${PYTHON_BIN:-}" ]]; then
   fi
 fi
 
-CAMPAIGN_CONFIG="${CAMPAIGN_CONFIG:-src/config/campaign/benchmark_sm_avr_gov_8k.yaml}"
+CAMPAIGN_CONFIG="${CAMPAIGN_CONFIG:-src/config/campaign/benchmark_sm_avr_gov.yaml}"
 METRICS_OUT="${METRICS_OUT:-}"
 CAMPAIGN_DRY_RUN="${CAMPAIGN_DRY_RUN:-false}"
 
@@ -64,5 +64,5 @@ fi
   --campaign-manifest "${CAMPAIGN_MANIFEST}" \
   --out "${METRICS_OUT}"
 
-echo "[benchmark_sm_avr_gov_8k] campaign_manifest=${CAMPAIGN_MANIFEST}"
-echo "[benchmark_sm_avr_gov_8k] metrics_csv=${METRICS_OUT}"
+echo "[benchmark_sm_avr_gov] campaign_manifest=${CAMPAIGN_MANIFEST}"
+echo "[benchmark_sm_avr_gov] metrics_csv=${METRICS_OUT}"
