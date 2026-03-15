@@ -1,0 +1,223 @@
+workflow:
+  id: qbc_deep_ensemble_sm_avr_gov_v1
+  version: 1
+  method: qbc_deep_ensemble
+  model_flag: SM_AVR_GOV
+  preset: default
+  experiment_id_prefix: thesis_qbc_sm_avr_gov_hpo
+  output_root: outputs/hpo_workflows
+
+stages:
+  smoke:
+    enabled: true
+    role: smoke
+    budget: b256
+    seeds: [s01]
+    objective:
+      metric: success
+      direction: maximize
+      aggregation: pass_fail
+      tie_breakers: []
+    ranking:
+      group_by:
+        - qbc_M
+        - active.disagreement.metric
+        - active.diversity.preselect_factor
+        - active.diversity.uncertainty_weight
+        - active.diversity.distance_weight
+    search:
+      stage1:
+        qbc_M: [3]
+        active.disagreement.metric: [variance_mean]
+        active.diversity.preselect_factor: [3]
+        active.diversity.uncertainty_weight: [0.6]
+    fixed_overrides:
+      stage1:
+        - qbc_enable_logging=true
+        - active.log_every=5
+        - qbc_n_test=64
+        - qbc_n0=32
+        - qbc_K=32
+        - qbc_T=7
+        - qbc_P=512
+      stage2: []
+      stage3: []
+    derive:
+      stage1:
+        uncertainty_distance_complement: true
+        uncertainty_key: active.diversity.uncertainty_weight
+        distance_key: active.diversity.distance_weight
+    constraints:
+      enforce_final_n_from_budget: true
+      n0_key: qbc_n0
+      k_key: qbc_K
+      t_key: qbc_T
+    shortlist:
+      top_k: 1
+
+  policy:
+    enabled: true
+    role: broad_policy_search
+    depends_on: smoke
+    budget: b1024
+    seeds: [s01, s02, s03]
+    objective:
+      metric: final_eval_rmse
+      direction: minimize
+      aggregation: mean_over_dataset_seeds
+      tie_breakers:
+        - std_over_dataset_seeds
+        - mean_final_round_seconds
+    ranking:
+      group_by:
+        - qbc_M
+        - active.disagreement.metric
+        - active.diversity.preselect_factor
+        - active.diversity.uncertainty_weight
+        - active.diversity.distance_weight
+    search:
+      stage1:
+        qbc_M: [3, 5]
+        active.disagreement.metric: [variance_mean, member_l2_mean]
+        active.diversity.preselect_factor: [3, 5]
+        active.diversity.uncertainty_weight: [0.4, 0.6, 0.8]
+    fixed_overrides:
+      stage1:
+        - qbc_enable_logging=true
+        - active.log_every=5
+        - qbc_n_test=256
+        - qbc_n0=64
+        - qbc_K=64
+        - qbc_T=15
+        - qbc_P=2048
+      stage2: []
+      stage3: []
+    derive:
+      stage1:
+        uncertainty_distance_complement: true
+        uncertainty_key: active.diversity.uncertainty_weight
+        distance_key: active.diversity.distance_weight
+    constraints:
+      enforce_final_n_from_budget: true
+      n0_key: qbc_n0
+      k_key: qbc_K
+      t_key: qbc_T
+    shortlist:
+      top_k: 4
+
+  refine:
+    enabled: true
+    role: refinement_and_schedule_search
+    depends_on: policy
+    budget: b4096
+    seeds: [s01, s02, s03]
+    objective:
+      metric: final_eval_rmse
+      direction: minimize
+      aggregation: mean_over_dataset_seeds
+      tie_breakers:
+        - std_over_dataset_seeds
+        - mean_final_round_seconds
+    ranking:
+      group_by:
+        - qbc_M
+        - qbc_P
+        - active.disagreement.metric
+        - active.diversity.preselect_factor
+        - active.diversity.uncertainty_weight
+        - active.diversity.distance_weight
+    inherit:
+      mode: shortlist
+      top_k: 4
+      from_artifact: stage_shortlist.json
+    narrowing:
+      lock_params:
+        - active.disagreement.metric
+        - qbc_M
+      refine:
+        active.diversity.preselect_factor:
+          mode: neighbors_from_grid
+          values: [3, 5]
+          radius: 1
+        active.diversity.uncertainty_weight:
+          mode: neighbors_from_grid
+          values: [0.4, 0.6, 0.8]
+          radius: 1
+      new_axes:
+        stage1:
+          qbc_P: [2048, 4096, 8192]
+    fixed_overrides:
+      stage1:
+        - qbc_enable_logging=true
+        - active.log_every=5
+        - qbc_n_test=256
+        - qbc_n0=128
+        - qbc_K=128
+        - qbc_T=31
+        - active.candidate_method=lhs
+      stage2: []
+      stage3: []
+    derive:
+      stage1:
+        uncertainty_distance_complement: true
+        uncertainty_key: active.diversity.uncertainty_weight
+        distance_key: active.diversity.distance_weight
+    constraints:
+      enforce_final_n_from_budget: true
+      n0_key: qbc_n0
+      k_key: qbc_K
+      t_key: qbc_T
+    shortlist:
+      top_k: 3
+
+  confirm:
+    enabled: true
+    role: benchmark_ready_confirmation
+    depends_on: refine
+    budget: b8192
+    seeds: [s01, s02, s03]
+    objective:
+      metric: final_eval_rmse
+      direction: minimize
+      aggregation: mean_over_dataset_seeds
+      tie_breakers:
+        - std_over_dataset_seeds
+        - mean_final_round_seconds
+    ranking:
+      group_by:
+        - qbc_M
+        - qbc_P
+        - active.disagreement.metric
+        - active.diversity.preselect_factor
+        - active.diversity.uncertainty_weight
+        - active.diversity.distance_weight
+    inherit:
+      mode: shortlist
+      top_k: 3
+      from_artifact: stage_shortlist.json
+    narrowing:
+      lock_params:
+        - active.disagreement.metric
+        - qbc_M
+        - active.diversity.preselect_factor
+        - active.diversity.uncertainty_weight
+        - active.diversity.distance_weight
+        - qbc_P
+      refine_params: []
+      new_axes: {}
+    fixed_overrides:
+      stage1:
+        - qbc_enable_logging=true
+        - active.log_every=5
+        - qbc_n_test=256
+        - qbc_n0=256
+        - qbc_K=256
+        - qbc_T=31
+        - active.candidate_method=lhs
+      stage2: []
+      stage3: []
+    constraints:
+      enforce_final_n_from_budget: true
+      n0_key: qbc_n0
+      k_key: qbc_K
+      t_key: qbc_T

@@ -1,0 +1,117 @@
+{
+  "group_by": [
+    "active.marker.pca_explained_variance",
+    "active.marker.k_density",
+    "active.marker.preselect_factor",
+    "active.marker.greedy_score_weight",
+    "active.marker.weights.diversity",
+    "active.marker.weights.sparsity"
+  ],
+  "items": [
+    {
+      "cfg_id": "grp_49c4613f91",
+      "dataset_seeds": [
+        "s01",
+        "s02",
+        "s03"
+      ],
+      "hyperparameters": {
+        "active.marker.greedy_score_weight": "0.7",
+        "active.marker.k_density": "10",
+        "active.marker.pca_explained_variance": "0.95",
+        "active.marker.preselect_factor": "3",
+        "active.marker.weights.diversity": "0.6",
+        "active.marker.weights.sparsity": "0.4"
+      },
+      "member_cfg_ids": [
+        "cfg_00025_2fe80a2473",
+        "cfg_00073_0148a48e23",
+        "cfg_00121_27d5694a33"
+      ],
+      "objective_mean": 0.007216860998705731,
+      "objective_std": 0.0002365259494381181,
+      "rank": 1
+    },
+    {
+      "cfg_id": "grp_3fd1ca6ee6",
+      "dataset_seeds": [
+        "s01",
+        "s02",
+        "s03"
+      ],
+      "hyperparameters": {
+        "active.marker.greedy_score_weight": "0.7",
+        "active.marker.k_density": "10",
+        "active.marker.pca_explained_variance": "0.95",
+        "active.marker.preselect_factor": "3",
+        "active.marker.weights.diversity": "0.4",
+        "active.marker.weights.sparsity": "0.4"
+      },
+      "member_cfg_ids": [
+        "cfg_00024_49e3c6faf6",
+        "cfg_00072_56b703b328",
+        "cfg_00120_fef94afaaa"
+      ],
+      "objective_mean": 0.007325574639711891,
+      "objective_std": 0.0006854487380145747,
+      "rank": 2
+    },
+    {
+      "cfg_id": "grp_f6ebc8d496",
+      "dataset_seeds": [
+        "s01",
+        "s02",
+        "s03"
+      ],
+      "hyperparameters": {
+        "active.marker.greedy_score_weight": "0.7",
+        "active.marker.k_density": "20",
+        "active.marker.pca_explained_variance": "0.95",
+        "active.marker.preselect_factor": "3",
+        "active.marker.weights.diversity": "0.8",
+        "active.marker.weights.sparsity": "0.4"
+      },
+      "member_cfg_ids": [
+        "cfg_00038_5ec8610ab3",
+        "cfg_00086_a0407c514b",
+        "cfg_00134_dbd5a2f190"
+      ],
+      "objective_mean": 0.007391624209670476,
+      "objective_std": 0.00037169912327609785,
+      "rank": 3
+    },
+    {
+      "cfg_id": "grp_bea746d53d",
+      "dataset_seeds": [
+        "s01",
+        "s02",
+        "s03"
+      ],
+      "hyperparameters": {
+        "active.marker.greedy_score_weight": "0.7",
+        "active.marker.k_density": "20",
+        "active.marker.pca_explained_variance": "0.9",
+        "active.marker.preselect_factor": "3",
+        "active.marker.weights.diversity": "0.8",
+        "active.marker.weights.sparsity": "0.4"
+      },
+      "member_cfg_ids": [
+        "cfg_00014_2d81f6740f",
+        "cfg_00062_4d54fcaa53",
+        "cfg_00110_b895af8277"
+      ],
+      "objective_mean": 0.007423185165565906,
+      "objective_std": 0.0001768527328674233,
+      "rank": 4
+    }
+  ],
+  "method": "marker_directed",
+  "model_flag": "SM4",
+  "preset": "default",
+  "shortlist_size": 4,
+  "source_stage_root": "/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/results/hpo/marker_directed/stage1_policy_search/marker_directed_policy_search_20260302_112434",
+  "stage": "stageA_policy",
+  "stage_role": "broad_policy_search",
+  "workflow_id": "marker_directed_sm4_v1",
+  "workflow_version": "1"
+}

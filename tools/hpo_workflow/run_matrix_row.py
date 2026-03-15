@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Run one row from an HPO matrix by delegating to run_experiment.py."""
+"""Run one row from a workflow HPO matrix."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _parse_overrides(serialized: str) -> list[str]:
@@ -81,7 +82,7 @@ def build_command(row: dict[str, str], python_bin: str) -> list[str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run one matrix row for HPO.")
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--matrix", required=True, help="Path to matrix.tsv")
     parser.add_argument("--row-index", type=int, default=None, help="0-based row index in matrix.tsv")
     parser.add_argument("--cfg-id", default=None, help="Optional cfg_id instead of row index")
@@ -101,14 +102,14 @@ def main() -> None:
     with (run_root / "hpo_command.sh").open("w", encoding="utf-8") as f:
         f.write(" ".join(cmd) + "\n")
 
-    print(f"[hpo] cfg_id={row['cfg_id']} row_idx={row['row_idx']} run_root={run_root}")
-    print("[hpo] command:")
+    print(f"[hpo-workflow] cfg_id={row['cfg_id']} row_idx={row['row_idx']} run_root={run_root}")
+    print("[hpo-workflow] command:")
     print(" ".join(cmd))
 
     if args.dry_run:
         return
 
-    proc = subprocess.run(cmd, cwd=Path(__file__).resolve().parents[2], text=True, check=False)
+    proc = subprocess.run(cmd, cwd=REPO_ROOT, text=True, check=False)
     status = {
         "cfg_id": row["cfg_id"],
         "row_idx": int(row["row_idx"]),

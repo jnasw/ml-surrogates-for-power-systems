@@ -1,0 +1,112 @@
+{
+  "group_by": [
+    "qbc_M",
+    "active.disagreement.metric",
+    "active.diversity.preselect_factor",
+    "active.diversity.uncertainty_weight",
+    "active.diversity.distance_weight"
+  ],
+  "items": [
+    {
+      "cfg_id": "grp_2159097e09",
+      "dataset_seeds": [
+        "s01",
+        "s02",
+        "s03"
+      ],
+      "hyperparameters": {
+        "active.disagreement.metric": "member_l2_mean",
+        "active.diversity.distance_weight": "0.4",
+        "active.diversity.preselect_factor": "3",
+        "active.diversity.uncertainty_weight": "0.6",
+        "qbc_M": "5"
+      },
+      "member_cfg_ids": [
+        "cfg_00012_402e87f983",
+        "cfg_00028_71cdff9ffe",
+        "cfg_00044_43f265b26b"
+      ],
+      "objective_mean": 0.005789165579939804,
+      "objective_std": 0.00012922761183866514,
+      "rank": 1
+    },
+    {
+      "cfg_id": "grp_904772b442",
+      "dataset_seeds": [
+        "s01",
+        "s02",
+        "s03"
+      ],
+      "hyperparameters": {
+        "active.disagreement.metric": "variance_mean",
+        "active.diversity.distance_weight": "0.4",
+        "active.diversity.preselect_factor": "5",
+        "active.diversity.uncertainty_weight": "0.6",
+        "qbc_M": "5"
+      },
+      "member_cfg_ids": [
+        "cfg_00010_2c29e69ca2",
+        "cfg_00026_27f13cedf1",
+        "cfg_00042_b783ad81c5"
+      ],
+      "objective_mean": 0.005849244375028335,
+      "objective_std": 6.18977961048035e-05,
+      "rank": 2
+    },
+    {
+      "cfg_id": "grp_d76e20e0de",
+      "dataset_seeds": [
+        "s01",
+        "s02",
+        "s03"
+      ],
+      "hyperparameters": {
+        "active.disagreement.metric": "member_l2_mean",
+        "active.diversity.distance_weight": "0.4",
+        "active.diversity.preselect_factor": "3",
+        "active.diversity.uncertainty_weight": "0.6",
+        "qbc_M": "3"
+      },
+      "member_cfg_ids": [
+        "cfg_00004_87945ca465",
+        "cfg_00020_33e3aed9b3",
+        "cfg_00036_6a7c651b9f"
+      ],
+      "objective_mean": 0.005896861574728553,
+      "objective_std": 0.00029869664390764876,
+      "rank": 3
+    },
+    {
+      "cfg_id": "grp_76f5451246",
+      "dataset_seeds": [
+        "s01",
+        "s02",
+        "s03"
+      ],
+      "hyperparameters": {
+        "active.disagreement.metric": "variance_mean",
+        "active.diversity.distance_weight": "0.4",
+        "active.diversity.preselect_factor": "3",
+        "active.diversity.uncertainty_weight": "0.6",
+        "qbc_M": "3"
+      },
+      "member_cfg_ids": [
+        "cfg_00000_0bb7219ebf",
+        "cfg_00016_c467e22f81",
+        "cfg_00032_d8e379f06c"
+      ],
+      "objective_mean": 0.006356088093586641,
+      "objective_std": 0.000626944989325554,
+      "rank": 4
+    }
+  ],
+  "method": "qbc_deep_ensemble",
+  "model_flag": "SM4",
+  "preset": "default",
+  "shortlist_size": 4,
+  "source_stage_root": "/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/results/hpo/qbc_deep_ensemble/stage1_policy_search/qbc_deep_ensemble_policy_search_20260302_165157",
+  "stage": "stageA_policy",
+  "stage_role": "broad_policy_search",
+  "workflow_id": "qbc_deep_ensemble_sm4_v1",
+  "workflow_version": "1"
+}

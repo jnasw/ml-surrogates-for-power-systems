@@ -1,0 +1,48 @@
+{
+  "dataset_seeds": [
+    "s01",
+    "s02",
+    "s03"
+  ],
+  "group_by": [
+    "active.marker.pca_explained_variance",
+    "active.marker.k_density",
+    "active.marker.preselect_factor",
+    "active.marker.greedy_score_weight",
+    "active.marker.weights.diversity",
+    "active.marker.weights.sparsity"
+  ],
+  "hyperparameters": {
+    "active.marker.greedy_score_weight": "0.7",
+    "active.marker.k_density": "10",
+    "active.marker.pca_explained_variance": "0.95",
+    "active.marker.preselect_factor": "3",
+    "active.marker.weights.diversity": "0.6",
+    "active.marker.weights.sparsity": "0.4"
+  },
+  "member_cfg_ids": [
+    "cfg_00025_2fe80a2473",
+    "cfg_00073_0148a48e23",
+    "cfg_00121_27d5694a33"
+  ],
+  "method": "marker_directed",
+  "model_flag": "SM4",
+  "n_dataset_seeds": 3,
+  "objective_direction": "minimize",
+  "objective_mean": 0.007216860998705731,
+  "objective_metric": "final_eval_rmse",
+  "objective_std": 0.0002365259494381181,
+  "preset": "default",
+  "shortlist_size": 4,
+  "source_stage_root": "/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/results/hpo/marker_directed/stage1_policy_search/marker_directed_policy_search_20260302_112434",
+  "stage": "stageA_policy",
+  "stage_role": "broad_policy_search",
+  "tie_breakers": [
+    "std_over_dataset_seeds",
+    "mean_final_round_seconds"
+  ],
+  "winner_cfg_id": "grp_49c4613f91",
+  "winner_rank": 1,
+  "workflow_id": "marker_directed_sm4_v1",
+  "workflow_version": "1"
+}

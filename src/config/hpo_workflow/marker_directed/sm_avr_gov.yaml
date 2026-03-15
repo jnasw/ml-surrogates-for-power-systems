@@ -1,0 +1,261 @@
+workflow:
+  id: marker_directed_sm_avr_gov_v1
+  version: 1
+  method: marker_directed
+  model_flag: SM_AVR_GOV
+  preset: default
+  experiment_id_prefix: thesis_marker_sm_avr_gov_hpo
+  output_root: outputs/hpo_workflows
+
+stages:
+  smoke:
+    enabled: true
+    role: smoke
+    budget: b256
+    seeds: [s01]
+    objective:
+      metric: success
+      direction: maximize
+      aggregation: pass_fail
+      tie_breakers: []
+    ranking:
+      group_by:
+        - active.marker.pca_explained_variance
+        - active.marker.k_density
+        - active.marker.preselect_factor
+        - active.marker.greedy_score_weight
+        - active.marker.weights.diversity
+        - active.marker.weights.sparsity
+        - qbc_n0
+        - qbc_K
+        - qbc_T
+        - qbc_P
+    search:
+      stage1:
+        active.marker.preselect_factor: [3]
+        marker_weight_profile: [balanced]
+        qbc_n0: [32]
+        qbc_K: [32]
+        qbc_T: [7]
+        qbc_P: [256]
+    fixed_overrides:
+      stage1:
+        - qbc_enable_logging=true
+        - active.log_every=5
+        - active.candidate_method=lhs
+        - active.marker.pca_explained_variance=0.9
+        - active.marker.k_density=15
+        - active.marker.greedy_score_weight=0.7
+        - active.marker.settling_fraction=0.05
+        - active.marker.include_anchor_state_markers=true
+      stage2: []
+      stage3: []
+    derive:
+      stage1:
+        override_profiles:
+          profile_key: marker_weight_profile
+          profiles:
+            diversity_heavy:
+              active.marker.weights.diversity: 0.8
+              active.marker.weights.sparsity: 0.2
+            balanced:
+              active.marker.weights.diversity: 0.6
+              active.marker.weights.sparsity: 0.4
+            sparsity_heavy:
+              active.marker.weights.diversity: 0.4
+              active.marker.weights.sparsity: 0.6
+    constraints:
+      enforce_final_n_from_budget: true
+      n0_key: qbc_n0
+      k_key: qbc_K
+      t_key: qbc_T
+    shortlist:
+      top_k: 1
+
+  policy:
+    enabled: true
+    role: broad_policy_search
+    depends_on: smoke
+    budget: b1024
+    seeds: [s01, s02, s03]
+    objective:
+      metric: final_eval_rmse
+      direction: minimize
+      aggregation: mean_over_dataset_seeds
+      tie_breakers:
+        - std_over_dataset_seeds
+        - mean_final_round_seconds
+    ranking:
+      group_by:
+        - active.marker.pca_explained_variance
+        - active.marker.k_density
+        - active.marker.preselect_factor
+        - active.marker.greedy_score_weight
+        - active.marker.weights.diversity
+        - active.marker.weights.sparsity
+    search:
+      stage1:
+        active.marker.pca_explained_variance: [0.9, 0.95]
+        active.marker.k_density: [10, 20]
+        active.marker.preselect_factor: [3, 5]
+        active.marker.greedy_score_weight: [0.7, 0.9]
+        marker_weight_profile: [diversity_heavy, balanced, sparsity_heavy]
+    fixed_overrides:
+      stage1:
+        - qbc_enable_logging=true
+        - active.log_every=5
+        - qbc_n_test=256
+        - active.candidate_method=lhs
+        - active.marker.settling_fraction=0.05
+        - active.marker.include_anchor_state_markers=true
+        - qbc_n0=64
+        - qbc_K=64
+        - qbc_T=15
+        - qbc_P=2048
+      stage2: []
+      stage3: []
+    derive:
+      stage1:
+        override_profiles:
+          profile_key: marker_weight_profile
+          profiles:
+            diversity_heavy:
+              active.marker.weights.diversity: 0.8
+              active.marker.weights.sparsity: 0.2
+            balanced:
+              active.marker.weights.diversity: 0.6
+              active.marker.weights.sparsity: 0.4
+            sparsity_heavy:
+              active.marker.weights.diversity: 0.4
+              active.marker.weights.sparsity: 0.6
+    constraints:
+      enforce_final_n_from_budget: true
+      n0_key: qbc_n0
+      k_key: qbc_K
+      t_key: qbc_T
+    shortlist:
+      top_k: 4
+
+  refine:
+    enabled: true
+    role: refinement_and_schedule_search
+    depends_on: policy
+    budget: b4096
+    seeds: [s01, s02, s03]
+    objective:
+      metric: final_eval_rmse
+      direction: minimize
+      aggregation: mean_over_dataset_seeds
+      tie_breakers:
+        - std_over_dataset_seeds
+        - mean_final_round_seconds
+    ranking:
+      group_by:
+        - active.marker.pca_explained_variance
+        - active.marker.k_density
+        - active.marker.preselect_factor
+        - active.marker.greedy_score_weight
+        - active.marker.weights.diversity
+        - active.marker.weights.sparsity
+        - qbc_P
+    inherit:
+      mode: shortlist
+      top_k: 4
+      from_artifact: stage_shortlist.json
+    narrowing:
+      lock_params:
+        - active.marker.preselect_factor
+        - active.marker.weights.diversity
+        - active.marker.weights.sparsity
+      refine:
+        active.marker.pca_explained_variance:
+          mode: neighbors_from_grid
+          values: [0.9, 0.95]
+          radius: 1
+        active.marker.k_density:
+          mode: neighbors_from_grid
+          values: [10, 20]
+          radius: 1
+        active.marker.greedy_score_weight:
+          mode: neighbors_from_grid
+          values: [0.7, 0.9]
+          radius: 1
+      new_axes:
+        stage1:
+          qbc_P: [2048, 4096, 8192]
+    fixed_overrides:
+      stage1:
+        - qbc_enable_logging=true
+        - active.log_every=5
+        - qbc_n_test=256
+        - active.candidate_method=lhs
+        - active.marker.settling_fraction=0.05
+        - active.marker.include_anchor_state_markers=true
+        - qbc_n0=128
+        - qbc_K=128
+        - qbc_T=31
+      stage2: []
+      stage3: []
+    constraints:
+      enforce_final_n_from_budget: true
+      n0_key: qbc_n0
+      k_key: qbc_K
+      t_key: qbc_T
+    shortlist:
+      top_k: 3
+
+  confirm:
+    enabled: true
+    role: benchmark_ready_confirmation
+    depends_on: refine
+    budget: b8192
+    seeds: [s01, s02, s03]
+    objective:
+      metric: final_eval_rmse
+      direction: minimize
+      aggregation: mean_over_dataset_seeds
+      tie_breakers:
+        - std_over_dataset_seeds
+        - mean_final_round_seconds
+    ranking:
+      group_by:
+        - active.marker.pca_explained_variance
+        - active.marker.k_density
+        - active.marker.preselect_factor
+        - active.marker.greedy_score_weight
+        - active.marker.weights.diversity
+        - active.marker.weights.sparsity
+        - qbc_P
+    inherit:
+      mode: shortlist
+      top_k: 3
+      from_artifact: stage_shortlist.json
+    narrowing:
+      lock_params:
+        - active.marker.pca_explained_variance
+        - active.marker.k_density
+        - active.marker.preselect_factor
+        - active.marker.greedy_score_weight
+        - active.marker.weights.diversity
+        - active.marker.weights.sparsity
+        - qbc_P
+      refine_params: []
+      new_axes: {}
+    fixed_overrides:
+      stage1:
+        - qbc_enable_logging=true
+        - active.log_every=5
+        - qbc_n_test=256
+        - active.candidate_method=lhs
+        - active.marker.settling_fraction=0.05
+        - active.marker.include_anchor_state_markers=true
+        - qbc_n0=256
+        - qbc_K=256
+        - qbc_T=31
+      stage2: []
+      stage3: []
+    constraints:
+      enforce_final_n_from_budget: true
+      n0_key: qbc_n0
+      k_key: qbc_K
+      t_key: qbc_T
