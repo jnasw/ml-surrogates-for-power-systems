@@ -60,7 +60,7 @@ stages:
     role: broad_policy_search
     depends_on: smoke
     budget: b1024
-    seeds: [s01, s02, s03]
+    seeds: [s01, s02]
     objective:
       metric: final_eval_rmse
       direction: minimize
@@ -77,10 +77,10 @@ stages:
         - active.diversity.distance_weight
     search:
       stage1:
-        qbc_M: [3, 5]
-        active.disagreement.metric: [variance_mean, member_l2_mean]
+        qbc_M: [5]
+        active.disagreement.metric: [member_l2_mean]
         active.diversity.preselect_factor: [3, 5]
-        active.diversity.uncertainty_weight: [0.4, 0.6, 0.8]
+        active.diversity.uncertainty_weight: [0.4, 0.6]
     fixed_overrides:
       stage1:
         - qbc_enable_logging=true
@@ -103,14 +103,14 @@ stages:
       k_key: qbc_K
       t_key: qbc_T
     shortlist:
-      top_k: 4
+      top_k: 2
 
   refine:
     enabled: true
     role: refinement_and_schedule_search
     depends_on: policy
     budget: b4096
-    seeds: [s01, s02, s03]
+    seeds: [s01, s02]
     objective:
       metric: final_eval_rmse
       direction: minimize
@@ -128,7 +128,7 @@ stages:
         - active.diversity.distance_weight
     inherit:
       mode: shortlist
-      top_k: 4
+      top_k: 2
       from_artifact: stage_shortlist.json
     narrowing:
       lock_params:
@@ -168,10 +168,10 @@ stages:
       k_key: qbc_K
       t_key: qbc_T
     shortlist:
-      top_k: 3
+      top_k: 2
 
   confirm:
-    enabled: true
+    enabled: false
     role: benchmark_ready_confirmation
     depends_on: refine
     budget: b8192

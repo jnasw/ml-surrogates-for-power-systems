@@ -58,6 +58,9 @@ fi
 if [[ "${HPO_NO_TIMESTAMP:-false}" == "true" ]]; then
   CMD+=(--no-timestamp)
 fi
+if [[ "${HPO_SKIP_CONFIRM:-false}" == "true" && -z "${HPO_TO_STAGE:-}" ]]; then
+  HPO_TO_STAGE="refine"
+fi
 if [[ -n "${HPO_FROM_STAGE:-}" ]]; then
   CMD+=(--from-stage "${HPO_FROM_STAGE}")
 fi

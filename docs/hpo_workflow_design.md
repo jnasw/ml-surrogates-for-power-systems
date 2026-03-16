@@ -443,6 +443,7 @@ Optional environment variables:
 - `HPO_NO_TIMESTAMP=true|false`
 - `HPO_FROM_STAGE`
 - `HPO_TO_STAGE`
+- `HPO_SKIP_CONFIRM=true|false`
 - `HPO_RESUME=true|false`
 - `HPO_MAX_ROWS`
 - `HPO_PLAN_ONLY=true|false`
@@ -467,6 +468,13 @@ Plan-only matrix materialization:
 
 ```bash
 export HPO_PLAN_ONLY=true
+tools/hpo_workflow/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
+```
+
+Skip the expensive benchmark-budget confirmation stage:
+
+```bash
+export HPO_SKIP_CONFIRM=true
 tools/hpo_workflow/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
 ```
 
