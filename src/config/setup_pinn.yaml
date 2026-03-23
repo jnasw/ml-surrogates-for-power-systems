@@ -1,0 +1,49 @@
+defaults:
+  - _self_
+  - logging: default
+
+time: 1.0
+num_of_points: 1000
+PINN_flag: true
+
+model:
+  model_flag: "SM4"
+  machine_num: 1
+  seed: 37
+
+dataset:
+  root: null # optional absolute/relative path to data/<MODEL>/dataset_vN; overrides dataset.number when set
+  number: 1
+
+pinn:
+  hidden_dim: 64
+  hidden_layers: 4
+  activation: tanh
+  dtype: float64
+  device: auto # auto | cuda | mps | cpu
+  deterministic: false
+  deterministic_strict: false
+  formulation: odequations # odequations | odequations_v2
+  default_batch_size: 1024
+  loss_weights:
+    data: 1.0
+    physics: 1.0e-4
+    ic: 1.0e-3
+  stages:
+    - name: adam
+      optimizer: Adam
+      lr: 0.001
+      epochs: 100
+      batch_size: 1024
+      shuffle: true
+    - name: lbfgs
+      optimizer: LBFGS
+      lr: 1.0
+      epochs: 20
+      batch_size: null
+      shuffle: false
+  run_dir: ${hydra:runtime.cwd}/outputs/pinn
+
+dirs:
+  params_dir: ${hydra:runtime.cwd}/src/config/params
+  dataset_dir: ${hydra:runtime.cwd}/data

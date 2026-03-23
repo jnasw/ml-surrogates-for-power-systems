@@ -15,9 +15,8 @@ baseline:
   batch_size: 64
   epochs: 300
   device: auto # auto | cuda | mps | cpu
-  save_dir: ${hydra:runtime.cwd}/outputs/baseline
-  save_name: baseline_model.pt
+  run_dir: ${hydra:runtime.cwd}/outputs/baseline
+  checkpoint_name: baseline_model.pt
 
 dirs:
-  init_conditions_dir: ${hydra:runtime.cwd}/src/config/ic
   dataset_dir: ${hydra:runtime.cwd}/data
