@@ -108,6 +108,31 @@ outputs/hpo_workflows/<workflow_id>_<timestamp>/
 
 Each stage writes the same artifact contract.
 
+## Execution Defaults
+
+Workflow rows are materialized into `matrix.tsv` and then executed through
+`tools/hpo_workflow/run_matrix_row.py`, which delegates to `tools/benchmark/run_experiment.py`.
+
+Unless a workflow adds an explicit `workflow.execution` block, the current defaults are:
+
+- `skip_preprocess: true`
+- `skip_baseline: true`
+- `baseline_epochs: null`
+
+This is intentional for HPO throughput: the default workflow objective is expected to come from
+stage-1 adaptive-loop evaluation (`final_eval_rmse`) rather than from repeated stage-3 baseline runs.
+
+If a workflow needs stage-2 or stage-3 artifacts, define that explicitly in config:
+
+```yaml
+workflow:
+  ...
+  execution:
+    skip_preprocess: false
+    skip_baseline: false
+    baseline_epochs: 80
+```
+
 ## Stage Artifact Contract
 
 Each stage should write:
@@ -139,6 +164,14 @@ Each stage should also define a ranking contract in the workflow config:
   - ordered list of secondary sort keys
 - `shortlist.top_k`
   - number of configs propagated to the next stage
+
+Ranking behavior:
+
+- rows with missing objective values are retained in `stage_results.csv`
+- ranking continues when at least one config group has a valid objective
+- ranking fails fast when no config group has a valid objective for the declared stage objective
+
+This protects downstream winner selection without invalidating already-written row artifacts.
 
 Optional:
 

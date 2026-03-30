@@ -85,3 +85,6 @@ flowchart TD
 
 - Adaptive round logs are throttled via `active.log_every` (default: `5`).
 - The final output contract is identical across methods (`raw/` + `info.txt`).
+- End-to-end thesis experiments should generally use `tools/benchmark/run_experiment.py` rather than invoking
+  stage-1 manually, because it keeps stage-1, stage-2, baseline subruns, telemetry export, and the dataset
+  manifest in one artifact root.

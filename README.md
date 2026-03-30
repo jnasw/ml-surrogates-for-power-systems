@@ -6,14 +6,14 @@ MSc thesis on surrogate modelling of synchronous machine dynamics using machine 
 The project uses a two-stage data pipeline:
 
 1. Stage-1 raw simulation dataset creation:
-   - Entry point: `create_dataset.py`
+   - Entry point: `00_create_dataset.py`
    - Output contract: `data/<MODEL>/dataset_vN/raw/file*.pkl` + `data/<MODEL>/dataset_vN/info.txt`
 2. Stage-2 preprocessing:
-   - Entry point: `preprocess_dataset.py`
-   - Consumes the stage-1 contract and writes train/val/test HDF5 files.
+   - Invoked as part of `tools/benchmark/run_experiment.py`
+   - Consumes the stage-1 contract and writes train/val/test HDF5 files plus optional shared-test splits.
    - Supports fair-comparison mode with a shared external test set.
 3. Baseline training/evaluation:
-   - Entry point: `run_baseline.py`
+   - Invoked as repeated stage-3 baseline subruns inside `tools/benchmark/run_experiment.py`
    - Consumes stage-2 HDF5 output (not raw `pkl` files).
 
 For end-to-end execution, use:
@@ -37,7 +37,7 @@ Optional logging/checkpointing during stage-1 adaptive generation:
 
 ### QBC logging and resume
 
-`create_dataset.py` is the single stage-1 entrypoint for both static and adaptive generation.
+`00_create_dataset.py` is the single stage-1 entrypoint for both static and adaptive generation.
 For adaptive runs, optional per-round logging/checkpointing/resume is available via the
 `qbc_enable_logging`, `qbc_run_dir`, `qbc_resume_from_round`, and `qbc_resume_stage` settings.
 
@@ -99,10 +99,11 @@ Key files:
 - `baseline/<baseline-seed>/metrics.json` (per-baseline-run results)
 - `baseline/summary.json` (aggregate baseline stats across baseline seeds)
 
-Aggregate all run manifests:
+Export campaign-level benchmark metrics from a campaign manifest:
 
 ```bash
-python tools/analysis/summarize_experiments.py --root outputs/experiments --out outputs/experiments_summary.csv
+python tools/benchmark/export_metrics.py \
+  --campaign-manifest outputs/campaigns/<campaign_dir>/campaign_manifest.json
 ```
 
 Run a declarative campaign matrix from YAML:
@@ -120,8 +121,19 @@ Dry-run the campaign (print commands only):
 python tools/benchmark/run_campaign.py --config src/config/campaign/local_smoke.yaml --dry-run
 ```
 
-Export experiment tables (dataset-level + baseline-level + round-level):
+Bundle compact benchmark artifacts into tracked `results/benchmark`:
 
 ```bash
-python tools/analysis/export_experiment_data.py --root outputs/experiments --out-dir outputs/dashboard
+python tools/benchmark/bundle_results.py
 ```
+
+HPO workflows are launched with:
+
+```bash
+tools/hpo_workflow/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
+```
+
+The canonical HPO outputs for downstream analysis and benchmark handoff are:
+
+- `results/hpo/hpo_summary.csv`
+- `results/hpo/hpo_winners.csv`

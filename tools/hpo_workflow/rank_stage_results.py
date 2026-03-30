@@ -239,6 +239,19 @@ def rank_aggregated_results(
     tie_breakers: list[str],
     shortlist_size: int,
 ) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+
+    valid_objective_rows = [row for row in rows if _to_float(row.get("objective_mean")) is not None]
+    if not valid_objective_rows:
+        workflow_id = str(rows[0].get("workflow_id", "")).strip() or "<unknown-workflow>"
+        stage = str(rows[0].get("stage", "")).strip() or "<unknown-stage>"
+        metric = str(rows[0].get("objective_metric", "")).strip() or "<unknown-metric>"
+        raise ValueError(
+            f"Cannot rank stage '{stage}' for workflow '{workflow_id}': "
+            f"no valid objective values were found for metric '{metric}'."
+        )
+
     def sort_key(row: dict[str, Any]) -> tuple[Any, ...]:
         objective = _to_float(row.get("objective_mean"))
         if objective is None:

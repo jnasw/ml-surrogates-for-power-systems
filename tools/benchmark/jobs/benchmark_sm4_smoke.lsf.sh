@@ -50,7 +50,7 @@ fi
 
 "${CAMPAIGN_CMD[@]}" | tee "${TMP_LOG}"
 
-CAMPAIGN_MANIFEST="$(grep -E "^\[campaign\] Manifest:" "${TMP_LOG}" | tail -n1 | awk '{print $3}')"
+CAMPAIGN_MANIFEST="$(grep -E "^\[campaign\] manifest:" "${TMP_LOG}" | tail -n1 | awk '{print $3}')"
 if [[ -z "${CAMPAIGN_MANIFEST}" ]]; then
   echo "[ERROR] Could not determine campaign manifest path from campaign output."
   exit 1
