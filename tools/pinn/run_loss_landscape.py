@@ -163,12 +163,8 @@ def main() -> None:
     manifest = {
         **summary,
         "analysis_bundle": analysis_bundle.as_manifest(),
-        "weights": {
-            "data": float(weights.data),
-            "dt": float(weights.dt),
-            "physics": float(weights.physics),
-            "ic": float(weights.ic),
-        },
+        "weights": weights.as_dict(),
+        "loss_components": list(weights.as_dict().keys()),
         "formulation": str(cfg_get(config, "pinn.formulation", "odequations")),
         "dtype": dtype_name,
         "device": str(pinn_model.device),

@@ -5,12 +5,14 @@ from __future__ import annotations
 import csv
 import importlib
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 import torch
 from omegaconf import OmegaConf
+
+from src.pinn.losses import LOSS_COMPONENTS
 
 
 @dataclass(frozen=True)
@@ -20,19 +22,104 @@ class EpochMetrics:
     stage_name: str
     optimizer: str
     train_total_loss: float
-    train_data_loss: float
-    train_dt_loss: float
-    train_physics_loss: float
-    train_ic_loss: float
+    train_component_losses: dict[str, float]
     train_total_grad_norm: float | None = None
-    train_data_grad_norm: float | None = None
-    train_dt_grad_norm: float | None = None
-    train_physics_grad_norm: float | None = None
-    train_ic_grad_norm: float | None = None
-    val_data_loss: float | None = None
-    val_dt_loss: float | None = None
-    val_physics_loss: float | None = None
-    test_data_loss: float | None = None
+    train_component_grad_norms: dict[str, float | None] | None = None
+    train_weighted_component_grad_norms: dict[str, float | None] | None = None
+    val_component_losses: dict[str, float | None] | None = None
+    test_metrics: dict[str, float | None] | None = None
+
+    def _component_loss(self, split: str, name: str) -> float | None:
+        if split == "train":
+            return self.train_component_losses.get(name)
+        if split == "val":
+            return None if self.val_component_losses is None else self.val_component_losses.get(name)
+        raise ValueError(f"Unsupported split: {split}")
+
+    def _component_grad_norm(self, weighted: bool, name: str) -> float | None:
+        source = self.train_weighted_component_grad_norms if weighted else self.train_component_grad_norms
+        if source is None:
+            return None
+        return source.get(name)
+
+    @property
+    def train_data_loss(self) -> float | None:
+        return self._component_loss("train", "data")
+
+    @property
+    def train_dt_loss(self) -> float | None:
+        return self._component_loss("train", "dt")
+
+    @property
+    def train_physics_loss(self) -> float | None:
+        return self._component_loss("train", "physics")
+
+    @property
+    def train_ic_loss(self) -> float | None:
+        return self._component_loss("train", "ic")
+
+    @property
+    def train_data_grad_norm(self) -> float | None:
+        return self._component_grad_norm(False, "data")
+
+    @property
+    def train_dt_grad_norm(self) -> float | None:
+        return self._component_grad_norm(False, "dt")
+
+    @property
+    def train_physics_grad_norm(self) -> float | None:
+        return self._component_grad_norm(False, "physics")
+
+    @property
+    def train_ic_grad_norm(self) -> float | None:
+        return self._component_grad_norm(False, "ic")
+
+    @property
+    def val_data_loss(self) -> float | None:
+        return self._component_loss("val", "data")
+
+    @property
+    def val_dt_loss(self) -> float | None:
+        return self._component_loss("val", "dt")
+
+    @property
+    def val_physics_loss(self) -> float | None:
+        return self._component_loss("val", "physics")
+
+    @property
+    def test_data_loss(self) -> float | None:
+        if self.test_metrics is None:
+            return None
+        return self.test_metrics.get("data_loss")
+
+    def as_flat_dict(self) -> dict[str, Any]:
+        flat = {
+            "epoch": int(self.epoch),
+            "global_epoch": int(self.global_epoch),
+            "stage_name": str(self.stage_name),
+            "optimizer": str(self.optimizer),
+            "train_total_loss": float(self.train_total_loss),
+            "train_total_grad_norm": self.train_total_grad_norm,
+        }
+        for name, value in self.train_component_losses.items():
+            flat[f"train_{name}_loss"] = value
+        for name in LOSS_COMPONENTS:
+            flat.setdefault(f"train_{name}_loss", self.train_component_losses.get(name))
+        source_maps = [
+            ("train", "grad_norm", self.train_component_grad_norms),
+            ("train_weighted", "grad_norm", self.train_weighted_component_grad_norms),
+            ("val", "loss", self.val_component_losses),
+        ]
+        for prefix, suffix, values in source_maps:
+            values = {} if values is None else values
+            ordered_names = list(LOSS_COMPONENTS) + sorted(name for name in values.keys() if name not in LOSS_COMPONENTS)
+            for name in ordered_names:
+                flat[f"{prefix}_{name}_{suffix}"] = values.get(name)
+        test_values = {} if self.test_metrics is None else self.test_metrics
+        for key, value in test_values.items():
+            flat[f"test_{key}"] = value
+        flat.setdefault("test_data_loss", test_values.get("data_loss"))
+        return flat
 
 
 class PinnLogger:
@@ -94,13 +181,14 @@ class PinnLogger:
         if not rows:
             return
         row = rows[-1]
-        fieldnames = list(asdict(row).keys())
+        row_dict = row.as_flat_dict()
+        fieldnames = list(row_dict.keys())
         write_header = not os.path.exists(self.metrics_path) or os.path.getsize(self.metrics_path) == 0
         with open(self.metrics_path, "a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             if write_header:
                 writer.writeheader()
-            writer.writerow(asdict(row))
+            writer.writerow(row_dict)
 
     def _should_log_epoch(self, row: EpochMetrics) -> bool:
         log_every_epoch = int(getattr(getattr(self, "_config_logging", None), "log_every_epoch", 1))
@@ -117,29 +205,23 @@ class PinnLogger:
             f"stage={row.stage_name}",
             f"optimizer={row.optimizer}",
             f"train_total={float(row.train_total_loss):.6e}",
-            f"train_data={float(row.train_data_loss):.6e}",
-            f"train_dt={float(row.train_dt_loss):.6e}",
-            f"train_physics={float(row.train_physics_loss):.6e}",
-            f"train_ic={float(row.train_ic_loss):.6e}",
         ]
+        for name, value in row.train_component_losses.items():
+            parts.append(f"train_{name}={float(value):.6e}")
         if row.train_total_grad_norm is not None:
             parts.append(f"grad_total={float(row.train_total_grad_norm):.6e}")
-        if row.train_data_grad_norm is not None:
-            parts.append(f"grad_data={float(row.train_data_grad_norm):.6e}")
-        if row.train_dt_grad_norm is not None:
-            parts.append(f"grad_dt={float(row.train_dt_grad_norm):.6e}")
-        if row.train_physics_grad_norm is not None:
-            parts.append(f"grad_physics={float(row.train_physics_grad_norm):.6e}")
-        if row.train_ic_grad_norm is not None:
-            parts.append(f"grad_ic={float(row.train_ic_grad_norm):.6e}")
-        if row.val_data_loss is not None:
-            parts.append(f"val_data={float(row.val_data_loss):.6e}")
-        if row.val_dt_loss is not None:
-            parts.append(f"val_dt={float(row.val_dt_loss):.6e}")
-        if row.val_physics_loss is not None:
-            parts.append(f"val_physics={float(row.val_physics_loss):.6e}")
-        if row.test_data_loss is not None:
-            parts.append(f"test_data={float(row.test_data_loss):.6e}")
+        for name, value in (row.train_component_grad_norms or {}).items():
+            if value is not None:
+                parts.append(f"grad_{name}={float(value):.6e}")
+        for name, value in (row.train_weighted_component_grad_norms or {}).items():
+            if value is not None:
+                parts.append(f"grad_weighted_{name}={float(value):.6e}")
+        for name, value in (row.val_component_losses or {}).items():
+            if value is not None:
+                parts.append(f"val_{name}={float(value):.6e}")
+        for key, value in (row.test_metrics or {}).items():
+            if value is not None:
+                parts.append(f"test_{key.replace('_loss', '')}={float(value):.6e}")
         print(" ".join(parts), flush=True)
 
     def log_epoch_metrics(self, row: EpochMetrics) -> None:
@@ -153,29 +235,23 @@ class PinnLogger:
             "stage/name": str(row.stage_name),
             "stage/optimizer": str(row.optimizer),
             "train/total_loss": float(row.train_total_loss),
-            "train/data_loss": float(row.train_data_loss),
-            "train/dt_loss": float(row.train_dt_loss),
-            "train/physics_loss": float(row.train_physics_loss),
-            "train/ic_loss": float(row.train_ic_loss),
         }
+        for name, value in row.train_component_losses.items():
+            payload[f"train/{name}_loss"] = float(value)
         if row.train_total_grad_norm is not None:
             payload["train/grad_total_norm"] = float(row.train_total_grad_norm)
-        if row.train_data_grad_norm is not None:
-            payload["train/grad_data_norm"] = float(row.train_data_grad_norm)
-        if row.train_dt_grad_norm is not None:
-            payload["train/grad_dt_norm"] = float(row.train_dt_grad_norm)
-        if row.train_physics_grad_norm is not None:
-            payload["train/grad_physics_norm"] = float(row.train_physics_grad_norm)
-        if row.train_ic_grad_norm is not None:
-            payload["train/grad_ic_norm"] = float(row.train_ic_grad_norm)
-        if row.val_data_loss is not None:
-            payload["val/data_loss"] = float(row.val_data_loss)
-        if row.val_dt_loss is not None:
-            payload["val/dt_loss"] = float(row.val_dt_loss)
-        if row.val_physics_loss is not None:
-            payload["val/physics_loss"] = float(row.val_physics_loss)
-        if row.test_data_loss is not None:
-            payload["test/data_loss"] = float(row.test_data_loss)
+        for name, value in (row.train_component_grad_norms or {}).items():
+            if value is not None:
+                payload[f"train/grad_{name}_norm"] = float(value)
+        for name, value in (row.train_weighted_component_grad_norms or {}).items():
+            if value is not None:
+                payload[f"train/grad_weighted_{name}_norm"] = float(value)
+        for name, value in (row.val_component_losses or {}).items():
+            if value is not None:
+                payload[f"val/{name}_loss"] = float(value)
+        for key, value in (row.test_metrics or {}).items():
+            if value is not None:
+                payload[f"test/{key}"] = float(value)
         self._wandb_run.log(payload, step=int(row.global_epoch))
 
     def save_checkpoint(self, payload: dict[str, Any], tag: str) -> str:

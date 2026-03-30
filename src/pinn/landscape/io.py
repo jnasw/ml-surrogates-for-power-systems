@@ -30,10 +30,8 @@ def write_landscape_artifacts_1d(
 ) -> str:
     output_dir = ensure_output_dir(output_dir)
     np.save(os.path.join(output_dir, "loss_total.npy"), result.total)
-    np.save(os.path.join(output_dir, "loss_data.npy"), result.data)
-    np.save(os.path.join(output_dir, "loss_dt.npy"), result.dt)
-    np.save(os.path.join(output_dir, "loss_physics.npy"), result.physics)
-    np.save(os.path.join(output_dir, "loss_ic.npy"), result.ic)
+    for name, values in result.losses.items():
+        np.save(os.path.join(output_dir, f"loss_{name}.npy"), values)
     np.savez(os.path.join(output_dir, "coordinates.npz"), alpha=result.axes.alpha)
     _save_direction(
         os.path.join(output_dir, "direction.pt"),
@@ -55,10 +53,8 @@ def write_landscape_artifacts_2d(
 ) -> str:
     output_dir = ensure_output_dir(output_dir)
     np.save(os.path.join(output_dir, "loss_total.npy"), result.total)
-    np.save(os.path.join(output_dir, "loss_data.npy"), result.data)
-    np.save(os.path.join(output_dir, "loss_dt.npy"), result.dt)
-    np.save(os.path.join(output_dir, "loss_physics.npy"), result.physics)
-    np.save(os.path.join(output_dir, "loss_ic.npy"), result.ic)
+    for name, values in result.losses.items():
+        np.save(os.path.join(output_dir, f"loss_{name}.npy"), values)
     np.savez(
         os.path.join(output_dir, "coordinates.npz"),
         alpha=result.axes.alpha,

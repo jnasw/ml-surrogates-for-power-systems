@@ -11,17 +11,33 @@ from torch import nn
 
 from src.pinn.analysis_data import PinnAnalysisBundle
 from src.pinn.data import PinnDatasetBundle
-from src.pinn.losses import LossWeights, PinnLossBreakdown, compute_pinn_losses
+from src.pinn.losses import LOSS_COMPONENTS, LossWeights, PinnLossBreakdown, compute_pinn_losses
 from src.pinn.residuals import compute_residual_terms, compute_supervised_dt_terms
 
 
 @dataclass(frozen=True)
 class PinnLossScalars:
     total: float
-    data: float
-    dt: float
-    physics: float
-    ic: float
+    components: dict[str, float]
+
+    def component(self, name: str) -> float:
+        return float(self.components[name])
+
+    @property
+    def data(self) -> float:
+        return self.component("data")
+
+    @property
+    def dt(self) -> float:
+        return self.component("dt")
+
+    @property
+    def physics(self) -> float:
+        return self.component("physics")
+
+    @property
+    def ic(self) -> float:
+        return self.component("ic")
 
 
 def move_pinn_dataset_to_device(
@@ -105,14 +121,12 @@ def evaluate_analysis_loss_scalars(
     """
 
     total = 0.0
-    loss_data = nan
-    loss_dt = nan
-    loss_physics = nan
-    loss_ic = nan
+    components = {name: nan for name in LOSS_COMPONENTS}
 
     if bundle.has_supervised:
         pred = model(bundle.x_data)
         loss_data = float(criterion(pred, bundle.y_data).item())
+        components["data"] = loss_data
         total += float(weights.data) * loss_data
         supervised_dt_terms = compute_supervised_dt_terms(
             model=model,
@@ -128,6 +142,7 @@ def evaluate_analysis_loss_scalars(
                 torch.zeros_like(supervised_dt_terms.residual),
             ).item()
         )
+        components["dt"] = loss_dt
         total += float(weights.dt) * loss_dt
 
     if bundle.has_collocation:
@@ -144,17 +159,16 @@ def evaluate_analysis_loss_scalars(
                 torch.zeros_like(collocation_terms.residual),
             ).item()
         )
+        components["physics"] = loss_physics
         total += float(weights.physics) * loss_physics
 
     if bundle.has_init:
         init_pred = model(bundle.x_init)
         loss_ic = float(criterion(init_pred, bundle.y_init).item())
+        components["ic"] = loss_ic
         total += float(weights.ic) * loss_ic
 
     return PinnLossScalars(
         total=float(total),
-        data=float(loss_data),
-        dt=float(loss_dt),
-        physics=float(loss_physics),
-        ic=float(loss_ic),
+        components=components,
     )

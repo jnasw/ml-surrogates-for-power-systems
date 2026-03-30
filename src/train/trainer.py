@@ -151,10 +151,30 @@ class PinnModel:
 @dataclass(frozen=True)
 class GradientTelemetry:
     total_grad_norm: float
-    data_grad_norm: float
-    dt_grad_norm: float
-    physics_grad_norm: float
-    ic_grad_norm: float
+    component_grad_norms: dict[str, float]
+    weighted_component_grad_norms: dict[str, float]
+
+    def component(self, name: str) -> float:
+        return float(self.component_grad_norms[name])
+
+    def weighted_component(self, name: str) -> float:
+        return float(self.weighted_component_grad_norms[name])
+
+    @property
+    def data_grad_norm(self) -> float:
+        return self.component("data")
+
+    @property
+    def dt_grad_norm(self) -> float:
+        return self.component("dt")
+
+    @property
+    def physics_grad_norm(self) -> float:
+        return self.component("physics")
+
+    @property
+    def ic_grad_norm(self) -> float:
+        return self.component("ic")
 
 
 def train_surrogate(dataset: TrajectoryDataset, seed: int, config: Any) -> SurrogateModel:
@@ -456,18 +476,21 @@ def _grad_norm(loss: torch.Tensor, model: nn.Module, retain_graph: bool) -> floa
 def _compute_gradient_telemetry(
     *,
     model: nn.Module,
-    loss_total: torch.Tensor,
-    loss_data: torch.Tensor,
-    loss_dt: torch.Tensor,
-    loss_physics: torch.Tensor,
-    loss_ic: torch.Tensor,
+    losses: PinnLossBreakdown,
+    weights: LossWeights,
 ) -> GradientTelemetry:
+    component_grad_norms = {
+        name: _grad_norm(losses.component(name), model, retain_graph=True)
+        for name in losses.components
+    }
+    weighted_component_grad_norms = {
+        name: _grad_norm(float(weights.get(name)) * losses.component(name), model, retain_graph=True)
+        for name in losses.components
+    }
     return GradientTelemetry(
-        total_grad_norm=_grad_norm(loss_total, model, retain_graph=True),
-        data_grad_norm=_grad_norm(loss_data, model, retain_graph=True),
-        dt_grad_norm=_grad_norm(loss_dt, model, retain_graph=True),
-        physics_grad_norm=_grad_norm(loss_physics, model, retain_graph=True),
-        ic_grad_norm=_grad_norm(loss_ic, model, retain_graph=True),
+        total_grad_norm=_grad_norm(losses.total, model, retain_graph=True),
+        component_grad_norms=component_grad_norms,
+        weighted_component_grad_norms=weighted_component_grad_norms,
     )
 
 
@@ -507,11 +530,8 @@ def _train_pinn_step(
         if capture_gradient_telemetry:
             telemetry_box["telemetry"] = _compute_gradient_telemetry(
                 model=model,
-                loss_total=losses.total,
-                loss_data=losses.data,
-                loss_dt=losses.dt,
-                loss_physics=losses.physics,
-                loss_ic=losses.ic,
+                losses=losses,
+                weights=weights,
             )
         losses.total.backward()
         breakdown_box["losses"] = losses
@@ -679,29 +699,31 @@ def train_pinn(
                         epoch_gradients.append(gradient_telemetry)
 
             train_total = float(torch.stack([x.total.detach() for x in epoch_losses]).mean().item())
-            train_data = float(torch.stack([x.data.detach() for x in epoch_losses]).mean().item())
-            train_dt = float(torch.stack([x.dt.detach() for x in epoch_losses]).mean().item())
-            train_physics = float(torch.stack([x.physics.detach() for x in epoch_losses]).mean().item())
-            train_ic = float(torch.stack([x.ic.detach() for x in epoch_losses]).mean().item())
+            train_component_losses = {
+                name: float(torch.stack([loss.components[name].detach() for loss in epoch_losses]).mean().item())
+                for name in epoch_losses[0].components
+            }
             train_total_grad_norm = None
-            train_data_grad_norm = None
-            train_dt_grad_norm = None
-            train_physics_grad_norm = None
-            train_ic_grad_norm = None
+            train_component_grad_norms = None
+            train_weighted_component_grad_norms = None
             if epoch_gradients:
                 train_total_grad_norm = float(np.mean([item.total_grad_norm for item in epoch_gradients]))
-                train_data_grad_norm = float(np.mean([item.data_grad_norm for item in epoch_gradients]))
-                train_dt_grad_norm = float(np.mean([item.dt_grad_norm for item in epoch_gradients]))
-                train_physics_grad_norm = float(np.mean([item.physics_grad_norm for item in epoch_gradients]))
-                train_ic_grad_norm = float(np.mean([item.ic_grad_norm for item in epoch_gradients]))
+                component_names = epoch_gradients[0].component_grad_norms.keys()
+                train_component_grad_norms = {
+                    name: float(np.mean([item.component_grad_norms[name] for item in epoch_gradients]))
+                    for name in component_names
+                }
+                train_weighted_component_grad_norms = {
+                    name: float(np.mean([item.weighted_component_grad_norms[name] for item in epoch_gradients]))
+                    for name in component_names
+                }
             global_epoch += 1
-            val_data = None
-            val_dt = None
-            val_physics = None
-            test_data = None
+            val_component_losses = None
+            test_metrics = None
             if _should_run_evaluation(global_epoch, config):
-                val_data = _evaluate_data_loss(model=model, x=dataset.val_x, y=dataset.val_y, criterion=criterion)
-                val_dt = _evaluate_dt_loss(
+                val_component_losses = {}
+                val_component_losses["data"] = _evaluate_data_loss(model=model, x=dataset.val_x, y=dataset.val_y, criterion=criterion)
+                val_component_losses["dt"] = _evaluate_dt_loss(
                     model=model,
                     x=dataset.val_x,
                     y=dataset.val_y,
@@ -709,33 +731,28 @@ def train_pinn(
                     criterion=criterion,
                     formulation=formulation,
                 )
-                val_physics = _evaluate_physics_loss(
+                val_component_losses["physics"] = _evaluate_physics_loss(
                     model=model,
                     x_rows=dataset.val_col_x if dataset.val_col_x is not None else dataset.val_x,
                     ode_model=ode_model,
                     criterion=criterion,
                     formulation=formulation,
                 )
-                test_data = _evaluate_data_loss(model=model, x=dataset.test_x, y=dataset.test_y, criterion=criterion)
+                test_metrics = {
+                    "data_loss": _evaluate_data_loss(model=model, x=dataset.test_x, y=dataset.test_y, criterion=criterion)
+                }
             row = EpochMetrics(
                 epoch=epoch,
                 global_epoch=global_epoch,
                 stage_name=stage.name,
                 optimizer=stage.optimizer,
                 train_total_loss=train_total,
-                train_data_loss=train_data,
-                train_dt_loss=train_dt,
-                train_physics_loss=train_physics,
-                train_ic_loss=train_ic,
+                train_component_losses=train_component_losses,
                 train_total_grad_norm=train_total_grad_norm,
-                train_data_grad_norm=train_data_grad_norm,
-                train_dt_grad_norm=train_dt_grad_norm,
-                train_physics_grad_norm=train_physics_grad_norm,
-                train_ic_grad_norm=train_ic_grad_norm,
-                val_data_loss=val_data,
-                val_dt_loss=val_dt,
-                val_physics_loss=val_physics,
-                test_data_loss=test_data,
+                train_component_grad_norms=train_component_grad_norms,
+                train_weighted_component_grad_norms=train_weighted_component_grad_norms,
+                val_component_losses=val_component_losses,
+                test_metrics=test_metrics,
             )
             rows.append(row)
 

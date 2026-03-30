@@ -35,13 +35,18 @@ def _parameter_rows(tensor: torch.Tensor) -> tuple[torch.Tensor, tuple[int, ...]
 def _normalize_like_parameter(direction: torch.Tensor, parameter: torch.Tensor) -> torch.Tensor:
     if direction.shape != parameter.shape:
         raise ValueError("Direction and parameter shapes must match for normalization.")
+    param_norm = torch.linalg.vector_norm(parameter)
+    dir_norm = torch.linalg.vector_norm(direction)
+    if float(param_norm.item()) == 0.0 or float(dir_norm.item()) == 0.0:
+        return torch.zeros_like(direction)
+    return direction * (param_norm / dir_norm)
 
+
+def _normalize_like_filter(direction: torch.Tensor, parameter: torch.Tensor) -> torch.Tensor:
+    if direction.shape != parameter.shape:
+        raise ValueError("Direction and parameter shapes must match for normalization.")
     if parameter.ndim <= 1:
-        param_norm = torch.linalg.vector_norm(parameter)
-        dir_norm = torch.linalg.vector_norm(direction)
-        if float(param_norm.item()) == 0.0 or float(dir_norm.item()) == 0.0:
-            return torch.zeros_like(direction)
-        return direction * (param_norm / dir_norm)
+        return _normalize_like_parameter(direction, parameter)
 
     direction_rows, original_shape = _parameter_rows(direction)
     parameter_rows, _ = _parameter_rows(parameter)
@@ -76,7 +81,9 @@ def sample_random_direction(
             device=parameter.device,
             dtype=parameter.dtype,
         )
-        if normalized in {"filter", "parameter"}:
+        if normalized == "filter":
+            raw = _normalize_like_filter(raw, parameter.detach())
+        elif normalized == "parameter":
             raw = _normalize_like_parameter(raw, parameter.detach())
         tensors[name] = raw
 

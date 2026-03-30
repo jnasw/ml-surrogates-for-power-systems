@@ -13,7 +13,7 @@ from src.pinn.analysis_data import PinnAnalysisBundle
 from src.pinn.evaluator import PinnLossScalars, evaluate_analysis_loss_scalars
 from src.pinn.landscape.directions import ParameterDirection, sample_random_directions
 from src.pinn.landscape.perturb import ParameterState, capture_parameter_state, perturbed_model
-from src.pinn.losses import LossWeights
+from src.pinn.losses import LOSS_COMPONENTS, LossWeights
 
 
 @dataclass(frozen=True)
@@ -31,33 +31,53 @@ class LandscapeAxes2D:
 class RawLandscape1D:
     axes: LandscapeAxes1D
     total: np.ndarray
-    data: np.ndarray
-    dt: np.ndarray
-    physics: np.ndarray
-    ic: np.ndarray
+    losses: dict[str, np.ndarray]
     direction: ParameterDirection
+
+    @property
+    def data(self) -> np.ndarray:
+        return self.losses["data"]
+
+    @property
+    def dt(self) -> np.ndarray:
+        return self.losses["dt"]
+
+    @property
+    def physics(self) -> np.ndarray:
+        return self.losses["physics"]
+
+    @property
+    def ic(self) -> np.ndarray:
+        return self.losses["ic"]
 
 
 @dataclass(frozen=True)
 class RawLandscape2D:
     axes: LandscapeAxes2D
     total: np.ndarray
-    data: np.ndarray
-    dt: np.ndarray
-    physics: np.ndarray
-    ic: np.ndarray
+    losses: dict[str, np.ndarray]
     direction_a: ParameterDirection
     direction_b: ParameterDirection
+
+    @property
+    def data(self) -> np.ndarray:
+        return self.losses["data"]
+
+    @property
+    def dt(self) -> np.ndarray:
+        return self.losses["dt"]
+
+    @property
+    def physics(self) -> np.ndarray:
+        return self.losses["physics"]
+
+    @property
+    def ic(self) -> np.ndarray:
+        return self.losses["ic"]
 
 
 def _default_criterion() -> nn.Module:
     return nn.MSELoss()
-
-
-def _scalar_to_tuple(losses: PinnLossScalars) -> tuple[float, float, float, float, float]:
-    return losses.total, losses.data, losses.dt, losses.physics, losses.ic
-
-
 def evaluate_landscape_1d(
     *,
     model: nn.Module,
@@ -86,10 +106,10 @@ def evaluate_landscape_1d(
     )
 
     total = np.empty(alpha.shape, dtype=np.float64)
-    data = np.empty(alpha.shape, dtype=np.float64)
-    dt = np.empty(alpha.shape, dtype=np.float64)
-    physics = np.empty(alpha.shape, dtype=np.float64)
-    ic = np.empty(alpha.shape, dtype=np.float64)
+    loss_arrays = {
+        name: np.empty(alpha.shape, dtype=np.float64)
+        for name in LOSS_COMPONENTS
+    }
 
     for idx, alpha_value in enumerate(alpha):
         with perturbed_model(
@@ -106,15 +126,14 @@ def evaluate_landscape_1d(
                 weights=weights,
                 bundle=bundle,
             )
-        total[idx], data[idx], dt[idx], physics[idx], ic[idx] = _scalar_to_tuple(losses)
+        total[idx] = losses.total
+        for name, values in loss_arrays.items():
+            values[idx] = losses.components[name]
 
     return RawLandscape1D(
         axes=LandscapeAxes1D(alpha=alpha),
         total=total,
-        data=data,
-        dt=dt,
-        physics=physics,
-        ic=ic,
+        losses=loss_arrays,
         direction=direction_obj,
     )
 
@@ -155,10 +174,10 @@ def evaluate_landscape_2d(
 
     shape = (alpha.shape[0], beta.shape[0])
     total = np.empty(shape, dtype=np.float64)
-    data = np.empty(shape, dtype=np.float64)
-    dt = np.empty(shape, dtype=np.float64)
-    physics = np.empty(shape, dtype=np.float64)
-    ic = np.empty(shape, dtype=np.float64)
+    loss_arrays = {
+        name: np.empty(shape, dtype=np.float64)
+        for name in LOSS_COMPONENTS
+    }
 
     for alpha_idx, alpha_value in enumerate(alpha):
         for beta_idx, beta_value in enumerate(beta):
@@ -178,15 +197,14 @@ def evaluate_landscape_2d(
                     weights=weights,
                     bundle=bundle,
                 )
-            total[alpha_idx, beta_idx], data[alpha_idx, beta_idx], dt[alpha_idx, beta_idx], physics[alpha_idx, beta_idx], ic[alpha_idx, beta_idx] = _scalar_to_tuple(losses)
+            total[alpha_idx, beta_idx] = losses.total
+            for name, values in loss_arrays.items():
+                values[alpha_idx, beta_idx] = losses.components[name]
 
     return RawLandscape2D(
         axes=LandscapeAxes2D(alpha=alpha, beta=beta),
         total=total,
-        data=data,
-        dt=dt,
-        physics=physics,
-        ic=ic,
+        losses=loss_arrays,
         direction_a=direction_a,
         direction_b=direction_b,
     )
