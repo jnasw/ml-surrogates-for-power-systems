@@ -209,6 +209,7 @@ __marimo__/
 
 # Project-generated artifacts
 outputs/
+wandb/
 /data/
 !/src/data/
 !/src/data/**

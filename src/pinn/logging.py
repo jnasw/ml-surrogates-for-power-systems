@@ -21,9 +21,16 @@ class EpochMetrics:
     optimizer: str
     train_total_loss: float
     train_data_loss: float
+    train_dt_loss: float
     train_physics_loss: float
     train_ic_loss: float
+    train_total_grad_norm: float | None = None
+    train_data_grad_norm: float | None = None
+    train_dt_grad_norm: float | None = None
+    train_physics_grad_norm: float | None = None
+    train_ic_grad_norm: float | None = None
     val_data_loss: float | None = None
+    val_dt_loss: float | None = None
     val_physics_loss: float | None = None
     test_data_loss: float | None = None
 
@@ -95,13 +102,50 @@ class PinnLogger:
                 writer.writeheader()
             writer.writerow(asdict(row))
 
-    def log_epoch_metrics(self, row: EpochMetrics) -> None:
-        if not self._wandb_enabled or self._wandb_run is None:
-            return
+    def _should_log_epoch(self, row: EpochMetrics) -> bool:
         log_every_epoch = int(getattr(getattr(self, "_config_logging", None), "log_every_epoch", 1))
         if log_every_epoch < 1:
             log_every_epoch = 1
-        if (int(row.global_epoch) % log_every_epoch) != 0:
+        return (int(row.global_epoch) % log_every_epoch) == 0
+
+    def print_epoch_metrics(self, row: EpochMetrics) -> None:
+        if not self._should_log_epoch(row):
+            return
+        parts = [
+            "[pinn]",
+            f"global_epoch={int(row.global_epoch)}",
+            f"stage={row.stage_name}",
+            f"optimizer={row.optimizer}",
+            f"train_total={float(row.train_total_loss):.6e}",
+            f"train_data={float(row.train_data_loss):.6e}",
+            f"train_dt={float(row.train_dt_loss):.6e}",
+            f"train_physics={float(row.train_physics_loss):.6e}",
+            f"train_ic={float(row.train_ic_loss):.6e}",
+        ]
+        if row.train_total_grad_norm is not None:
+            parts.append(f"grad_total={float(row.train_total_grad_norm):.6e}")
+        if row.train_data_grad_norm is not None:
+            parts.append(f"grad_data={float(row.train_data_grad_norm):.6e}")
+        if row.train_dt_grad_norm is not None:
+            parts.append(f"grad_dt={float(row.train_dt_grad_norm):.6e}")
+        if row.train_physics_grad_norm is not None:
+            parts.append(f"grad_physics={float(row.train_physics_grad_norm):.6e}")
+        if row.train_ic_grad_norm is not None:
+            parts.append(f"grad_ic={float(row.train_ic_grad_norm):.6e}")
+        if row.val_data_loss is not None:
+            parts.append(f"val_data={float(row.val_data_loss):.6e}")
+        if row.val_dt_loss is not None:
+            parts.append(f"val_dt={float(row.val_dt_loss):.6e}")
+        if row.val_physics_loss is not None:
+            parts.append(f"val_physics={float(row.val_physics_loss):.6e}")
+        if row.test_data_loss is not None:
+            parts.append(f"test_data={float(row.test_data_loss):.6e}")
+        print(" ".join(parts), flush=True)
+
+    def log_epoch_metrics(self, row: EpochMetrics) -> None:
+        if not self._wandb_enabled or self._wandb_run is None:
+            return
+        if not self._should_log_epoch(row):
             return
         payload = {
             "stage/epoch": int(row.epoch),
@@ -110,11 +154,24 @@ class PinnLogger:
             "stage/optimizer": str(row.optimizer),
             "train/total_loss": float(row.train_total_loss),
             "train/data_loss": float(row.train_data_loss),
+            "train/dt_loss": float(row.train_dt_loss),
             "train/physics_loss": float(row.train_physics_loss),
             "train/ic_loss": float(row.train_ic_loss),
         }
+        if row.train_total_grad_norm is not None:
+            payload["train/grad_total_norm"] = float(row.train_total_grad_norm)
+        if row.train_data_grad_norm is not None:
+            payload["train/grad_data_norm"] = float(row.train_data_grad_norm)
+        if row.train_dt_grad_norm is not None:
+            payload["train/grad_dt_norm"] = float(row.train_dt_grad_norm)
+        if row.train_physics_grad_norm is not None:
+            payload["train/grad_physics_norm"] = float(row.train_physics_grad_norm)
+        if row.train_ic_grad_norm is not None:
+            payload["train/grad_ic_norm"] = float(row.train_ic_grad_norm)
         if row.val_data_loss is not None:
             payload["val/data_loss"] = float(row.val_data_loss)
+        if row.val_dt_loss is not None:
+            payload["val/dt_loss"] = float(row.val_dt_loss)
         if row.val_physics_loss is not None:
             payload["val/physics_loss"] = float(row.val_physics_loss)
         if row.test_data_loss is not None:

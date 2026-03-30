@@ -25,8 +25,44 @@ pinn:
   deterministic_strict: false
   formulation: odequations # odequations | odequations_v2
   default_batch_size: 1024
+  gradient_telemetry:
+    enabled: false
+  collocation_sampling:
+    enabled: false
+    rows_per_epoch: null
+    fraction_per_epoch: null
+  supervised_sampling:
+    enabled: false
+    rows_per_epoch: null
+    fraction_per_epoch: null
+  evaluation:
+    frequency: 1
+  checkpointing:
+    save_init: true
+    epoch_fractions: []
+    save_best: true
+    save_last: true
+  analysis_dataset:
+    split: train
+    supervised_rows: null
+    collocation_rows: null
+    init_rows: null
+    seed: 0
+    require_all_components: true
+  landscape:
+    output_dir: null
+    grid:
+      type: 2d
+      resolution: 21
+      alpha_min: -1.0
+      alpha_max: 1.0
+      beta_min: -1.0
+      beta_max: 1.0
+    direction_seed: 0
+    normalization: filter
   loss_weights:
     data: 1.0
+    dt: 1.0e-4
     physics: 1.0e-4
     ic: 1.0e-3
   stages:
