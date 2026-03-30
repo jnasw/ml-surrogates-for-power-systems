@@ -1,0 +1,220 @@
+{
+  "dataset_id": "lhs_static_b4096_ds01",
+  "created_at_utc": "2026-03-25T08:00:57.173402+00:00",
+  "updated_at_utc": "2026-03-25T08:02:17.492254+00:00",
+  "run_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01",
+  "experiment": {
+    "id": "thesis_sm4_benchmark_sm4_v2",
+    "preset": "default",
+    "method": "lhs_static",
+    "budget": "b4096",
+    "dataset_seed_label": "ds01",
+    "dataset_seed_value": 101,
+    "model_flag": "SM4"
+  },
+  "git": {
+    "commit": "00a021e01f7cb50cfcb1e3104f9397cb14eda9ee"
+  },
+  "stages_enabled": {
+    "stage1_create_dataset": true,
+    "stage2_preprocess": true,
+    "stage3_baseline": true
+  },
+  "stages": {
+    "stage1_create_dataset": {
+      "status": "completed",
+      "command": [
+        "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/.venv/bin/python",
+        "00_create_dataset.py",
+        "+base=base",
+        "preset=default",
+        "+method=lhs_static",
+        "experiment.id=thesis_sm4_benchmark_sm4_v2",
+        "experiment.preset=default",
+        "experiment.budget=b4096",
+        "experiment.seed=ds01",
+        "model.seed=101",
+        "model.model_flag=SM4",
+        "dirs.dataset_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/data",
+        "qbc_run_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/qbc",
+        "hydra.run.dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/hydra/stage1_20260325_090057",
+        "hydra.job.chdir=false",
+        "qbc_enable_logging=false",
+        "model.ic_num_samples=4096",
+        "qbc_enable_logging=true",
+        "active.log_every=5",
+        "qbc_n_test=0"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/logs/stage1_create_dataset.log",
+      "started_at_utc": "2026-03-25T08:00:57.176697+00:00",
+      "completed_at_utc": "2026-03-25T08:01:14.453317+00:00",
+      "return_code": 0
+    },
+    "stage2_preprocess": {
+      "status": "completed",
+      "command": [
+        "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/.venv/bin/python",
+        "01_preprocess_dataset.py",
+        "model.model_flag=SM4",
+        "dataset.root=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/data/SM4/dataset_v1",
+        "dirs.dataset_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/data",
+        "hydra.run.dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/hydra/stage2_20260325_090114",
+        "hydra.job.chdir=false",
+        "dataset.validation_flag=true",
+        "dataset.split_ratio=0.9",
+        "dataset.new_coll_points_flag=false",
+        "dataset.test_split_mode=shared_dataset",
+        "dataset.shared_test_dataset_root=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/campaigns/benchmark_sm4_20260325_085600/shared_test_source/data/SM4/dataset_v1",
+        "dataset.shared_test_max_trajectories=8192"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/logs/stage2_preprocess.log",
+      "started_at_utc": "2026-03-25T08:01:14.460380+00:00",
+      "completed_at_utc": "2026-03-25T08:01:30.382383+00:00",
+      "return_code": 0
+    },
+    "stage3_baseline": {
+      "status": "completed",
+      "command": [
+        "baseline_subruns",
+        "dataset_seed=ds01",
+        "baseline_seeds=bs01,bs02,bs03"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/logs/stage3_baseline.log",
+      "started_at_utc": "2026-03-25T08:01:30.386697+00:00",
+      "baseline_seed_labels": [
+        "bs01",
+        "bs02",
+        "bs03"
+      ],
+      "completed_at_utc": "2026-03-25T08:02:17.492241+00:00",
+      "return_code": 0
+    }
+  },
+  "artifacts": {
+    "dataset_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/data/SM4/dataset_v1",
+    "stage1_data_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/data",
+    "preprocessed_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/data/SM4/dataset_v1",
+    "baseline_summary": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/baseline/summary.json",
+    "dataset_root_note": "This path records the dataset location used during the run. Campaign cleanup may prune the on-disk dataset afterwards to control disk usage for large benchmark sweeps.",
+    "preprocessed_root_note": "This path records the dataset location used during the run. Campaign cleanup may prune the on-disk dataset afterwards to control disk usage for large benchmark sweeps."
+  },
+  "baseline_runs": {
+    "bs01": {
+      "baseline_seed_label": "bs01",
+      "baseline_seed_value": 1101,
+      "baseline_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/baseline/bs01",
+      "status": "completed",
+      "command": [
+        "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/.venv/bin/python",
+        "10_run_baseline.py",
+        "model.model_flag=SM4",
+        "model.seed=1101",
+        "dataset.root=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/data/SM4/dataset_v1",
+        "baseline.save_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/baseline/bs01",
+        "baseline.save_name=baseline.pt",
+        "hydra.run.dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/hydra/stage3_bs01_20260325_090130",
+        "hydra.job.chdir=false",
+        "baseline.epochs=80",
+        "baseline.batch_size=128"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/logs/stage3_baseline_bs01.log",
+      "started_at_utc": "2026-03-25T08:01:30.388991+00:00",
+      "completed_at_utc": "2026-03-25T08:01:46.059528+00:00",
+      "return_code": 0,
+      "metrics_path": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/baseline/bs01/metrics.json",
+      "metrics_payload": {
+        "model_flag": "SM4",
+        "dataset_number": null,
+        "dataset_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/data/SM4/dataset_v1",
+        "n_train": 3686,
+        "n_test": 8192,
+        "mse": 0.00026650403742678463,
+        "rmse": 0.016324951375939367
+      }
+    },
+    "bs02": {
+      "baseline_seed_label": "bs02",
+      "baseline_seed_value": 2202,
+      "baseline_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/baseline/bs02",
+      "status": "completed",
+      "command": [
+        "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/.venv/bin/python",
+        "10_run_baseline.py",
+        "model.model_flag=SM4",
+        "model.seed=2202",
+        "dataset.root=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/data/SM4/dataset_v1",
+        "baseline.save_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/baseline/bs02",
+        "baseline.save_name=baseline.pt",
+        "hydra.run.dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/hydra/stage3_bs02_20260325_090146",
+        "hydra.job.chdir=false",
+        "baseline.epochs=80",
+        "baseline.batch_size=128"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/logs/stage3_baseline_bs02.log",
+      "started_at_utc": "2026-03-25T08:01:46.061912+00:00",
+      "completed_at_utc": "2026-03-25T08:02:01.627064+00:00",
+      "return_code": 0,
+      "metrics_path": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/baseline/bs02/metrics.json",
+      "metrics_payload": {
+        "model_flag": "SM4",
+        "dataset_number": null,
+        "dataset_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/data/SM4/dataset_v1",
+        "n_train": 3686,
+        "n_test": 8192,
+        "mse": 0.00035402827779762447,
+        "rmse": 0.01881563918121371
+      }
+    },
+    "bs03": {
+      "baseline_seed_label": "bs03",
+      "baseline_seed_value": 3303,
+      "baseline_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/baseline/bs03",
+      "status": "completed",
+      "command": [
+        "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/.venv/bin/python",
+        "10_run_baseline.py",
+        "model.model_flag=SM4",
+        "model.seed=3303",
+        "dataset.root=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/data/SM4/dataset_v1",
+        "baseline.save_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/baseline/bs03",
+        "baseline.save_name=baseline.pt",
+        "hydra.run.dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/hydra/stage3_bs03_20260325_090201",
+        "hydra.job.chdir=false",
+        "baseline.epochs=80",
+        "baseline.batch_size=128"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/logs/stage3_baseline_bs03.log",
+      "started_at_utc": "2026-03-25T08:02:01.629533+00:00",
+      "completed_at_utc": "2026-03-25T08:02:17.483971+00:00",
+      "return_code": 0,
+      "metrics_path": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/baseline/bs03/metrics.json",
+      "metrics_payload": {
+        "model_flag": "SM4",
+        "dataset_number": null,
+        "dataset_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds01/data/SM4/dataset_v1",
+        "n_train": 3686,
+        "n_test": 8192,
+        "mse": 0.0002697926538530737,
+        "rmse": 0.01642536617105
+      }
+    }
+  },
+  "baseline_summary": {
+    "n_runs": 3,
+    "baseline_seed_labels": [
+      "bs01",
+      "bs02",
+      "bs03"
+    ],
+    "mse_mean": 0.0002967749896924943,
+    "mse_std": 4.961005945004094e-05,
+    "mse_min": 0.00026650403742678463,
+    "mse_max": 0.00035402827779762447,
+    "rmse_mean": 0.01718865224273436,
+    "rmse_std": 0.0014099062579675588,
+    "rmse_min": 0.016324951375939367,
+    "rmse_max": 0.01881563918121371,
+    "n_train": 3686,
+    "n_test": 8192
+  }
+}

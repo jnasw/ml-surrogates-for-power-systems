@@ -1,0 +1,9 @@
+{
+  "model_flag": "SM6",
+  "dataset_number": null,
+  "dataset_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm6_benchmark_sm6_v1/default/qbc_deep_ensemble/b1024/ds04/data/SM6/dataset_v1",
+  "n_train": 921,
+  "n_test": 8192,
+  "mse": 0.0007093099411576986,
+  "rmse": 0.026632873317719564
+}

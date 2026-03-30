@@ -1,0 +1,220 @@
+{
+  "dataset_id": "lhs_static_b1024_ds01",
+  "created_at_utc": "2026-03-25T07:57:51.772487+00:00",
+  "updated_at_utc": "2026-03-25T07:59:10.724173+00:00",
+  "run_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01",
+  "experiment": {
+    "id": "thesis_sm_avr_gov_benchmark_v1",
+    "preset": "default",
+    "method": "lhs_static",
+    "budget": "b1024",
+    "dataset_seed_label": "ds01",
+    "dataset_seed_value": 101,
+    "model_flag": "SM_AVR_GOV"
+  },
+  "git": {
+    "commit": "00a021e01f7cb50cfcb1e3104f9397cb14eda9ee"
+  },
+  "stages_enabled": {
+    "stage1_create_dataset": true,
+    "stage2_preprocess": true,
+    "stage3_baseline": true
+  },
+  "stages": {
+    "stage1_create_dataset": {
+      "status": "completed",
+      "command": [
+        "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/.venv/bin/python",
+        "00_create_dataset.py",
+        "+base=base",
+        "preset=default",
+        "+method=lhs_static",
+        "experiment.id=thesis_sm_avr_gov_benchmark_v1",
+        "experiment.preset=default",
+        "experiment.budget=b1024",
+        "experiment.seed=ds01",
+        "model.seed=101",
+        "model.model_flag=SM_AVR_GOV",
+        "dirs.dataset_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/data",
+        "qbc_run_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/qbc",
+        "hydra.run.dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/hydra/stage1_20260325_085751",
+        "hydra.job.chdir=false",
+        "qbc_enable_logging=false",
+        "model.ic_num_samples=1024",
+        "qbc_enable_logging=true",
+        "active.log_every=5",
+        "qbc_n_test=0"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/logs/stage1_create_dataset.log",
+      "started_at_utc": "2026-03-25T07:57:51.775995+00:00",
+      "completed_at_utc": "2026-03-25T07:57:58.823025+00:00",
+      "return_code": 0
+    },
+    "stage2_preprocess": {
+      "status": "completed",
+      "command": [
+        "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/.venv/bin/python",
+        "01_preprocess_dataset.py",
+        "model.model_flag=SM_AVR_GOV",
+        "dataset.root=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/data/SM_AVR_GOV/dataset_v1",
+        "dirs.dataset_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/data",
+        "hydra.run.dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/hydra/stage2_20260325_085758",
+        "hydra.job.chdir=false",
+        "dataset.validation_flag=true",
+        "dataset.split_ratio=0.9",
+        "dataset.new_coll_points_flag=false",
+        "dataset.test_split_mode=shared_dataset",
+        "dataset.shared_test_dataset_root=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/campaigns/benchmark_sm_avr_gov_20260325_085630/shared_test_source/data/SM_AVR_GOV/dataset_v1",
+        "dataset.shared_test_max_trajectories=8192"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/logs/stage2_preprocess.log",
+      "started_at_utc": "2026-03-25T07:57:58.828510+00:00",
+      "completed_at_utc": "2026-03-25T07:58:26.550373+00:00",
+      "return_code": 0
+    },
+    "stage3_baseline": {
+      "status": "completed",
+      "command": [
+        "baseline_subruns",
+        "dataset_seed=ds01",
+        "baseline_seeds=bs01,bs02,bs03"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/logs/stage3_baseline.log",
+      "started_at_utc": "2026-03-25T07:58:26.554962+00:00",
+      "baseline_seed_labels": [
+        "bs01",
+        "bs02",
+        "bs03"
+      ],
+      "completed_at_utc": "2026-03-25T07:59:10.724160+00:00",
+      "return_code": 0
+    }
+  },
+  "artifacts": {
+    "dataset_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/data/SM_AVR_GOV/dataset_v1",
+    "stage1_data_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/data",
+    "preprocessed_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/data/SM_AVR_GOV/dataset_v1",
+    "baseline_summary": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/baseline/summary.json",
+    "dataset_root_note": "This path records the dataset location used during the run. Campaign cleanup may prune the on-disk dataset afterwards to control disk usage for large benchmark sweeps.",
+    "preprocessed_root_note": "This path records the dataset location used during the run. Campaign cleanup may prune the on-disk dataset afterwards to control disk usage for large benchmark sweeps."
+  },
+  "baseline_runs": {
+    "bs01": {
+      "baseline_seed_label": "bs01",
+      "baseline_seed_value": 1101,
+      "baseline_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/baseline/bs01",
+      "status": "completed",
+      "command": [
+        "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/.venv/bin/python",
+        "10_run_baseline.py",
+        "model.model_flag=SM_AVR_GOV",
+        "model.seed=1101",
+        "dataset.root=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/data/SM_AVR_GOV/dataset_v1",
+        "baseline.save_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/baseline/bs01",
+        "baseline.save_name=baseline.pt",
+        "hydra.run.dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/hydra/stage3_bs01_20260325_085826",
+        "hydra.job.chdir=false",
+        "baseline.epochs=80",
+        "baseline.batch_size=128"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/logs/stage3_baseline_bs01.log",
+      "started_at_utc": "2026-03-25T07:58:26.557110+00:00",
+      "completed_at_utc": "2026-03-25T07:58:46.370904+00:00",
+      "return_code": 0,
+      "metrics_path": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/baseline/bs01/metrics.json",
+      "metrics_payload": {
+        "model_flag": "SM_AVR_GOV",
+        "dataset_number": null,
+        "dataset_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/data/SM_AVR_GOV/dataset_v1",
+        "n_train": 921,
+        "n_test": 8192,
+        "mse": 0.006497322116047144,
+        "rmse": 0.0806059682408638
+      }
+    },
+    "bs02": {
+      "baseline_seed_label": "bs02",
+      "baseline_seed_value": 2202,
+      "baseline_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/baseline/bs02",
+      "status": "completed",
+      "command": [
+        "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/.venv/bin/python",
+        "10_run_baseline.py",
+        "model.model_flag=SM_AVR_GOV",
+        "model.seed=2202",
+        "dataset.root=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/data/SM_AVR_GOV/dataset_v1",
+        "baseline.save_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/baseline/bs02",
+        "baseline.save_name=baseline.pt",
+        "hydra.run.dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/hydra/stage3_bs02_20260325_085846",
+        "hydra.job.chdir=false",
+        "baseline.epochs=80",
+        "baseline.batch_size=128"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/logs/stage3_baseline_bs02.log",
+      "started_at_utc": "2026-03-25T07:58:46.373067+00:00",
+      "completed_at_utc": "2026-03-25T07:58:58.640730+00:00",
+      "return_code": 0,
+      "metrics_path": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/baseline/bs02/metrics.json",
+      "metrics_payload": {
+        "model_flag": "SM_AVR_GOV",
+        "dataset_number": null,
+        "dataset_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/data/SM_AVR_GOV/dataset_v1",
+        "n_train": 921,
+        "n_test": 8192,
+        "mse": 0.004522595554590225,
+        "rmse": 0.06725024575858608
+      }
+    },
+    "bs03": {
+      "baseline_seed_label": "bs03",
+      "baseline_seed_value": 3303,
+      "baseline_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/baseline/bs03",
+      "status": "completed",
+      "command": [
+        "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/.venv/bin/python",
+        "10_run_baseline.py",
+        "model.model_flag=SM_AVR_GOV",
+        "model.seed=3303",
+        "dataset.root=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/data/SM_AVR_GOV/dataset_v1",
+        "baseline.save_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/baseline/bs03",
+        "baseline.save_name=baseline.pt",
+        "hydra.run.dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/hydra/stage3_bs03_20260325_085858",
+        "hydra.job.chdir=false",
+        "baseline.epochs=80",
+        "baseline.batch_size=128"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/logs/stage3_baseline_bs03.log",
+      "started_at_utc": "2026-03-25T07:58:58.643849+00:00",
+      "completed_at_utc": "2026-03-25T07:59:10.715881+00:00",
+      "return_code": 0,
+      "metrics_path": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/baseline/bs03/metrics.json",
+      "metrics_payload": {
+        "model_flag": "SM_AVR_GOV",
+        "dataset_number": null,
+        "dataset_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds01/data/SM_AVR_GOV/dataset_v1",
+        "n_train": 921,
+        "n_test": 8192,
+        "mse": 0.023145100101828575,
+        "rmse": 0.15213513763042572
+      }
+    }
+  },
+  "baseline_summary": {
+    "n_runs": 3,
+    "baseline_seed_labels": [
+      "bs01",
+      "bs02",
+      "bs03"
+    ],
+    "mse_mean": 0.011388339257488648,
+    "mse_std": 0.010229416181355817,
+    "mse_min": 0.004522595554590225,
+    "mse_max": 0.023145100101828575,
+    "rmse_mean": 0.09999711720995853,
+    "rmse_std": 0.045643988769384455,
+    "rmse_min": 0.06725024575858608,
+    "rmse_max": 0.15213513763042572,
+    "n_train": 921,
+    "n_test": 8192
+  }
+}

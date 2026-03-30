@@ -1,0 +1,74 @@
+wandb:
+  project: sm-surrogates-dataset
+  use: false
+time: 1.0
+num_of_points: 1000
+save_freq: 1000
+PINN_flag: false
+model:
+  model_flag: SM6
+  machine_num: 1
+  init_condition_bounds: 1
+  sampling: Lhs
+  ic_generation_method: adaptive_iterative
+  ic_num_samples: 4096
+  torch: false
+  seed: 303
+surrogate:
+  hidden_dim: 128
+  hidden_layers: 3
+  batch_size: 64
+  epochs: 200
+  lr: 0.001
+  device: auto
+  use_cuda: true
+  deterministic: false
+  deterministic_strict: false
+  train_data_shuffle: true
+  require_explicit_device: false
+  warn_on_auto_device: true
+qbc_n_test: 0
+dirs:
+  params_dir: /zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/src/config/params
+  init_conditions_dir: /zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/src/config/ic
+  dataset_dir: /zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm6_benchmark_sm6_v1/default/qbc_deep_ensemble/b1024/ds03/data
+active:
+  log_every: 5
+  candidate_method: lhs
+  diversify: true
+  acquisition_strategy: qbc_only
+  predict_batch_size: 2048
+  disagreement:
+    metric: member_l2_mean
+  diversity:
+    preselect_factor: 3
+    uncertainty_weight: 0.4
+    distance_weight: 0.6
+    normalize_uncertainty: true
+    normalize_distance: true
+  hybrid:
+    pca_explained_variance: 0.9
+    k_density: 15
+    preselect_factor: 5
+    greedy_score_weight: 0.7
+    settling_fraction: 0.05
+    include_anchor_state_markers: true
+    weights:
+      uncertainty: 0.4
+      diversity: 0.4
+      sparsity: 0.2
+qbc_n0: 64
+qbc_M: 5
+qbc_P: 2048
+qbc_K: 64
+qbc_T: 15
+qbc_enable_logging: true
+qbc_run_dir: /zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm6_benchmark_sm6_v1/default/qbc_deep_ensemble/b1024/ds03/qbc
+qbc_resume_from_round: -1
+qbc_resume_stage: next_round
+experiment:
+  preset: default
+  id: thesis_sm6_benchmark_sm6_v1
+  method: qbc_deep_ensemble
+  budget: b1024
+  seed: ds03

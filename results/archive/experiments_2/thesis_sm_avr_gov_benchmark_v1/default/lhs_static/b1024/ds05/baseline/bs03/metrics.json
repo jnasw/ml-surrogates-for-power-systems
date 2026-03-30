@@ -1,0 +1,9 @@
+{
+  "model_flag": "SM_AVR_GOV",
+  "dataset_number": null,
+  "dataset_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm_avr_gov_benchmark_v1/default/lhs_static/b1024/ds05/data/SM_AVR_GOV/dataset_v1",
+  "n_train": 921,
+  "n_test": 8192,
+  "mse": 0.017680475488305092,
+  "rmse": 0.13296794910167295
+}

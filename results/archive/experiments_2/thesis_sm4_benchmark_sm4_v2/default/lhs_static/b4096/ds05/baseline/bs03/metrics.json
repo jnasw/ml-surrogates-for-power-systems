@@ -1,0 +1,9 @@
+{
+  "model_flag": "SM4",
+  "dataset_number": null,
+  "dataset_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/experiments/thesis_sm4_benchmark_sm4_v2/default/lhs_static/b4096/ds05/data/SM4/dataset_v1",
+  "n_train": 3686,
+  "n_test": 8192,
+  "mse": 0.0002146346669178456,
+  "rmse": 0.0146504152472838
+}
