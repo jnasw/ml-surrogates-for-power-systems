@@ -1,0 +1,54 @@
+{
+  "dataset_seeds": [
+    "s01",
+    "s02"
+  ],
+  "group_by": [
+    "qbc_M",
+    "active.disagreement.metric",
+    "active.hybrid.pca_explained_variance",
+    "active.hybrid.k_density",
+    "active.hybrid.preselect_factor",
+    "active.hybrid.greedy_score_weight",
+    "active.hybrid.weights.uncertainty",
+    "active.hybrid.weights.diversity",
+    "active.hybrid.weights.sparsity",
+    "qbc_P"
+  ],
+  "hyperparameters": {
+    "active.disagreement.metric": "member_l2_mean",
+    "active.hybrid.greedy_score_weight": "0.7",
+    "active.hybrid.k_density": "10",
+    "active.hybrid.pca_explained_variance": "0.95",
+    "active.hybrid.preselect_factor": "5",
+    "active.hybrid.weights.diversity": "0.25",
+    "active.hybrid.weights.sparsity": "0.15",
+    "active.hybrid.weights.uncertainty": "0.6",
+    "qbc_M": "5",
+    "qbc_P": "8192"
+  },
+  "member_cfg_ids": [
+    "cfg_00020_31fca29af1",
+    "cfg_00044_adf2153cda"
+  ],
+  "method": "qbc_marker_hybrid",
+  "model_flag": "SM_AVR_GOV",
+  "n_dataset_seeds": 2,
+  "objective_direction": "minimize",
+  "objective_mean": 0.005471495670935899,
+  "objective_metric": "final_eval_rmse",
+  "objective_std": 0.0002982137663754777,
+  "preset": "default",
+  "shortlist_size": 2,
+  "source_stage_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_marker_hybrid_sm_avr_gov_v1_20260323_070441/refine",
+  "stage": "refine",
+  "stage_role": "refinement_and_schedule_search",
+  "tie_breakers": [
+    "std_over_dataset_seeds",
+    "mean_final_round_seconds"
+  ],
+  "winner_cfg_id": "grp_63488d6ebe",
+  "winner_rank": 1,
+  "workflow_id": "qbc_marker_hybrid_sm_avr_gov_v1",
+  "workflow_version": "1"
+}

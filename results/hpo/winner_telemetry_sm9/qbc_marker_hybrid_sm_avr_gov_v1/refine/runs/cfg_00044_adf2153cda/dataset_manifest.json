@@ -1,0 +1,82 @@
+{
+  "dataset_id": "qbc_marker_hybrid_b4096_s02",
+  "created_at_utc": "2026-03-24T19:55:05.215006+00:00",
+  "updated_at_utc": "2026-03-24T20:48:53.564414+00:00",
+  "run_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_marker_hybrid_sm_avr_gov_v1_20260323_070441/refine/runs/cfg_00044_adf2153cda",
+  "experiment": {
+    "id": "thesis_hybrid_sm_avr_gov_hpo_refine",
+    "preset": "default",
+    "method": "qbc_marker_hybrid",
+    "budget": "b4096",
+    "dataset_seed_label": "s02",
+    "dataset_seed_value": 202,
+    "model_flag": "SM_AVR_GOV"
+  },
+  "git": {
+    "commit": "00a021e01f7cb50cfcb1e3104f9397cb14eda9ee"
+  },
+  "stages_enabled": {
+    "stage1_create_dataset": true,
+    "stage2_preprocess": false,
+    "stage3_baseline": false
+  },
+  "stages": {
+    "stage1_create_dataset": {
+      "status": "completed",
+      "command": [
+        "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/.venv/bin/python",
+        "00_create_dataset.py",
+        "+base=base",
+        "preset=default",
+        "+method=qbc_marker_hybrid",
+        "experiment.id=thesis_hybrid_sm_avr_gov_hpo_refine",
+        "experiment.preset=default",
+        "experiment.budget=b4096",
+        "experiment.seed=s02",
+        "model.seed=202",
+        "model.model_flag=SM_AVR_GOV",
+        "dirs.dataset_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_marker_hybrid_sm_avr_gov_v1_20260323_070441/refine/runs/cfg_00044_adf2153cda/data",
+        "qbc_run_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_marker_hybrid_sm_avr_gov_v1_20260323_070441/refine/runs/cfg_00044_adf2153cda/qbc",
+        "hydra.run.dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_marker_hybrid_sm_avr_gov_v1_20260323_070441/refine/runs/cfg_00044_adf2153cda/hydra/stage1_20260324_205505",
+        "hydra.job.chdir=false",
+        "qbc_enable_logging=true",
+        "qbc_n0=128",
+        "qbc_K=128",
+        "qbc_T=31",
+        "qbc_P=4096",
+        "active.acquisition_strategy=qbc_marker_hybrid",
+        "active.candidate_method=lhs",
+        "active.disagreement.metric=member_l2_mean",
+        "active.hybrid.greedy_score_weight=0.7",
+        "active.hybrid.include_anchor_state_markers=true",
+        "active.hybrid.k_density=10",
+        "active.hybrid.pca_explained_variance=0.95",
+        "active.hybrid.preselect_factor=5",
+        "active.hybrid.settling_fraction=0.05",
+        "active.hybrid.weights.diversity=0.25",
+        "active.hybrid.weights.sparsity=0.15",
+        "active.hybrid.weights.uncertainty=0.6",
+        "active.log_every=5",
+        "qbc_K=128",
+        "qbc_M=5",
+        "qbc_P=8192",
+        "qbc_T=31",
+        "qbc_enable_logging=true",
+        "qbc_n0=128",
+        "qbc_n_test=256"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_marker_hybrid_sm_avr_gov_v1_20260323_070441/refine/runs/cfg_00044_adf2153cda/logs/stage1_create_dataset.log",
+      "started_at_utc": "2026-03-24T19:55:05.218225+00:00",
+      "completed_at_utc": "2026-03-24T20:48:53.398763+00:00",
+      "return_code": 0
+    }
+  },
+  "artifacts": {
+    "dataset_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_marker_hybrid_sm_avr_gov_v1_20260323_070441/refine/runs/cfg_00044_adf2153cda/data/SM_AVR_GOV/dataset_v1",
+    "stage1_data_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_marker_hybrid_sm_avr_gov_v1_20260323_070441/refine/runs/cfg_00044_adf2153cda/data",
+    "qbc_history": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_marker_hybrid_sm_avr_gov_v1_20260323_070441/refine/runs/cfg_00044_adf2153cda/qbc/history.jsonl",
+    "round_telemetry_csv": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_marker_hybrid_sm_avr_gov_v1_20260323_070441/refine/runs/cfg_00044_adf2153cda/telemetry/round_telemetry.csv"
+  },
+  "baseline_runs": {},
+  "baseline_summary": {}
+}

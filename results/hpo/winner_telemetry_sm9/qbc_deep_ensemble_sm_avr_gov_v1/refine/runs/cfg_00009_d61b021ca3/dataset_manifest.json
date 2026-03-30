@@ -1,0 +1,75 @@
+{
+  "dataset_id": "qbc_deep_ensemble_b4096_s01",
+  "created_at_utc": "2026-03-22T14:32:01.024506+00:00",
+  "updated_at_utc": "2026-03-22T15:28:36.804390+00:00",
+  "run_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_deep_ensemble_sm_avr_gov_v1_20260322_064049/refine/runs/cfg_00009_d61b021ca3",
+  "experiment": {
+    "id": "thesis_qbc_sm_avr_gov_hpo_refine",
+    "preset": "default",
+    "method": "qbc_deep_ensemble",
+    "budget": "b4096",
+    "dataset_seed_label": "s01",
+    "dataset_seed_value": 101,
+    "model_flag": "SM_AVR_GOV"
+  },
+  "git": {
+    "commit": "00a021e01f7cb50cfcb1e3104f9397cb14eda9ee"
+  },
+  "stages_enabled": {
+    "stage1_create_dataset": true,
+    "stage2_preprocess": false,
+    "stage3_baseline": false
+  },
+  "stages": {
+    "stage1_create_dataset": {
+      "status": "completed",
+      "command": [
+        "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/.venv/bin/python",
+        "00_create_dataset.py",
+        "+base=base",
+        "preset=default",
+        "+method=qbc_deep_ensemble",
+        "experiment.id=thesis_qbc_sm_avr_gov_hpo_refine",
+        "experiment.preset=default",
+        "experiment.budget=b4096",
+        "experiment.seed=s01",
+        "model.seed=101",
+        "model.model_flag=SM_AVR_GOV",
+        "dirs.dataset_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_deep_ensemble_sm_avr_gov_v1_20260322_064049/refine/runs/cfg_00009_d61b021ca3/data",
+        "qbc_run_dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_deep_ensemble_sm_avr_gov_v1_20260322_064049/refine/runs/cfg_00009_d61b021ca3/qbc",
+        "hydra.run.dir=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_deep_ensemble_sm_avr_gov_v1_20260322_064049/refine/runs/cfg_00009_d61b021ca3/hydra/stage1_20260322_153201",
+        "hydra.job.chdir=false",
+        "qbc_enable_logging=true",
+        "qbc_n0=128",
+        "qbc_K=128",
+        "qbc_T=31",
+        "qbc_P=4096",
+        "active.candidate_method=lhs",
+        "active.disagreement.metric=member_l2_mean",
+        "active.diversity.distance_weight=0.4",
+        "active.diversity.preselect_factor=5",
+        "active.diversity.uncertainty_weight=0.6",
+        "active.log_every=5",
+        "qbc_K=128",
+        "qbc_M=5",
+        "qbc_P=2048",
+        "qbc_T=31",
+        "qbc_enable_logging=true",
+        "qbc_n0=128",
+        "qbc_n_test=256"
+      ],
+      "log_file": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_deep_ensemble_sm_avr_gov_v1_20260322_064049/refine/runs/cfg_00009_d61b021ca3/logs/stage1_create_dataset.log",
+      "started_at_utc": "2026-03-22T14:32:01.027616+00:00",
+      "completed_at_utc": "2026-03-22T15:28:36.725047+00:00",
+      "return_code": 0
+    }
+  },
+  "artifacts": {
+    "dataset_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_deep_ensemble_sm_avr_gov_v1_20260322_064049/refine/runs/cfg_00009_d61b021ca3/data/SM_AVR_GOV/dataset_v1",
+    "stage1_data_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_deep_ensemble_sm_avr_gov_v1_20260322_064049/refine/runs/cfg_00009_d61b021ca3/data",
+    "qbc_history": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_deep_ensemble_sm_avr_gov_v1_20260322_064049/refine/runs/cfg_00009_d61b021ca3/qbc/history.jsonl",
+    "round_telemetry_csv": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_deep_ensemble_sm_avr_gov_v1_20260322_064049/refine/runs/cfg_00009_d61b021ca3/telemetry/round_telemetry.csv"
+  },
+  "baseline_runs": {},
+  "baseline_summary": {}
+}

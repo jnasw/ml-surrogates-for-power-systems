@@ -1,0 +1,46 @@
+{
+  "dataset_seeds": [
+    "s01",
+    "s02"
+  ],
+  "group_by": [
+    "qbc_M",
+    "qbc_P",
+    "active.disagreement.metric",
+    "active.diversity.preselect_factor",
+    "active.diversity.uncertainty_weight",
+    "active.diversity.distance_weight"
+  ],
+  "hyperparameters": {
+    "active.disagreement.metric": "member_l2_mean",
+    "active.diversity.distance_weight": "0.4",
+    "active.diversity.preselect_factor": "5",
+    "active.diversity.uncertainty_weight": "0.6",
+    "qbc_M": "5",
+    "qbc_P": "2048"
+  },
+  "member_cfg_ids": [
+    "cfg_00009_d61b021ca3",
+    "cfg_00021_e5d4b19d6f"
+  ],
+  "method": "qbc_deep_ensemble",
+  "model_flag": "SM_AVR_GOV",
+  "n_dataset_seeds": 2,
+  "objective_direction": "minimize",
+  "objective_mean": 0.005262847027420166,
+  "objective_metric": "final_eval_rmse",
+  "objective_std": 0.0002736098111965975,
+  "preset": "default",
+  "shortlist_size": 2,
+  "source_stage_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_deep_ensemble_sm_avr_gov_v1_20260322_064049/refine",
+  "stage": "refine",
+  "stage_role": "refinement_and_schedule_search",
+  "tie_breakers": [
+    "std_over_dataset_seeds",
+    "mean_final_round_seconds"
+  ],
+  "winner_cfg_id": "grp_7d63e86e39",
+  "winner_rank": 1,
+  "workflow_id": "qbc_deep_ensemble_sm_avr_gov_v1",
+  "workflow_version": "1"
+}

@@ -1,0 +1,77 @@
+{
+  "group_by": [
+    "qbc_M",
+    "active.disagreement.metric",
+    "active.hybrid.pca_explained_variance",
+    "active.hybrid.k_density",
+    "active.hybrid.preselect_factor",
+    "active.hybrid.greedy_score_weight",
+    "active.hybrid.weights.uncertainty",
+    "active.hybrid.weights.diversity",
+    "active.hybrid.weights.sparsity",
+    "qbc_P"
+  ],
+  "items": [
+    {
+      "cfg_id": "grp_63488d6ebe",
+      "dataset_seeds": [
+        "s01",
+        "s02"
+      ],
+      "hyperparameters": {
+        "active.disagreement.metric": "member_l2_mean",
+        "active.hybrid.greedy_score_weight": "0.7",
+        "active.hybrid.k_density": "10",
+        "active.hybrid.pca_explained_variance": "0.95",
+        "active.hybrid.preselect_factor": "5",
+        "active.hybrid.weights.diversity": "0.25",
+        "active.hybrid.weights.sparsity": "0.15",
+        "active.hybrid.weights.uncertainty": "0.6",
+        "qbc_M": "5",
+        "qbc_P": "8192"
+      },
+      "member_cfg_ids": [
+        "cfg_00020_31fca29af1",
+        "cfg_00044_adf2153cda"
+      ],
+      "objective_mean": 0.005471495670935899,
+      "objective_std": 0.0002982137663754777,
+      "rank": 1
+    },
+    {
+      "cfg_id": "grp_727c07187c",
+      "dataset_seeds": [
+        "s01",
+        "s02"
+      ],
+      "hyperparameters": {
+        "active.disagreement.metric": "member_l2_mean",
+        "active.hybrid.greedy_score_weight": "0.9",
+        "active.hybrid.k_density": "10",
+        "active.hybrid.pca_explained_variance": "0.9",
+        "active.hybrid.preselect_factor": "3",
+        "active.hybrid.weights.diversity": "0.25",
+        "active.hybrid.weights.sparsity": "0.15",
+        "active.hybrid.weights.uncertainty": "0.6",
+        "qbc_M": "5",
+        "qbc_P": "2048"
+      },
+      "member_cfg_ids": [
+        "cfg_00003_bafb8d87ab",
+        "cfg_00027_7f1b40edb8"
+      ],
+      "objective_mean": 0.005837940021898528,
+      "objective_std": 0.00041830596174301715,
+      "rank": 2
+    }
+  ],
+  "method": "qbc_marker_hybrid",
+  "model_flag": "SM_AVR_GOV",
+  "preset": "default",
+  "shortlist_size": 2,
+  "source_stage_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_marker_hybrid_sm_avr_gov_v1_20260323_070441/refine",
+  "stage": "refine",
+  "stage_role": "refinement_and_schedule_search",
+  "workflow_id": "qbc_marker_hybrid_sm_avr_gov_v1",
+  "workflow_version": "1"
+}

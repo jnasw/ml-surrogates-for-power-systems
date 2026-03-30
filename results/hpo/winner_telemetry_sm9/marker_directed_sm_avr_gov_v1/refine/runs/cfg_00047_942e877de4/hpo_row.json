@@ -1,0 +1,17 @@
+{
+  "row_idx": "47",
+  "cfg_id": "cfg_00047_942e877de4",
+  "method": "marker_directed",
+  "preset": "default",
+  "budget": "b4096",
+  "seed": "s01",
+  "experiment_id": "thesis_marker_sm_avr_gov_hpo_refine",
+  "model_flag": "SM_AVR_GOV",
+  "skip_preprocess": "true",
+  "skip_baseline": "true",
+  "baseline_epochs": "",
+  "run_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/marker_directed_sm_avr_gov_v1_20260320_145448/refine/runs/cfg_00047_942e877de4",
+  "stage1_overrides": "active.candidate_method=lhs;;active.log_every=5;;active.marker.greedy_score_weight=0.9;;active.marker.include_anchor_state_markers=true;;active.marker.k_density=20;;active.marker.pca_explained_variance=0.95;;active.marker.preselect_factor=3;;active.marker.settling_fraction=0.05;;active.marker.weights.diversity=0.6;;active.marker.weights.sparsity=0.4;;qbc_K=128;;qbc_P=8192;;qbc_T=31;;qbc_enable_logging=true;;qbc_n0=128;;qbc_n_test=256",
+  "stage2_overrides": "",
+  "stage3_overrides": ""
+}

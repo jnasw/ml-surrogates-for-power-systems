@@ -1,0 +1,17 @@
+{
+  "row_idx": "21",
+  "cfg_id": "cfg_00021_e5d4b19d6f",
+  "method": "qbc_deep_ensemble",
+  "preset": "default",
+  "budget": "b4096",
+  "seed": "s02",
+  "experiment_id": "thesis_qbc_sm_avr_gov_hpo_refine",
+  "model_flag": "SM_AVR_GOV",
+  "skip_preprocess": "true",
+  "skip_baseline": "true",
+  "baseline_epochs": "",
+  "run_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/qbc_deep_ensemble_sm_avr_gov_v1_20260322_064049/refine/runs/cfg_00021_e5d4b19d6f",
+  "stage1_overrides": "active.candidate_method=lhs;;active.disagreement.metric=member_l2_mean;;active.diversity.distance_weight=0.4;;active.diversity.preselect_factor=5;;active.diversity.uncertainty_weight=0.6;;active.log_every=5;;qbc_K=128;;qbc_M=5;;qbc_P=2048;;qbc_T=31;;qbc_enable_logging=true;;qbc_n0=128;;qbc_n_test=256",
+  "stage2_overrides": "",
+  "stage3_overrides": ""
+}

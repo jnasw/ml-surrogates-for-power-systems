@@ -1,0 +1,68 @@
+{
+  "group_by": [
+    "active.marker.pca_explained_variance",
+    "active.marker.k_density",
+    "active.marker.preselect_factor",
+    "active.marker.greedy_score_weight",
+    "active.marker.weights.diversity",
+    "active.marker.weights.sparsity",
+    "qbc_P"
+  ],
+  "items": [
+    {
+      "cfg_id": "grp_1539b411e0",
+      "dataset_seeds": [
+        "s01",
+        "s02"
+      ],
+      "hyperparameters": {
+        "active.marker.greedy_score_weight": "0.9",
+        "active.marker.k_density": "20",
+        "active.marker.pca_explained_variance": "0.95",
+        "active.marker.preselect_factor": "3",
+        "active.marker.weights.diversity": "0.6",
+        "active.marker.weights.sparsity": "0.4",
+        "qbc_P": "8192"
+      },
+      "member_cfg_ids": [
+        "cfg_00047_942e877de4",
+        "cfg_00095_e16fb04c46"
+      ],
+      "objective_mean": 0.0056416031654660725,
+      "objective_std": 0.00011618733483806029,
+      "rank": 1
+    },
+    {
+      "cfg_id": "grp_f18367420b",
+      "dataset_seeds": [
+        "s01",
+        "s02"
+      ],
+      "hyperparameters": {
+        "active.marker.greedy_score_weight": "0.9",
+        "active.marker.k_density": "10",
+        "active.marker.pca_explained_variance": "0.9",
+        "active.marker.preselect_factor": "3",
+        "active.marker.weights.diversity": "0.8",
+        "active.marker.weights.sparsity": "0.2",
+        "qbc_P": "4096"
+      },
+      "member_cfg_ids": [
+        "cfg_00004_d83bf48648",
+        "cfg_00052_5bea1ecf33"
+      ],
+      "objective_mean": 0.006014430129289236,
+      "objective_std": 0.00017643570486977796,
+      "rank": 2
+    }
+  ],
+  "method": "marker_directed",
+  "model_flag": "SM_AVR_GOV",
+  "preset": "default",
+  "shortlist_size": 2,
+  "source_stage_root": "/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/hpo_workflows/marker_directed_sm_avr_gov_v1_20260320_145448/refine",
+  "stage": "refine",
+  "stage_role": "refinement_and_schedule_search",
+  "workflow_id": "marker_directed_sm_avr_gov_v1",
+  "workflow_version": "1"
+}
