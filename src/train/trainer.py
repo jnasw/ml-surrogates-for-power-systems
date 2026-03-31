@@ -18,9 +18,9 @@ from src.pinn.data import PinnDatasetBundle
 from src.pinn.evaluator import evaluate_pinn_loss_breakdown, move_pinn_dataset_to_device
 from src.pinn.logging import EpochMetrics, PinnLogger
 from src.pinn.losses import LossWeights, PinnLossBreakdown
-from src.pinn.optim import build_optimizer
+from src.pinn.optim import OptimizerSpec, build_optimizer
 from src.pinn.residuals import compute_residual_terms, compute_supervised_dt_terms
-from src.pinn.runtime import load_optimizer_stages, resolve_torch_dtype, torch_dtype_name
+from src.pinn.runtime import OptimizerStage, load_optimizer_stages, resolve_torch_dtype, torch_dtype_name
 from src.train.device import select_torch_device
 from src.train.model import BaselineTrajectoryMLP, TimeConditionedMLP, TrajectoryMLP
 from src.train.runtime import cfg_get, configure_reproducibility, configure_reproducibility_from_config
@@ -516,7 +516,7 @@ def _compute_gradient_telemetry(
 def _train_pinn_step(
     *,
     model: nn.Module,
-    optimizer: torch.optim.Optimizer,
+    optimizer_spec: OptimizerSpec,
     criterion: nn.Module,
     ode_model: Any,
     formulation: str,
@@ -530,6 +530,7 @@ def _train_pinn_step(
 ) -> tuple[PinnLossBreakdown, GradientTelemetry | None]:
     breakdown_box: dict[str, PinnLossBreakdown] = {}
     telemetry_box: dict[str, GradientTelemetry | None] = {"telemetry": None}
+    optimizer = optimizer_spec.optimizer
 
     def closure() -> torch.Tensor:
         optimizer.zero_grad(set_to_none=True)
@@ -556,12 +557,22 @@ def _train_pinn_step(
         breakdown_box["losses"] = losses
         return losses.total
 
-    if isinstance(optimizer, torch.optim.LBFGS):
+    if optimizer_spec.requires_closure:
         optimizer.step(closure)
     else:
         closure()
         optimizer.step()
     return breakdown_box["losses"], telemetry_box["telemetry"]
+
+
+def _stage_effective_full_batch(stage: OptimizerStage, optimizer_spec: OptimizerSpec) -> bool:
+    return optimizer_spec.default_full_batch if stage.full_batch is None else bool(stage.full_batch)
+
+
+def _stage_allows_sampling(stage: OptimizerStage, optimizer_spec: OptimizerSpec) -> bool:
+    if stage.allow_sampling is None:
+        return not _stage_effective_full_batch(stage, optimizer_spec)
+    return bool(stage.allow_sampling)
 
 
 def train_pinn(
@@ -624,10 +635,25 @@ def train_pinn(
         )
 
     for stage_idx, stage in enumerate(stages):
-        optimizer = build_optimizer(model=model, optimizer_name=stage.optimizer, lr=stage.lr)
-        if stage.optimizer.lower() == "lbfgs":
+        optimizer_spec = build_optimizer(
+            model=model,
+            optimizer_name=stage.optimizer,
+            lr=stage.lr,
+            optimizer_kwargs=stage.optimizer_kwargs,
+            line_search=stage.line_search,
+        )
+        stage_full_batch = _stage_effective_full_batch(stage, optimizer_spec)
+        if stage_full_batch and stage.batch_size is not None:
+            raise ValueError(f"Stage '{stage.name}' is full-batch and must set batch_size=null.")
+        stage_allows_sampling = _stage_allows_sampling(stage, optimizer_spec)
+        if stage_full_batch and stage_allows_sampling:
+            raise ValueError(f"Stage '{stage.name}' is full-batch and must disable sampling for a stable objective.")
+
+        if stage_full_batch:
             stage_batch_size = None
         else:
+            if not optimizer_spec.supports_minibatch:
+                raise ValueError(f"Optimizer '{stage.optimizer}' does not support minibatch execution.")
             stage_batch_size = stage.batch_size if stage.batch_size is not None else int(cfg_get(config, "pinn.default_batch_size", 1024))
 
         if stage_batch_size is None:
@@ -649,13 +675,17 @@ def train_pinn(
             epoch_losses: list[PinnLossBreakdown] = []
             epoch_gradients: list[GradientTelemetry] = []
             capture_gradient_telemetry = gradient_telemetry_enabled
-            epoch_train_x, epoch_train_y = _sample_supervised_rows(dataset.train_x, dataset.train_y, config)
-            epoch_train_col_x = _sample_collocation_rows(dataset.train_col_x, config)
+            if stage_allows_sampling:
+                epoch_train_x, epoch_train_y = _sample_supervised_rows(dataset.train_x, dataset.train_y, config)
+                epoch_train_col_x = _sample_collocation_rows(dataset.train_col_x, config)
+            else:
+                epoch_train_x, epoch_train_y = dataset.train_x, dataset.train_y
+                epoch_train_col_x = dataset.train_col_x
 
             if stage_batch_size is None:
                 breakdown, gradient_telemetry = _train_pinn_step(
                     model=model,
-                    optimizer=optimizer,
+                    optimizer_spec=optimizer_spec,
                     criterion=criterion,
                     ode_model=ode_model,
                     formulation=formulation,
@@ -701,7 +731,7 @@ def train_pinn(
                 ):
                     breakdown, gradient_telemetry = _train_pinn_step(
                         model=model,
-                        optimizer=optimizer,
+                        optimizer_spec=optimizer_spec,
                         criterion=criterion,
                         ode_model=ode_model,
                         formulation=formulation,
@@ -775,6 +805,17 @@ def train_pinn(
                 val_total_loss=val_total_loss,
                 val_component_losses=val_component_losses,
                 test_metrics=test_metrics,
+                optimizer_diagnostics={
+                    "requires_closure": optimizer_spec.requires_closure,
+                    "full_batch": stage_full_batch,
+                    "sampling_enabled": stage_allows_sampling,
+                    "line_search": optimizer_spec.line_search_name,
+                    **(
+                        optimizer_spec.optimizer.get_last_diagnostics()
+                        if hasattr(optimizer_spec.optimizer, "get_last_diagnostics")
+                        else {}
+                    ),
+                },
             )
             rows.append(row)
 

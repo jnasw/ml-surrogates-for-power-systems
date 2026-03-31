@@ -29,6 +29,7 @@ class EpochMetrics:
     val_total_loss: float | None = None
     val_component_losses: dict[str, float | None] | None = None
     test_metrics: dict[str, float | None] | None = None
+    optimizer_diagnostics: dict[str, float | int | str | bool | None] | None = None
 
     def _component_loss(self, split: str, name: str) -> float | None:
         if split == "train":
@@ -121,6 +122,9 @@ class EpochMetrics:
         for key, value in test_values.items():
             flat[f"test_{key}"] = value
         flat.setdefault("test_data_loss", test_values.get("data_loss"))
+        optimizer_values = {} if self.optimizer_diagnostics is None else self.optimizer_diagnostics
+        for key, value in optimizer_values.items():
+            flat[f"optimizer_{key}"] = value
         return flat
 
 
@@ -226,6 +230,9 @@ class PinnLogger:
         for key, value in (row.test_metrics or {}).items():
             if value is not None:
                 parts.append(f"test_{key.replace('_loss', '')}={float(value):.6e}")
+        for key, value in (row.optimizer_diagnostics or {}).items():
+            if value is not None:
+                parts.append(f"opt_{key}={value}")
         print(" ".join(parts), flush=True)
 
     def log_epoch_metrics(self, row: EpochMetrics) -> None:
@@ -258,6 +265,9 @@ class PinnLogger:
         for key, value in (row.test_metrics or {}).items():
             if value is not None:
                 payload[f"test/{key}"] = float(value)
+        for key, value in (row.optimizer_diagnostics or {}).items():
+            if value is not None:
+                payload[f"optimizer/{key}"] = value
         self._wandb_run.log(payload, step=int(row.global_epoch))
 
     def save_checkpoint(self, payload: dict[str, Any], tag: str) -> str:
