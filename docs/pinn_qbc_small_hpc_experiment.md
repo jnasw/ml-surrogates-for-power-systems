@@ -152,6 +152,80 @@ python tools/pinn/bundle_qbc_small_analysis.py \
   --include-loss-landscape
 ```
 
+## Run Loss Landscapes On HPC
+
+For the real study, it is usually better to compute the landscapes on HPC too.
+
+Files:
+
+- Orchestrator: [tools/pinn/run_qbc_small_loss_landscape.py](/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/tools/pinn/run_qbc_small_loss_landscape.py)
+- HPC job script: [tools/pinn/jobs/run_qbc_small_loss_landscape.lsf.sh](/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/tools/pinn/jobs/run_qbc_small_loss_landscape.lsf.sh)
+
+The HPC script:
+
+1. reads the finished PINN experiment manifest
+2. finds the per-model PINN run directories
+3. computes 1D and/or 2D loss landscapes from the selected checkpoint
+4. exports only the compact analysis artifacts into a clean folder
+
+### Basic submission
+
+```bash
+export EXPERIMENT_ROOT=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/pinn_hpc_experiments/<experiment_tag>
+bsub < tools/pinn/jobs/run_qbc_small_loss_landscape.lsf.sh
+```
+
+### Common overrides
+
+```bash
+EXPERIMENT_ROOT=/zhome/.../outputs/pinn_hpc_experiments/<experiment_tag> \
+EXPORT_ROOT=/zhome/.../results/pinn_landscape/<experiment_tag> \
+CHECKPOINT_TAG=best \
+GRID_MODE=both \
+RESOLUTION_1D=41 \
+RESOLUTION_2D=21 \
+ANALYSIS_SPLIT=train \
+SUPERVISED_ROWS=1024 \
+COLLOCATION_ROWS=1024 \
+INIT_ROWS=128 \
+LANDSCAPE_DEVICE=cuda \
+bsub < tools/pinn/jobs/run_qbc_small_loss_landscape.lsf.sh
+```
+
+Useful variables:
+
+- `EXPERIMENT_ROOT`: required, root of the finished PINN experiment
+- `EXPORT_ROOT`: destination for the compact export bundle
+- `CHECKPOINT_TAG`: `best`, `last`, `init`, or another saved checkpoint tag
+- `GRID_MODE`: `1d`, `2d`, or `both`
+- `RESOLUTION_1D`: number of points for 1D landscapes
+- `RESOLUTION_2D`: number of points per axis for 2D landscapes
+- `ANALYSIS_SPLIT`: usually `train`
+- `SUPERVISED_ROWS`, `COLLOCATION_ROWS`, `INIT_ROWS`: fixed analysis subset sizes
+- `MODELS`: optional comma-separated subset, for example `SM4,SM6`
+- `SKIP_EXPORT=true`: compute landscapes only
+- `EXPORT_METRICS=false`: do not copy `metrics.csv` into the export bundle
+- `DRY_RUN=true`: print commands without running them
+
+## What To Commit
+
+For git, the best practice is to commit only the exported landscape bundle, not the full training outputs.
+
+Recommended commit payload:
+
+- `experiment_manifest.json`
+- per-model `config.yaml`
+- per-model `metrics.csv` if useful
+- per-model `loss_landscape/`
+
+Do not commit:
+
+- raw stage-1 dataset outputs
+- full preprocessed datasets
+- checkpoints unless you explicitly want model recovery in git
+
+This keeps the tracked artifacts compact while preserving the actual landscape arrays and metadata needed for downstream analysis.
+
 ## W&B naming
 
 The job creates one W&B group for the whole experiment:
