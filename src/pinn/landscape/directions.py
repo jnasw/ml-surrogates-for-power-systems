@@ -75,12 +75,13 @@ def sample_random_direction(
 
     tensors: dict[str, torch.Tensor] = {}
     for name, parameter in model.named_parameters():
+        # Sample on CPU for deterministic seeding, then move to the parameter device.
         raw = torch.randn(
             parameter.shape,
             generator=generator,
-            device=parameter.device,
+            device="cpu",
             dtype=parameter.dtype,
-        )
+        ).to(device=parameter.device, dtype=parameter.dtype)
         if normalized == "filter":
             raw = _normalize_like_filter(raw, parameter.detach())
         elif normalized == "parameter":
