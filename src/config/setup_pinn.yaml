@@ -72,12 +72,58 @@ pinn:
       epochs: 100
       batch_size: 1024
       shuffle: true
+      full_batch: false
+      allow_sampling: true
+      optimizer_kwargs: {}
+      line_search: null
+      convergence: null
     - name: lbfgs
       optimizer: LBFGS
       lr: 1.0
       epochs: 20
       batch_size: null
       shuffle: false
+      full_batch: true
+      allow_sampling: false
+      optimizer_kwargs: {}
+      line_search:
+        name: strong_wolfe
+      convergence: null
+  # Example SSBFGS stage override:
+  # stages:
+  #   - name: ssbfgs
+  #     optimizer: SSBFGS
+  #     lr: 1.0
+  #     epochs: 20
+  #     batch_size: null
+  #     shuffle: false
+  #     full_batch: true
+  #     allow_sampling: false
+  #     optimizer_kwargs:
+  #       tau_strategy: al_baali
+  #       tau_min: 1.0e-12
+  #       tau_max: 1.0
+  #     line_search:
+  #       name: strong_wolfe
+  #     convergence: null
+  #   - name: ssbroyden
+  #     optimizer: SSBroyden
+  #     lr: 1.0
+  #     epochs: 20
+  #     batch_size: null
+  #     shuffle: false
+  #     full_batch: true
+  #     allow_sampling: false
+  #     optimizer_kwargs:
+  #       tau_strategy: paper_default
+  #       phi_strategy: paper_default
+  #       tau_min: 1.0e-12
+  #       tau_max: 1.0
+  #       phi_min: -1.0e6
+  #       phi_max: 1.0e6
+  #     line_search:
+  #       name: strong_wolfe
+  #     convergence: null
   run_dir: ${hydra:runtime.cwd}/outputs/pinn
 
 dirs:
