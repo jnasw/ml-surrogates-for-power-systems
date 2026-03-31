@@ -131,6 +131,12 @@ def main() -> None:
     if not runs:
         raise ValueError(f"No runs found in experiment manifest: {manifest_path}")
 
+    export_root = (
+        Path(args.export_root).resolve()
+        if args.export_root
+        else (REPO_ROOT / "results" / "pinn_landscape" / experiment_root.name).resolve()
+    )
+
     grid_modes = ["1d", "2d"] if args.grid == "both" else [args.grid]
 
     for model_flag, run_info in sorted(runs.items()):
@@ -188,10 +194,10 @@ def main() -> None:
                 )
             _run(command, dry_run=args.dry_run)
 
-    if not args.skip_export and args.export_root:
+    if not args.skip_export:
         _bundle_export(
             experiment_root=experiment_root,
-            export_root=Path(args.export_root).resolve(),
+            export_root=export_root,
             manifest=manifest,
             include_metrics=not bool(args.no_export_metrics),
             dry_run=args.dry_run,

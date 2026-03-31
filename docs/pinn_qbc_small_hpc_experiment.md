@@ -171,6 +171,13 @@ The HPC script:
 ### Basic submission
 
 ```bash
+bsub < tools/pinn/jobs/run_qbc_small_loss_landscape.lsf.sh
+```
+
+If `EXPERIMENT_ROOT` is not set, the job automatically picks the newest folder under `outputs/pinn_hpc_experiments/`.
+You can still override it explicitly:
+
+```bash
 export EXPERIMENT_ROOT=/zhome/14/b/214266/Repos/ml-surrogates-for-power-systems/outputs/pinn_hpc_experiments/<experiment_tag>
 bsub < tools/pinn/jobs/run_qbc_small_loss_landscape.lsf.sh
 ```
@@ -192,9 +199,15 @@ LANDSCAPE_DEVICE=cuda \
 bsub < tools/pinn/jobs/run_qbc_small_loss_landscape.lsf.sh
 ```
 
+If `EXPORT_ROOT` is not set, the compact export defaults to:
+
+```text
+results/pinn_landscape/<experiment_name>/
+```
+
 Useful variables:
 
-- `EXPERIMENT_ROOT`: required, root of the finished PINN experiment
+- `EXPERIMENT_ROOT`: optional, root of the finished PINN experiment. If omitted, the newest experiment under `outputs/pinn_hpc_experiments/` is used.
 - `EXPORT_ROOT`: destination for the compact export bundle
 - `CHECKPOINT_TAG`: `best`, `last`, `init`, or another saved checkpoint tag
 - `GRID_MODE`: `1d`, `2d`, or `both`
