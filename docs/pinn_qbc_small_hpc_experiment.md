@@ -121,6 +121,37 @@ The orchestrator also writes:
 
 This top-level manifest records the dataset pipeline root, final dataset root, and PINN run directory for each model.
 
+## Bundle Analysis Artifacts
+
+If you want one portable folder for later loss-landscape analysis, use:
+
+- [tools/pinn/bundle_qbc_small_analysis.py](/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/tools/pinn/bundle_qbc_small_analysis.py)
+
+Example:
+
+```bash
+python tools/pinn/bundle_qbc_small_analysis.py \
+  --experiment-root outputs/pinn_hpc_experiments/<experiment_tag> \
+  --dst results/pinn_analysis/<experiment_tag>
+```
+
+This copies, for each model:
+
+- `dataset_pipeline/dataset_manifest.json`
+- `dataset_pipeline/data/<MODEL>/dataset_v1/`
+- `pinn_run/config.yaml`
+- `pinn_run/metrics.csv`
+- `pinn_run/checkpoints/`
+
+If you already computed landscapes and want to preserve them too:
+
+```bash
+python tools/pinn/bundle_qbc_small_analysis.py \
+  --experiment-root outputs/pinn_hpc_experiments/<experiment_tag> \
+  --dst results/pinn_analysis/<experiment_tag> \
+  --include-loss-landscape
+```
+
 ## W&B naming
 
 The job creates one W&B group for the whole experiment:
