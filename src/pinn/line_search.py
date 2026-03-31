@@ -153,13 +153,23 @@ def _run_strong_wolfe(
         max_ls=int(config["max_iters"]),
     )
     success = bool(step_size > 0.0)
+    capped_step = min(float(step_size), float(config["max_step"]))
+    accepted_loss = float(loss_value)
+    accepted_grad = gradient
+    reason: str | None
+    if success and float(step_size) > float(config["max_step"]):
+        accepted_loss, accepted_grad = evaluate_at_step(capped_step)
+        evals = int(evals) + 1
+        reason = "step_capped"
+    else:
+        reason = None if success else "strong_wolfe_failed"
     return LineSearchResult(
-        step_size=float(step_size),
+        step_size=float(capped_step),
         success=success,
         num_evals=int(evals),
-        loss_value=float(loss_value),
-        gradient=gradient,
-        reason=None if success else "strong_wolfe_failed",
+        loss_value=float(accepted_loss),
+        gradient=accepted_grad,
+        reason=reason,
     )
 
 

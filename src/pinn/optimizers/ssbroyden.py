@@ -68,6 +68,7 @@ class SSBroyden(BFGS):
         diagnostics: dict[str, float | int | bool | str | None] = {
             "tau_strategy": str(self.param_groups[0]["tau_strategy"]),
             "phi_strategy": str(self.param_groups[0]["phi_strategy"]),
+            "tau1": None,
             "tau_raw": None,
             "tau_clipped": False,
             "phi_raw": None,
@@ -128,18 +129,20 @@ class SSBroyden(BFGS):
         rho_minus = float(min(1.0, h_k * (1.0 - c_k)))
         rho_plus = float(min(1.0, 1.0 / b_k))
         theta_minus = float((rho_minus - 1.0) / a_k)
-        theta_plus = float(-1.0 / rho_plus)
+        if rho_minus <= float(curvature_eps):
+            diagnostics["tau_reason"] = "invalid_rho_minus"
+            diagnostics["phi_reason"] = "invalid_rho_minus"
+            return None, diagnostics
+        theta_plus = float(1.0 / rho_minus)
         theta_mid = float((1.0 - b_k) / b_k)
         theta = float(max(theta_minus, min(theta_plus, theta_mid)))
         sigma = float(1.0 + theta * a_k)
         n = max(2, int(context.get("param_dim", H.shape[0])))
-        sigma_power = float(abs(sigma) ** (1.0 - n))
 
         diagnostics["theta_minus"] = theta_minus
         diagnostics["theta_plus"] = theta_plus
         diagnostics["theta"] = theta
         diagnostics["sigma"] = sigma
-        diagnostics["sigma_power"] = sigma_power
         diagnostics["rho_minus"] = rho_minus
         diagnostics["rho_plus"] = rho_plus
 
@@ -148,13 +151,18 @@ class SSBroyden(BFGS):
             diagnostics["phi_reason"] = "invalid_sigma"
             return None, diagnostics
 
+        sigma_power = float(sigma ** (-1.0 / (n - 1.0)))
+        diagnostics["sigma_power"] = sigma_power
+        tau1 = float(min(1.0, ys / max(float(torch.dot(s, H @ s).item()), float(curvature_eps))))
+        diagnostics["tau1"] = tau1
+
         strategy = str(self.param_groups[0]["tau_strategy"])
         if strategy != "paper_default":
             raise ValueError(f"Unsupported SSBroyden tau_strategy: {strategy}")
-        if theta <= 0.0:
-            tau = min(rho_plus / max(sigma_power, float(curvature_eps)), sigma)
+        if theta > 0.0:
+            tau = tau1 * min(sigma_power, 1.0 / max(theta, float(curvature_eps)))
         else:
-            tau = rho_plus * min(sigma_power / max(theta, float(curvature_eps)), 1.0)
+            tau = min(tau1 * sigma_power, sigma)
         tau = float(tau)
         diagnostics["tau_raw"] = tau
         tau_clipped = False
@@ -240,9 +248,8 @@ class SSBroyden(BFGS):
 
         Hy = H @ y
         v = (s / ys) - (Hy / yHy)
-        scaled_H = (1.0 / tau) * H
         rank_one = phi * yHy * torch.outer(v, v)
         ss_term = torch.outer(s, s) / ys
         correction = torch.outer(Hy, Hy) / yHy
-        updated = scaled_H - (1.0 / tau) * correction + rank_one + ss_term
+        updated = (1.0 / tau) * (H - correction + rank_one + ss_term)
         return updated, False, ys, diagnostics

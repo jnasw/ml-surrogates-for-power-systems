@@ -204,12 +204,14 @@ class BFGS(torch.optim.Optimizer):
             pk=search_direction,
             evaluate_at_step=evaluate_at_step,
         )
+        line_search_cfg = group.get("line_search") or {}
+        min_acceptable_step = max(float(group["step_tol"]), float(line_search_cfg.get("min_step", 0.0)))
 
         update_skipped = False
         curvature_ys: float | None = None
         update_diagnostics: dict[str, float | int | bool | str | None] = {}
 
-        if line_search_result.success and line_search_result.step_size > float(group["step_tol"]):
+        if line_search_result.success and line_search_result.step_size > min_acceptable_step:
             step_size = float(line_search_result.step_size)
             x_next = xk + step_size * search_direction
             self._set_flat_params(x_next)
@@ -233,6 +235,13 @@ class BFGS(torch.optim.Optimizer):
                 curvature_eps=float(group["curvature_eps"]),
                 context=update_context,
             )
+            if update_skipped and bool(group["history_reset_on_failure"]):
+                H = self._reset_inverse_hessian(
+                    int(xk.numel()),
+                    dtype=xk.dtype,
+                    device=xk.device,
+                    scale=float(group["init_hessian_scale"]),
+                )
             state["x_prev"] = x_next.detach().clone()
             state["g_prev"] = g_next.detach().clone()
             accepted_loss = torch.tensor(f_next, dtype=loss_tensor.dtype, device=loss_tensor.device)
@@ -250,10 +259,14 @@ class BFGS(torch.optim.Optimizer):
 
         state["H"] = H
         state["n_iter"] = int(state.get("n_iter", 0)) + 1
+        reason = line_search_result.reason
+        if line_search_result.success and line_search_result.step_size <= min_acceptable_step:
+            reason = "step_below_min_threshold"
         self._last_diagnostics = {
             "line_search_success": bool(line_search_result.success),
             "line_search_evals": int(line_search_result.num_evals),
             "step_size": float(line_search_result.step_size),
+            "min_acceptable_step": float(min_acceptable_step),
             "grad_norm": grad_norm,
             "curvature_ys": curvature_ys,
             "update_skipped": bool(update_skipped),
@@ -261,7 +274,7 @@ class BFGS(torch.optim.Optimizer):
             "directional_derivative": directional,
             "param_norm": float(torch.linalg.vector_norm(xk, ord=2).item()),
             "optimizer": self._optimizer_label(),
-            "reason": line_search_result.reason,
+            "reason": reason,
             **update_diagnostics,
         }
         return accepted_loss
