@@ -26,6 +26,7 @@ class EpochMetrics:
     train_total_grad_norm: float | None = None
     train_component_grad_norms: dict[str, float | None] | None = None
     train_weighted_component_grad_norms: dict[str, float | None] | None = None
+    val_total_loss: float | None = None
     val_component_losses: dict[str, float | None] | None = None
     test_metrics: dict[str, float | None] | None = None
 
@@ -100,6 +101,7 @@ class EpochMetrics:
             "optimizer": str(self.optimizer),
             "train_total_loss": float(self.train_total_loss),
             "train_total_grad_norm": self.train_total_grad_norm,
+            "val_total_loss": self.val_total_loss,
         }
         for name, value in self.train_component_losses.items():
             flat[f"train_{name}_loss"] = value
@@ -219,6 +221,8 @@ class PinnLogger:
         for name, value in (row.val_component_losses or {}).items():
             if value is not None:
                 parts.append(f"val_{name}={float(value):.6e}")
+        if row.val_total_loss is not None:
+            parts.append(f"val_total={float(row.val_total_loss):.6e}")
         for key, value in (row.test_metrics or {}).items():
             if value is not None:
                 parts.append(f"test_{key.replace('_loss', '')}={float(value):.6e}")
@@ -249,6 +253,8 @@ class PinnLogger:
         for name, value in (row.val_component_losses or {}).items():
             if value is not None:
                 payload[f"val/{name}_loss"] = float(value)
+        if row.val_total_loss is not None:
+            payload["val/total_loss"] = float(row.val_total_loss)
         for key, value in (row.test_metrics or {}).items():
             if value is not None:
                 payload[f"test/{key}"] = float(value)

@@ -420,6 +420,25 @@ def _evaluate_dt_loss(
     return float(criterion(terms.residual, torch.zeros_like(terms.residual)).item())
 
 
+def _compute_weighted_total_loss(
+    component_losses: dict[str, float | None] | None,
+    weights: LossWeights,
+) -> float | None:
+    if component_losses is None:
+        return None
+    total = 0.0
+    used_any = False
+    for name, weight in weights.items():
+        value = component_losses.get(name)
+        if value is None:
+            continue
+        total += float(weight) * float(value)
+        used_any = True
+    if not used_any:
+        return None
+    return float(total)
+
+
 def _build_checkpoint_payload(
     *,
     pinn_model: PinnModel,
@@ -718,6 +737,7 @@ def train_pinn(
                     for name in component_names
                 }
             global_epoch += 1
+            val_total_loss = None
             val_component_losses = None
             test_metrics = None
             if _should_run_evaluation(global_epoch, config):
@@ -738,6 +758,7 @@ def train_pinn(
                     criterion=criterion,
                     formulation=formulation,
                 )
+                val_total_loss = _compute_weighted_total_loss(val_component_losses, weights)
                 test_metrics = {
                     "data_loss": _evaluate_data_loss(model=model, x=dataset.test_x, y=dataset.test_y, criterion=criterion)
                 }
@@ -751,6 +772,7 @@ def train_pinn(
                 train_total_grad_norm=train_total_grad_norm,
                 train_component_grad_norms=train_component_grad_norms,
                 train_weighted_component_grad_norms=train_weighted_component_grad_norms,
+                val_total_loss=val_total_loss,
                 val_component_losses=val_component_losses,
                 test_metrics=test_metrics,
             )
@@ -782,7 +804,7 @@ def train_pinn(
                         tag="last",
                     )
 
-            selection_metric = row.val_data_loss if row.val_data_loss is not None else row.train_total_loss
+            selection_metric = row.val_total_loss if row.val_total_loss is not None else row.train_total_loss
             if best_metric is None or selection_metric < best_metric:
                 best_metric = selection_metric
                 if logger is not None and _checkpointing_enabled(config, "save_best", True):
