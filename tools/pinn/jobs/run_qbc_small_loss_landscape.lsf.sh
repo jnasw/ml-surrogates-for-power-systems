@@ -57,7 +57,7 @@ PY
   EXPERIMENT_ROOT="${LATEST_EXPERIMENT_ROOT}"
 fi
 
-CHECKPOINT_TAG="${CHECKPOINT_TAG:-best}"
+CHECKPOINT_TAGS="${CHECKPOINT_TAGS:-init,epoch_050pct,last}"
 GRID_MODE="${GRID_MODE:-both}"
 RESOLUTION_1D="${RESOLUTION_1D:-41}"
 RESOLUTION_2D="${RESOLUTION_2D:-21}"
@@ -80,7 +80,7 @@ CMD=(
   "${PYTHON_BIN}"
   tools/pinn/run_qbc_small_loss_landscape.py
   --experiment-root "${EXPERIMENT_ROOT}"
-  --checkpoint-tag "${CHECKPOINT_TAG}"
+  --checkpoint-tags "${CHECKPOINT_TAGS}"
   --grid "${GRID_MODE}"
   --resolution-1d "${RESOLUTION_1D}"
   --resolution-2d "${RESOLUTION_2D}"

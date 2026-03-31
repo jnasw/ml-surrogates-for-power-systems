@@ -43,6 +43,10 @@ def _format_hydra_list(items: list[str]) -> str:
     return "[" + ",".join(items) + "]"
 
 
+def _format_hydra_float_list(items: list[float]) -> str:
+    return "[" + ",".join(f"{float(item):g}" for item in items) + "]"
+
+
 def _tag_stamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -50,6 +54,13 @@ def _tag_stamp() -> str:
 def _read_json(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _parse_float_list(raw: str) -> list[float]:
+    values = [float(item.strip()) for item in raw.split(",") if item.strip()]
+    if not values:
+        raise ValueError("Expected at least one numeric value.")
+    return values
 
 
 def _build_dataset_command(
@@ -126,6 +137,8 @@ def _build_pinn_command(
     loss_weight_dt: float,
     loss_weight_physics: float,
     loss_weight_ic: float,
+    enable_gradient_telemetry: bool,
+    checkpoint_fractions: list[float],
 ) -> list[str]:
     stage_override = (
         "pinn.stages="
@@ -147,6 +160,11 @@ def _build_pinn_command(
         f"pinn.loss_weights.dt={loss_weight_dt}",
         f"pinn.loss_weights.physics={loss_weight_physics}",
         f"pinn.loss_weights.ic={loss_weight_ic}",
+        f"pinn.gradient_telemetry.enabled={'true' if enable_gradient_telemetry else 'false'}",
+        "pinn.checkpointing.save_init=true",
+        "pinn.checkpointing.save_best=true",
+        "pinn.checkpointing.save_last=true",
+        f"pinn.checkpointing.epoch_fractions={_format_hydra_float_list(checkpoint_fractions)}",
         "wandb.use=true",
         f"wandb.project={wandb_project}",
         f"wandb.group={wandb_group}",
@@ -180,6 +198,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log-every-epoch", type=int, default=1, help="Metric/W&B logging cadence.")
     parser.add_argument("--wandb-project", default="sm-surrogates-pinn", help="W&B project.")
     parser.add_argument("--wandb-entity", default=None, help="Optional W&B entity.")
+    parser.add_argument(
+        "--enable-gradient-telemetry",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable per-epoch gradient telemetry logging.",
+    )
+    parser.add_argument(
+        "--checkpoint-fractions",
+        default="0.5",
+        help="Comma-separated fractional checkpoint milestones, for example '0.5' or '0.25,0.5,0.75'.",
+    )
     parser.add_argument("--loss-weight-data", type=float, default=1.0, help="Static supervised loss weight.")
     parser.add_argument("--loss-weight-dt", type=float, default=1.0e-4, help="Static dt loss weight.")
     parser.add_argument("--loss-weight-physics", type=float, default=1.0e-4, help="Static physics loss weight.")
@@ -207,6 +236,7 @@ def main() -> None:
     models = _parse_models(args.models)
     experiment_id = f"pinn_qbc_small_{args.budget}_{stamp}"
     wandb_group = f"pinn_qbc_{args.budget}_adam{int(args.epochs)}_{stamp}"
+    checkpoint_fractions = _parse_float_list(args.checkpoint_fractions)
 
     summary: dict[str, Any] = {
         "experiment_tag": stamp,
@@ -214,6 +244,8 @@ def main() -> None:
         "wandb_group": wandb_group,
         "budget": args.budget,
         "dataset_seed": args.dataset_seed,
+        "enable_gradient_telemetry": bool(args.enable_gradient_telemetry),
+        "checkpoint_fractions": checkpoint_fractions,
         "models": models,
         "output_root": str(output_root),
         "runs": {},
@@ -264,6 +296,8 @@ def main() -> None:
             loss_weight_dt=args.loss_weight_dt,
             loss_weight_physics=args.loss_weight_physics,
             loss_weight_ic=args.loss_weight_ic,
+            enable_gradient_telemetry=bool(args.enable_gradient_telemetry),
+            checkpoint_fractions=checkpoint_fractions,
         )
         _run(pinn_command, dry_run=args.dry_run)
         summary["runs"][model_flag] = {

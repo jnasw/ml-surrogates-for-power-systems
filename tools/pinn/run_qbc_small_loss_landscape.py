@@ -20,6 +20,13 @@ def _read_json(path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
+def _parse_items(raw: str) -> list[str]:
+    items = [item.strip() for item in raw.split(",") if item.strip()]
+    if not items:
+        raise ValueError("Expected at least one comma-separated item.")
+    return items
+
+
 def _run(command: list[str], *, dry_run: bool) -> None:
     print("[qbc-landscape] command:")
     print(" ".join(command))
@@ -92,7 +99,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--experiment-root", required=True, help="Root of one completed qbc_small_pinn experiment.")
     parser.add_argument("--python-bin", default=sys.executable, help="Python executable for the landscape script.")
     parser.add_argument("--models", default=None, help="Optional comma-separated subset of models to process.")
-    parser.add_argument("--checkpoint-tag", default="best", help="Checkpoint tag to analyze: best | last | init | ...")
+    parser.add_argument(
+        "--checkpoint-tags",
+        default="init,epoch_050pct,last",
+        help="Comma-separated checkpoint tags to analyze, for example 'init,epoch_050pct,last'.",
+    )
     parser.add_argument("--grid", choices=["1d", "2d", "both"], default="both", help="Landscape grid(s) to evaluate.")
     parser.add_argument("--resolution-1d", type=int, default=41, help="Resolution for 1D landscapes.")
     parser.add_argument("--resolution-2d", type=int, default=21, help="Resolution for 2D landscapes.")
@@ -125,7 +136,8 @@ def main() -> None:
 
     selected_models = None
     if args.models:
-        selected_models = {item.strip() for item in args.models.split(",") if item.strip()}
+        selected_models = set(_parse_items(args.models))
+    checkpoint_tags = _parse_items(args.checkpoint_tags)
 
     runs = dict(manifest.get("runs", {}))
     if not runs:
@@ -143,56 +155,57 @@ def main() -> None:
         if selected_models is not None and model_flag not in selected_models:
             continue
         pinn_run_dir = Path(str(run_info["pinn_run_dir"]))
-        checkpoint_path = pinn_run_dir / "checkpoints" / f"{args.checkpoint_tag}.pt"
-        if not args.dry_run and not checkpoint_path.is_file():
-            raise FileNotFoundError(f"Checkpoint not found for {model_flag}: {checkpoint_path}")
+        for checkpoint_tag in checkpoint_tags:
+            checkpoint_path = pinn_run_dir / "checkpoints" / f"{checkpoint_tag}.pt"
+            if not args.dry_run and not checkpoint_path.is_file():
+                raise FileNotFoundError(f"Checkpoint not found for {model_flag}: {checkpoint_path}")
 
-        for grid in grid_modes:
-            resolution = args.resolution_1d if grid == "1d" else args.resolution_2d
-            output_dir = pinn_run_dir / "loss_landscape" / f"{args.checkpoint_tag}_{grid}"
-            command = [
-                args.python_bin,
-                "tools/pinn/run_loss_landscape.py",
-                "--checkpoint",
-                str(checkpoint_path),
-                "--grid",
-                grid,
-                "--resolution",
-                str(int(resolution)),
-                "--alpha-min",
-                str(float(args.alpha_min)),
-                "--alpha-max",
-                str(float(args.alpha_max)),
-                "--split",
-                str(args.split),
-                "--supervised-rows",
-                str(int(args.supervised_rows)),
-                "--collocation-rows",
-                str(int(args.collocation_rows)),
-                "--init-rows",
-                str(int(args.init_rows)),
-                "--analysis-seed",
-                str(int(args.analysis_seed)),
-                "--direction-seed",
-                str(int(args.direction_seed)),
-                "--normalization",
-                str(args.normalization),
-                "--device",
-                str(args.device),
-                "--output-dir",
-                str(output_dir),
-                "--require-all-components",
-            ]
-            if grid == "2d":
-                command.extend(
-                    [
-                        "--beta-min",
-                        str(float(args.beta_min)),
-                        "--beta-max",
-                        str(float(args.beta_max)),
-                    ]
-                )
-            _run(command, dry_run=args.dry_run)
+            for grid in grid_modes:
+                resolution = args.resolution_1d if grid == "1d" else args.resolution_2d
+                output_dir = pinn_run_dir / "loss_landscape" / f"{checkpoint_tag}_{grid}"
+                command = [
+                    args.python_bin,
+                    "tools/pinn/run_loss_landscape.py",
+                    "--checkpoint",
+                    str(checkpoint_path),
+                    "--grid",
+                    grid,
+                    "--resolution",
+                    str(int(resolution)),
+                    "--alpha-min",
+                    str(float(args.alpha_min)),
+                    "--alpha-max",
+                    str(float(args.alpha_max)),
+                    "--split",
+                    str(args.split),
+                    "--supervised-rows",
+                    str(int(args.supervised_rows)),
+                    "--collocation-rows",
+                    str(int(args.collocation_rows)),
+                    "--init-rows",
+                    str(int(args.init_rows)),
+                    "--analysis-seed",
+                    str(int(args.analysis_seed)),
+                    "--direction-seed",
+                    str(int(args.direction_seed)),
+                    "--normalization",
+                    str(args.normalization),
+                    "--device",
+                    str(args.device),
+                    "--output-dir",
+                    str(output_dir),
+                    "--require-all-components",
+                ]
+                if grid == "2d":
+                    command.extend(
+                        [
+                            "--beta-min",
+                            str(float(args.beta_min)),
+                            "--beta-max",
+                            str(float(args.beta_max)),
+                        ]
+                    )
+                _run(command, dry_run=args.dry_run)
 
     if not args.skip_export:
         _bundle_export(
