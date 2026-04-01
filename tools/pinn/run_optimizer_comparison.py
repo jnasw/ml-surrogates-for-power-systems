@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -23,12 +24,15 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SUPPORTED_OPTIMIZERS = ("LBFGS", "BFGS", "SSBFGS", "SSBroyden")
 
 
-def _run(command: list[str], *, dry_run: bool) -> None:
+def _run(command: list[str], *, dry_run: bool, extra_env: dict[str, str] | None = None) -> None:
     print("[optimizer-comparison] command:")
     print(" ".join(command))
     if dry_run:
         return
-    proc = subprocess.run(command, cwd=REPO_ROOT, text=True, check=False)
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
+    proc = subprocess.run(command, cwd=REPO_ROOT, text=True, check=False, env=env)
     if proc.returncode != 0:
         raise SystemExit(proc.returncode)
 
@@ -116,7 +120,7 @@ def _build_dataset_command(
         command.extend(["--stage1-override", override])
     for override in stage2_overrides:
         command.extend(["--stage2-override", override])
-    _run(command, dry_run=dry_run)
+    _run(command, dry_run=dry_run, extra_env={"PYTHONPATH": str(REPO_ROOT)})
     return dataset_run_root
 
 
