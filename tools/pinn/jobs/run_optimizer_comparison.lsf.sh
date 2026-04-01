@@ -60,6 +60,7 @@ LOSS_WEIGHT_DATA="${LOSS_WEIGHT_DATA:-1.0}"
 LOSS_WEIGHT_DT="${LOSS_WEIGHT_DT:-1.0e-4}"
 LOSS_WEIGHT_PHYSICS="${LOSS_WEIGHT_PHYSICS:-1.0e-4}"
 LOSS_WEIGHT_IC="${LOSS_WEIGHT_IC:-1.0e-3}"
+GRADIENT_TELEMETRY="${GRADIENT_TELEMETRY:-false}"
 DATASET_ROOT="${DATASET_ROOT:-}"
 DRY_RUN="${DRY_RUN:-false}"
 
@@ -90,6 +91,12 @@ CMD=(
   --loss-weight-physics "${LOSS_WEIGHT_PHYSICS}"
   --loss-weight-ic "${LOSS_WEIGHT_IC}"
 )
+
+if [[ "${GRADIENT_TELEMETRY}" == "true" ]]; then
+  CMD+=(--gradient-telemetry)
+else
+  CMD+=(--no-gradient-telemetry)
+fi
 
 if [[ -n "${WARMUP_EPOCHS}" ]]; then
   CMD+=(--warmup-epochs "${WARMUP_EPOCHS}")

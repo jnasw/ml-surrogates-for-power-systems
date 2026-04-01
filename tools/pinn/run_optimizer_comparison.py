@@ -242,6 +242,7 @@ def _build_pinn_command(
     loss_weight_dt: float,
     loss_weight_physics: float,
     loss_weight_ic: float,
+    gradient_telemetry: bool,
 ) -> list[str]:
     stage_override = _stage_override(
         optimizer=optimizer,
@@ -267,7 +268,7 @@ def _build_pinn_command(
         f"pinn.default_batch_size={int(batch_size)}",
         "pinn.supervised_sampling.enabled=false",
         "pinn.collocation_sampling.enabled=false",
-        "pinn.gradient_telemetry.enabled=true",
+        f"pinn.gradient_telemetry.enabled={'true' if gradient_telemetry else 'false'}",
         f"pinn.loss_weights.data={loss_weight_data}",
         f"pinn.loss_weights.dt={loss_weight_dt}",
         f"pinn.loss_weights.physics={loss_weight_physics}",
@@ -315,6 +316,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--loss-weight-dt", type=float, default=1.0e-4, help="Static dt loss weight.")
     parser.add_argument("--loss-weight-physics", type=float, default=1.0e-4, help="Static physics loss weight.")
     parser.add_argument("--loss-weight-ic", type=float, default=1.0e-3, help="Static IC loss weight.")
+    parser.add_argument(
+        "--gradient-telemetry",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable expensive gradient telemetry. Defaults to false for HPC safety.",
+    )
     parser.add_argument("--log-every-epoch", type=int, default=1, help="Metric/W&B logging cadence.")
     parser.add_argument("--tag", action="append", default=[], help="Optional extra W&B tag. Can be passed multiple times.")
     parser.add_argument("--stage1-override", action="append", default=[], help="Extra stage-1 dataset-generation override.")
@@ -427,6 +434,7 @@ def main() -> None:
                     loss_weight_dt=args.loss_weight_dt,
                     loss_weight_physics=args.loss_weight_physics,
                     loss_weight_ic=args.loss_weight_ic,
+                    gradient_telemetry=args.gradient_telemetry,
                 )
                 _run(command, dry_run=args.dry_run)
                 summary["runs"].append(
