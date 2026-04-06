@@ -641,6 +641,43 @@ def _compute_gradient_telemetry(
     )
 
 
+def _measure_pinn_state(
+    *,
+    model: nn.Module,
+    criterion: nn.Module,
+    ode_model: Any,
+    formulation: str,
+    weights: LossWeights,
+    x_data: torch.Tensor,
+    y_data: torch.Tensor,
+    x_col: torch.Tensor,
+    x_init: torch.Tensor,
+    y_init: torch.Tensor,
+    capture_gradient_telemetry: bool = False,
+) -> tuple[PinnLossBreakdown, GradientTelemetry | None]:
+    losses = evaluate_pinn_loss_breakdown(
+        model=model,
+        criterion=criterion,
+        ode_model=ode_model,
+        formulation=formulation,
+        weights=weights,
+        x_data=x_data,
+        y_data=y_data,
+        x_col=x_col,
+        x_init=x_init,
+        y_init=y_init,
+        create_graph=capture_gradient_telemetry,
+    )
+    telemetry = None
+    if capture_gradient_telemetry:
+        telemetry = _compute_gradient_telemetry(
+            model=model,
+            losses=losses,
+            weights=weights,
+        )
+    return losses, telemetry
+
+
 def _train_pinn_step(
     *,
     model: nn.Module,
@@ -675,18 +712,28 @@ def _train_pinn_step(
             y_init=y_init,
             create_graph=True,
         )
-        if capture_gradient_telemetry:
-            telemetry_box["telemetry"] = _compute_gradient_telemetry(
-                model=model,
-                losses=losses,
-                weights=weights,
-            )
         losses.total.backward()
         breakdown_box["losses"] = losses
         return losses.total
 
     if optimizer_spec.requires_closure:
         optimizer.step(closure)
+        optimizer.zero_grad(set_to_none=True)
+        measured_losses, measured_telemetry = _measure_pinn_state(
+            model=model,
+            criterion=criterion,
+            ode_model=ode_model,
+            formulation=formulation,
+            weights=weights,
+            x_data=x_data,
+            y_data=y_data,
+            x_col=x_col,
+            x_init=x_init,
+            y_init=y_init,
+            capture_gradient_telemetry=capture_gradient_telemetry,
+        )
+        breakdown_box["losses"] = measured_losses
+        telemetry_box["telemetry"] = measured_telemetry
     else:
         closure()
         optimizer.step()
