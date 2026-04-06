@@ -3,7 +3,7 @@
 #BSUB -q gpua100
 #BSUB -n 1
 #BSUB -W 24:00
-#BSUB -R "rusage[mem=32GB]"
+#BSUB -R "rusage[mem=8GB]"
 #BSUB -oo outputs/lsf_logs/optimizer_comparison.%J.out
 #BSUB -eo outputs/lsf_logs/optimizer_comparison.%J.err
 
@@ -62,6 +62,8 @@ LOSS_WEIGHT_PHYSICS="${LOSS_WEIGHT_PHYSICS:-1.0e-4}"
 LOSS_WEIGHT_IC="${LOSS_WEIGHT_IC:-1.0e-3}"
 GRADIENT_TELEMETRY="${GRADIENT_TELEMETRY:-false}"
 DATASET_ROOT="${DATASET_ROOT:-}"
+STAGE1_OVERRIDES="${STAGE1_OVERRIDES:-}"
+STAGE2_OVERRIDES="${STAGE2_OVERRIDES:-}"
 DRY_RUN="${DRY_RUN:-false}"
 
 CMD=(
@@ -110,6 +112,22 @@ fi
 if [[ -n "${DATASET_ROOT}" ]]; then
   CMD+=(--dataset-root "${DATASET_ROOT}")
 fi
+if [[ -n "${STAGE1_OVERRIDES}" ]]; then
+  IFS='|' read -r -a _stage1_override_array <<< "${STAGE1_OVERRIDES}"
+  for override in "${_stage1_override_array[@]}"; do
+    if [[ -n "${override}" ]]; then
+      CMD+=(--stage1-override "${override}")
+    fi
+  done
+fi
+if [[ -n "${STAGE2_OVERRIDES}" ]]; then
+  IFS='|' read -r -a _stage2_override_array <<< "${STAGE2_OVERRIDES}"
+  for override in "${_stage2_override_array[@]}"; do
+    if [[ -n "${override}" ]]; then
+      CMD+=(--stage2-override "${override}")
+    fi
+  done
+fi
 if [[ "${DRY_RUN}" == "true" ]]; then
   CMD+=(--dry-run)
 fi
@@ -129,6 +147,12 @@ if [[ -n "${QUASI_NEWTON_EPOCHS}" ]]; then
 fi
 if [[ -n "${DATASET_ROOT}" ]]; then
   echo "[optimizer-comparison] dataset_root=${DATASET_ROOT}"
+fi
+if [[ -n "${STAGE1_OVERRIDES}" ]]; then
+  echo "[optimizer-comparison] stage1_overrides=${STAGE1_OVERRIDES}"
+fi
+if [[ -n "${STAGE2_OVERRIDES}" ]]; then
+  echo "[optimizer-comparison] stage2_overrides=${STAGE2_OVERRIDES}"
 fi
 echo "[optimizer-comparison] command=${CMD[*]}"
 
