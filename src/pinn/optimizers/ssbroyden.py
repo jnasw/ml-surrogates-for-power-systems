@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import torch
@@ -25,10 +26,10 @@ class SSBroyden(BFGS):
         history_reset_on_failure: bool = True,
         tau_strategy: str = "paper_default",
         phi_strategy: str = "paper_default",
-        tau_min: float = 1.0e-12,
-        tau_max: float = 1.0,
-        phi_min: float = -1.0e6,
-        phi_max: float = 1.0e6,
+        tau_min: float = 0.0,
+        tau_max: float = math.inf,
+        phi_min: float = -math.inf,
+        phi_max: float = math.inf,
     ) -> None:
         super().__init__(
             params,
@@ -40,8 +41,8 @@ class SSBroyden(BFGS):
             step_tol=step_tol,
             history_reset_on_failure=history_reset_on_failure,
         )
-        if tau_min <= 0.0:
-            raise ValueError("SSBroyden requires tau_min > 0.")
+        if tau_min < 0.0:
+            raise ValueError("SSBroyden requires tau_min >= 0.")
         if tau_max <= 0.0:
             raise ValueError("SSBroyden requires tau_max > 0.")
         if tau_min > tau_max:
@@ -101,11 +102,17 @@ class SSBroyden(BFGS):
             return None, diagnostics
 
         gk = context["gk"]
+        alpha_total = float(context.get("alpha_total", 0.0))
+        if alpha_total <= float(curvature_eps):
+            diagnostics["tau_reason"] = "invalid_alpha_total"
+            diagnostics["phi_reason"] = "invalid_alpha_total"
+            return None, diagnostics
         s_dot_g = float(torch.dot(s, gk).item())
-        b_k = float((-s_dot_g) / ys)
+        b_k = float(((-alpha_total) * s_dot_g) / ys)
         h_k = float(yHy / ys)
         diagnostics["b_k"] = b_k
         diagnostics["h_k"] = h_k
+        diagnostics["alpha_total"] = alpha_total
 
         if b_k <= float(curvature_eps) or h_k <= float(curvature_eps):
             diagnostics["tau_reason"] = "invalid_b_or_h"
@@ -119,19 +126,19 @@ class SSBroyden(BFGS):
             diagnostics["phi_reason"] = "nonpositive_a"
             return None, diagnostics
 
-        c_k = float((a_k / (1.0 + a_k)) ** 0.5)
+        if 1.0 + a_k <= float(curvature_eps):
+            diagnostics["tau_reason"] = "invalid_one_plus_a"
+            diagnostics["phi_reason"] = "invalid_one_plus_a"
+            return None, diagnostics
+
+        c_k = float((abs(a_k) / (1.0 + a_k)) ** 0.5)
         rho_minus = float(min(1.0, h_k * (1.0 - c_k)))
-        rho_plus = float(min(1.0, 1.0 / b_k))
         theta_minus = float((rho_minus - 1.0) / a_k)
         if rho_minus <= float(curvature_eps):
             diagnostics["tau_reason"] = "invalid_rho_minus"
             diagnostics["phi_reason"] = "invalid_rho_minus"
             return None, diagnostics
-        if rho_plus <= float(curvature_eps):
-            diagnostics["tau_reason"] = "invalid_rho_plus"
-            diagnostics["phi_reason"] = "invalid_rho_plus"
-            return None, diagnostics
-        theta_plus = float((rho_plus - 1.0) / a_k)
+        theta_plus = float(1.0 / rho_minus)
         theta_mid = float((1.0 - b_k) / b_k)
         theta = float(max(theta_minus, min(theta_plus, theta_mid)))
         sigma = float(1.0 + theta * a_k)
@@ -142,26 +149,30 @@ class SSBroyden(BFGS):
         diagnostics["theta"] = theta
         diagnostics["sigma"] = sigma
         diagnostics["rho_minus"] = rho_minus
-        diagnostics["rho_plus"] = rho_plus
+        diagnostics["rho_plus"] = None
 
-        if sigma <= float(curvature_eps):
+        if abs(sigma) <= float(curvature_eps):
             diagnostics["tau_reason"] = "invalid_sigma"
             diagnostics["phi_reason"] = "invalid_sigma"
             return None, diagnostics
 
-        sigma_power = float(sigma ** (-1.0 / (n - 1.0)))
+        sigma_power = float(abs(sigma) ** (1.0 / (1 - n)))
         diagnostics["sigma_power"] = sigma_power
-        tau1 = float(min(1.0, ys / max(float(torch.dot(s, H @ s).item()), float(curvature_eps))))
+        tau1 = float(min(1.0, 1.0 / b_k))
         diagnostics["tau1"] = tau1
 
         strategy = str(self.param_groups[0]["tau_strategy"])
         if strategy != "paper_default":
             raise ValueError(f"Unsupported SSBroyden tau_strategy: {strategy}")
         if theta > 0.0:
-            tau = tau1 * min(sigma_power, 1.0 / max(theta, float(curvature_eps)))
+            tau = tau1 * min(sigma_power, 1.0 / theta)
         else:
             tau = min(tau1 * sigma_power, sigma)
         tau = float(tau)
+        if tau <= float(curvature_eps):
+            diagnostics["tau_reason"] = "invalid_tau"
+            diagnostics["phi_reason"] = "invalid_tau"
+            return None, diagnostics
         diagnostics["tau_raw"] = tau
         tau_clipped = False
         tau_min = float(self.param_groups[0]["tau_min"])
@@ -169,7 +180,7 @@ class SSBroyden(BFGS):
         if tau < tau_min:
             tau = tau_min
             tau_clipped = True
-        if tau > tau_max:
+        if math.isfinite(tau_max) and tau > tau_max:
             tau = tau_max
             tau_clipped = True
         diagnostics["tau"] = tau
@@ -187,10 +198,10 @@ class SSBroyden(BFGS):
         phi_clipped = False
         phi_min = float(self.param_groups[0]["phi_min"])
         phi_max = float(self.param_groups[0]["phi_max"])
-        if phi < phi_min:
+        if math.isfinite(phi_min) and phi < phi_min:
             phi = phi_min
             phi_clipped = True
-        if phi > phi_max:
+        if math.isfinite(phi_max) and phi > phi_max:
             phi = phi_max
             phi_clipped = True
         diagnostics["phi"] = phi
@@ -249,5 +260,5 @@ class SSBroyden(BFGS):
         rank_one = phi * yHy * torch.outer(v, v)
         ss_term = torch.outer(s, s) / ys
         correction = torch.outer(Hy, Hy) / yHy
-        updated = (1.0 / tau) * (H - correction + rank_one + ss_term)
+        updated = ((H - correction + rank_one) / tau) + ss_term
         return updated, False, ys, diagnostics

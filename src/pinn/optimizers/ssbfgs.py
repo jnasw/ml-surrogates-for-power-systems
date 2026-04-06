@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import torch
@@ -24,7 +25,7 @@ class SSBFGS(BFGS):
         step_tol: float = 0.0,
         history_reset_on_failure: bool = True,
         tau_strategy: str = "al_baali",
-        tau_min: float = 1.0e-12,
+        tau_min: float = 0.0,
         tau_max: float = 1.0,
     ) -> None:
         super().__init__(
@@ -37,8 +38,8 @@ class SSBFGS(BFGS):
             step_tol=step_tol,
             history_reset_on_failure=history_reset_on_failure,
         )
-        if tau_min <= 0.0:
-            raise ValueError("SSBFGS requires tau_min > 0.")
+        if tau_min < 0.0:
+            raise ValueError("SSBFGS requires tau_min >= 0.")
         if tau_max <= 0.0:
             raise ValueError("SSBFGS requires tau_max > 0.")
         if tau_min > tau_max:
@@ -48,24 +49,48 @@ class SSBFGS(BFGS):
         self.param_groups[0]["tau_max"] = float(tau_max)
 
     @torch.no_grad()
-    def _compute_tau(self, H: torch.Tensor, s: torch.Tensor, y: torch.Tensor, curvature_eps: float) -> tuple[float | None, dict[str, float | int | bool | str | None]]:
+    def _compute_tau(
+        self,
+        H: torch.Tensor,
+        s: torch.Tensor,
+        y: torch.Tensor,
+        curvature_eps: float,
+        context: dict[str, Any] | None,
+    ) -> tuple[float | None, dict[str, float | int | bool | str | None]]:
         ys = float(torch.dot(y, s).item())
-        sHs = float(torch.dot(s, H @ s).item())
         diagnostics: dict[str, float | int | bool | str | None] = {
             "tau_strategy": str(self.param_groups[0]["tau_strategy"]),
             "tau_raw": None,
             "tau_clipped": False,
-            "sHs": sHs,
+            "b_k": None,
+            "alpha_total": None,
         }
-        if ys <= float(curvature_eps) or sHs <= float(curvature_eps):
+        if ys <= float(curvature_eps):
             diagnostics["tau_reason"] = "invalid_curvature"
+            return None, diagnostics
+
+        if context is None or "gk" not in context:
+            diagnostics["tau_reason"] = "missing_context"
+            return None, diagnostics
+
+        alpha_total = float(context.get("alpha_total", 0.0))
+        if alpha_total <= float(curvature_eps):
+            diagnostics["tau_reason"] = "invalid_alpha_total"
+            return None, diagnostics
+        gk = context["gk"]
+        s_dot_g = float(torch.dot(s, gk).item())
+        b_k = float(((-alpha_total) * s_dot_g) / ys)
+        diagnostics["b_k"] = b_k
+        diagnostics["alpha_total"] = alpha_total
+        if b_k <= float(curvature_eps):
+            diagnostics["tau_reason"] = "invalid_b_k"
             return None, diagnostics
 
         strategy = str(self.param_groups[0]["tau_strategy"])
         if strategy != "al_baali":
             raise ValueError(f"Unsupported SSBFGS tau_strategy: {strategy}")
 
-        tau = min(1.0, ys / sHs)
+        tau = min(1.0, 1.0 / b_k)
         tau = float(tau)
         diagnostics["tau_raw"] = tau
 
@@ -75,7 +100,7 @@ class SSBFGS(BFGS):
         if tau < tau_min:
             tau = tau_min
             tau_clipped = True
-        if tau > tau_max:
+        if math.isfinite(tau_max) and tau > tau_max:
             tau = tau_max
             tau_clipped = True
         diagnostics["tau_clipped"] = tau_clipped
@@ -102,13 +127,19 @@ class SSBFGS(BFGS):
                 "sHs": None,
             }
 
-        tau, tau_diagnostics = self._compute_tau(H=H, s=s, y=y, curvature_eps=curvature_eps)
+        tau, tau_diagnostics = self._compute_tau(
+            H=H,
+            s=s,
+            y=y,
+            curvature_eps=curvature_eps,
+            context=context,
+        )
         if tau is None:
             return H, True, ys, tau_diagnostics
 
+        scaled_H = H / float(tau)
         rho = 1.0 / ys
         identity = torch.eye(H.shape[0], dtype=H.dtype, device=H.device)
-        scaled_H = float(tau) * H
         sy = torch.outer(s, y)
         ys_outer = torch.outer(y, s)
         ss = torch.outer(s, s)

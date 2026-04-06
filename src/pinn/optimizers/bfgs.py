@@ -225,6 +225,8 @@ class BFGS(torch.optim.Optimizer):
                 "gk": gk,
                 "g_next": g_next,
                 "step_size": step_size,
+                "stage_lr": float(group["lr"]),
+                "alpha_total": float(step_size) * float(group["lr"]),
                 "search_direction": search_direction,
                 "param_dim": int(xk.numel()),
             }

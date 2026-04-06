@@ -164,12 +164,9 @@ def _optimizer_stage(
     lower = optimizer.lower()
     optimizer_kwargs = "{}"
     if optimizer == "SSBFGS":
-        optimizer_kwargs = "{tau_strategy:al_baali,tau_min:1.0e-12,tau_max:1.0}"
+        optimizer_kwargs = "{tau_strategy:al_baali}"
     elif optimizer == "SSBroyden":
-        optimizer_kwargs = (
-            "{tau_strategy:paper_default,phi_strategy:paper_default,"
-            "tau_min:1.0e-6,tau_max:1.0,phi_min:-1.0e6,phi_max:1.0e6}"
-        )
+        optimizer_kwargs = "{tau_strategy:paper_default,phi_strategy:paper_default}"
     elif optimizer == "BFGS":
         optimizer_kwargs = "{curvature_eps:1.0e-12,init_hessian_scale:1.0}"
     elif optimizer == "LBFGS":
