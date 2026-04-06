@@ -38,8 +38,8 @@ PROFILE="${PROFILE:-benchmark}"
 EXPERIMENT_TAG="${EXPERIMENT_TAG:-optimizer_comparison_${PROFILE}_${STAMP}}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_ROOT}/outputs/pinn_hpc_experiments/${EXPERIMENT_TAG}}"
 MODEL_FLAG="${MODEL_FLAG:-SM4}"
-PRESET="${PRESET:-default}"
-PINN_BUDGET="${PINN_BUDGET:-b1024}"
+PRESET="${PRESET:-}"
+PINN_BUDGET="${PINN_BUDGET:-}"
 DATASET_SEED="${DATASET_SEED:-s01}"
 PINN_DEVICE="${PINN_DEVICE:-cuda}"
 PINN_HIDDEN_DIM="${PINN_HIDDEN_DIM:-64}"
@@ -73,8 +73,6 @@ CMD=(
   --experiment-tag "${EXPERIMENT_TAG}"
   --output-root "${OUTPUT_ROOT}"
   --model-flag "${MODEL_FLAG}"
-  --preset "${PRESET}"
-  --budget "${PINN_BUDGET}"
   --dataset-seed "${DATASET_SEED}"
   --device "${PINN_DEVICE}"
   --hidden-dim "${PINN_HIDDEN_DIM}"
@@ -102,6 +100,12 @@ fi
 
 if [[ -n "${WARMUP_EPOCHS}" ]]; then
   CMD+=(--warmup-epochs "${WARMUP_EPOCHS}")
+fi
+if [[ -n "${PRESET}" ]]; then
+  CMD+=(--preset "${PRESET}")
+fi
+if [[ -n "${PINN_BUDGET}" ]]; then
+  CMD+=(--budget "${PINN_BUDGET}")
 fi
 if [[ -n "${QUASI_NEWTON_EPOCHS}" ]]; then
   CMD+=(--quasi-newton-epochs "${QUASI_NEWTON_EPOCHS}")
@@ -136,9 +140,14 @@ echo "[optimizer-comparison] repo_root=${REPO_ROOT}"
 echo "[optimizer-comparison] output_root=${OUTPUT_ROOT}"
 echo "[optimizer-comparison] profile=${PROFILE}"
 echo "[optimizer-comparison] model_flag=${MODEL_FLAG}"
-echo "[optimizer-comparison] budget=${PINN_BUDGET}"
 echo "[optimizer-comparison] dataset_seed=${DATASET_SEED}"
 echo "[optimizer-comparison] optimizers=${OPTIMIZERS}"
+if [[ -n "${PRESET}" ]]; then
+  echo "[optimizer-comparison] preset=${PRESET}"
+fi
+if [[ -n "${PINN_BUDGET}" ]]; then
+  echo "[optimizer-comparison] budget=${PINN_BUDGET}"
+fi
 if [[ -n "${WARMUP_EPOCHS}" ]]; then
   echo "[optimizer-comparison] warmup_epochs=${WARMUP_EPOCHS}"
 fi

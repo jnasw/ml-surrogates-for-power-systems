@@ -22,6 +22,26 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SUPPORTED_OPTIMIZERS = ("LBFGS", "BFGS", "SSBFGS", "SSBroyden")
+PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
+    "smoke": {
+        "budget": "b256",
+        "preset": "default",
+        "warmup_epochs": [0, 100],
+        "quasi_newton_epochs": [20],
+        "stage1_overrides": [],
+        "stage2_overrides": ["time=0.05", "num_of_points=20"],
+        "gradient_telemetry": False,
+    },
+    "benchmark": {
+        "budget": "b256",
+        "preset": "default",
+        "warmup_epochs": [0, 100, 300, 10000],
+        "quasi_newton_epochs": [100],
+        "stage1_overrides": [],
+        "stage2_overrides": ["time=0.05", "num_of_points=20"],
+        "gradient_telemetry": False,
+    },
+}
 
 
 def _run(command: list[str], *, dry_run: bool, extra_env: dict[str, str] | None = None) -> None:
@@ -74,13 +94,11 @@ def _parse_optimizers(raw: str) -> list[str]:
     return optimizers
 
 
-def _profile_defaults(profile: str) -> tuple[list[int], list[int]]:
+def _profile_config(profile: str) -> dict[str, Any]:
     profile_name = profile.strip().lower()
-    if profile_name == "smoke":
-        return [0, 100], [20]
-    if profile_name == "benchmark":
-        return [0, 100, 300, 10000], [100]
-    raise ValueError("profile must be one of: smoke, benchmark")
+    if profile_name not in PROFILE_CONFIGS:
+        raise ValueError("profile must be one of: smoke, benchmark")
+    return dict(PROFILE_CONFIGS[profile_name])
 
 
 def _build_dataset_command(
@@ -293,8 +311,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--experiment-tag", default=None, help="Output/W&B tag suffix. Default: timestamp.")
     parser.add_argument("--output-root", default=None, help="Explicit output root. Default: outputs/pinn/optimizer_comparison/<tag>.")
     parser.add_argument("--model-flag", default="SM4", help="Model flag.")
-    parser.add_argument("--preset", default="default", help="Dataset pipeline preset.")
-    parser.add_argument("--budget", default="b1024", help="Budget label for QBC dataset generation.")
+    parser.add_argument("--preset", default=None, help="Dataset pipeline preset. Defaults from --profile.")
+    parser.add_argument("--budget", default=None, help="Budget label for QBC dataset generation. Defaults from --profile.")
     parser.add_argument("--dataset-seed", default="s01", help="Dataset seed label from the registry.")
     parser.add_argument("--dataset-root", default=None, help="Optional explicit preprocessed dataset root. Skips dataset generation when set.")
     parser.add_argument("--seed", type=int, default=37, help="Training seed.")
@@ -319,8 +337,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--gradient-telemetry",
         action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Enable expensive gradient telemetry. Defaults to false for HPC safety.",
+        default=None,
+        help="Enable expensive gradient telemetry. Defaults from --profile.",
     )
     parser.add_argument("--log-every-epoch", type=int, default=1, help="Metric/W&B logging cadence.")
     parser.add_argument("--tag", action="append", default=[], help="Optional extra W&B tag. Can be passed multiple times.")
@@ -334,10 +352,19 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    warmup_default, qn_default = _profile_defaults(args.profile)
+    profile_config = _profile_config(args.profile)
+    warmup_default = list(profile_config["warmup_epochs"])
+    qn_default = list(profile_config["quasi_newton_epochs"])
     warmup_epochs = _parse_int_list(args.warmup_epochs) if args.warmup_epochs else warmup_default
     quasi_newton_epochs = _parse_int_list(args.quasi_newton_epochs) if args.quasi_newton_epochs else qn_default
     optimizers = _parse_optimizers(args.optimizers)
+    resolved_budget = args.budget or str(profile_config["budget"])
+    resolved_preset = args.preset or str(profile_config["preset"])
+    resolved_stage1_overrides = [*list(profile_config["stage1_overrides"]), *list(args.stage1_override)]
+    resolved_stage2_overrides = [*list(profile_config["stage2_overrides"]), *list(args.stage2_override)]
+    resolved_gradient_telemetry = (
+        bool(profile_config["gradient_telemetry"]) if args.gradient_telemetry is None else args.gradient_telemetry
+    )
 
     stamp = args.experiment_tag or _tag_stamp()
     output_root = (
@@ -347,7 +374,7 @@ def main() -> None:
     )
     output_root.mkdir(parents=True, exist_ok=True)
 
-    experiment_id = f"optimizer_comparison_{args.budget}_{stamp}"
+    experiment_id = f"optimizer_comparison_{resolved_budget}_{stamp}"
     wandb_group = f"optimizer_comparison_{args.model_flag.lower()}_{stamp}"
 
     if args.dataset_root:
@@ -356,16 +383,16 @@ def main() -> None:
     else:
         dataset_pipeline_root = output_root / "dataset_pipeline"
         _build_dataset_command(
-            python_bin=args.python_bin,
-            experiment_id=experiment_id,
-            preset=args.preset,
-            budget=args.budget,
-            dataset_seed=args.dataset_seed,
-            model_flag=args.model_flag,
-            run_root=output_root,
-            stage1_overrides=list(args.stage1_override),
-            stage2_overrides=list(args.stage2_override),
-            dry_run=args.dry_run,
+                python_bin=args.python_bin,
+                experiment_id=experiment_id,
+                preset=resolved_preset,
+                budget=resolved_budget,
+                dataset_seed=args.dataset_seed,
+                model_flag=args.model_flag,
+                run_root=output_root,
+                stage1_overrides=resolved_stage1_overrides,
+                stage2_overrides=resolved_stage2_overrides,
+                dry_run=args.dry_run,
         )
         dataset_root = _dataset_root_from_manifest(
             dataset_pipeline_root,
@@ -379,9 +406,13 @@ def main() -> None:
         "wandb_project": args.wandb_project,
         "wandb_group": wandb_group,
         "profile": args.profile,
-        "budget": args.budget,
+        "budget": resolved_budget,
+        "preset": resolved_preset,
         "dataset_seed": args.dataset_seed,
         "model_flag": args.model_flag,
+        "stage1_overrides": resolved_stage1_overrides,
+        "stage2_overrides": resolved_stage2_overrides,
+        "gradient_telemetry": resolved_gradient_telemetry,
         "dataset_root": str(dataset_root),
         "dataset_pipeline_root": None if dataset_pipeline_root is None else str(dataset_pipeline_root),
         "warmup_epochs": warmup_epochs,
@@ -395,7 +426,7 @@ def main() -> None:
         "optimizer_comparison",
         args.profile,
         "qbc_deep_ensemble",
-        args.budget,
+        resolved_budget,
         args.model_flag.lower(),
         *args.tag,
     ]
@@ -434,7 +465,7 @@ def main() -> None:
                     loss_weight_dt=args.loss_weight_dt,
                     loss_weight_physics=args.loss_weight_physics,
                     loss_weight_ic=args.loss_weight_ic,
-                    gradient_telemetry=args.gradient_telemetry,
+                    gradient_telemetry=resolved_gradient_telemetry,
                 )
                 _run(command, dry_run=args.dry_run)
                 summary["runs"].append(
