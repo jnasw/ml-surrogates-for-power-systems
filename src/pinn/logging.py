@@ -29,6 +29,15 @@ class EpochMetrics:
     val_total_loss: float | None = None
     val_component_losses: dict[str, float | None] | None = None
     test_metrics: dict[str, float | None] | None = None
+    weighting_scheme: str | None = None
+    weighting_updated: bool = False
+    train_loss_weights: dict[str, float] | None = None
+    weighting_raw_candidate_weights: dict[str, float] | None = None
+    weighting_probe_grad_l2_norms: dict[str, float] | None = None
+    weighting_probe_grad_mean_abs: dict[str, float] | None = None
+    weighting_probe_grad_max_abs: dict[str, float] | None = None
+    weighting_probe_grad_std: dict[str, float] | None = None
+    weighting_anchor: str | None = None
     optimizer_diagnostics: dict[str, float | int | str | bool | None] | None = None
 
     def _component_loss(self, split: str, name: str) -> float | None:
@@ -103,15 +112,27 @@ class EpochMetrics:
             "train_total_loss": float(self.train_total_loss),
             "train_total_grad_norm": self.train_total_grad_norm,
             "val_total_loss": self.val_total_loss,
+            "weighting_scheme": self.weighting_scheme,
+            "weighting_updated": bool(self.weighting_updated),
+            "weighting_anchor": self.weighting_anchor,
         }
         for name, value in self.train_component_losses.items():
             flat[f"train_{name}_loss"] = value
         for name in LOSS_COMPONENTS:
             flat.setdefault(f"train_{name}_loss", self.train_component_losses.get(name))
+        weight_values = {} if self.train_loss_weights is None else self.train_loss_weights
+        candidate_values = {} if self.weighting_raw_candidate_weights is None else self.weighting_raw_candidate_weights
+        for name in LOSS_COMPONENTS:
+            flat[f"train_weight_{name}"] = weight_values.get(name)
+            flat[f"weighting_candidate_{name}"] = candidate_values.get(name)
         source_maps = [
             ("train", "grad_norm", self.train_component_grad_norms),
             ("train_weighted", "grad_norm", self.train_weighted_component_grad_norms),
             ("val", "loss", self.val_component_losses),
+            ("weight_probe", "l2_norm", self.weighting_probe_grad_l2_norms),
+            ("weight_probe", "mean_abs", self.weighting_probe_grad_mean_abs),
+            ("weight_probe", "max_abs", self.weighting_probe_grad_max_abs),
+            ("weight_probe", "std", self.weighting_probe_grad_std),
         ]
         for prefix, suffix, values in source_maps:
             values = {} if values is None else values
@@ -214,6 +235,13 @@ class PinnLogger:
         ]
         for name, value in row.train_component_losses.items():
             parts.append(f"train_{name}={float(value):.6e}")
+        for name, value in (row.train_loss_weights or {}).items():
+            parts.append(f"weight_{name}={float(value):.6e}")
+        if row.weighting_scheme is not None:
+            parts.append(f"weighting={row.weighting_scheme}")
+        if row.weighting_anchor is not None:
+            parts.append(f"weight_anchor={row.weighting_anchor}")
+        parts.append(f"weight_updated={bool(row.weighting_updated)}")
         if row.train_total_grad_norm is not None:
             parts.append(f"grad_total={float(row.train_total_grad_norm):.6e}")
         for name, value in (row.train_component_grad_norms or {}).items():
@@ -227,6 +255,8 @@ class PinnLogger:
                 parts.append(f"val_{name}={float(value):.6e}")
         if row.val_total_loss is not None:
             parts.append(f"val_total={float(row.val_total_loss):.6e}")
+        for name, value in (row.weighting_raw_candidate_weights or {}).items():
+            parts.append(f"weight_candidate_{name}={float(value):.6e}")
         for key, value in (row.test_metrics or {}).items():
             if value is not None:
                 parts.append(f"test_{key.replace('_loss', '')}={float(value):.6e}")
@@ -246,9 +276,18 @@ class PinnLogger:
             "stage/name": str(row.stage_name),
             "stage/optimizer": str(row.optimizer),
             "train/total_loss": float(row.train_total_loss),
+            "weighting/updated": bool(row.weighting_updated),
         }
+        if row.weighting_scheme is not None:
+            payload["weighting/scheme"] = str(row.weighting_scheme)
+        if row.weighting_anchor is not None:
+            payload["weighting/anchor"] = str(row.weighting_anchor)
         for name, value in row.train_component_losses.items():
             payload[f"train/{name}_loss"] = float(value)
+        for name, value in (row.train_loss_weights or {}).items():
+            payload[f"weighting/active_{name}"] = float(value)
+        for name, value in (row.weighting_raw_candidate_weights or {}).items():
+            payload[f"weighting/candidate_{name}"] = float(value)
         if row.train_total_grad_norm is not None:
             payload["train/grad_total_norm"] = float(row.train_total_grad_norm)
         for name, value in (row.train_component_grad_norms or {}).items():
@@ -257,6 +296,14 @@ class PinnLogger:
         for name, value in (row.train_weighted_component_grad_norms or {}).items():
             if value is not None:
                 payload[f"train/grad_weighted_{name}_norm"] = float(value)
+        for name, value in (row.weighting_probe_grad_l2_norms or {}).items():
+            payload[f"weighting/probe_{name}_l2_norm"] = float(value)
+        for name, value in (row.weighting_probe_grad_mean_abs or {}).items():
+            payload[f"weighting/probe_{name}_mean_abs"] = float(value)
+        for name, value in (row.weighting_probe_grad_max_abs or {}).items():
+            payload[f"weighting/probe_{name}_max_abs"] = float(value)
+        for name, value in (row.weighting_probe_grad_std or {}).items():
+            payload[f"weighting/probe_{name}_std"] = float(value)
         for name, value in (row.val_component_losses or {}).items():
             if value is not None:
                 payload[f"val/{name}_loss"] = float(value)

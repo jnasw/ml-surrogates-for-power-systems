@@ -61,10 +61,26 @@ pinn:
     direction_seed: 0
     normalization: filter
   loss_weights:
+    # Backward compatibility:
+    # These remain the static weights when pinn.weighting.scheme=static.
+    # For dynamic schemes, these act as base/initial values, while physics is
+    # fixed to the anchor value 1.0 in v1.
     data: 1.0
     dt: 1.0e-4
     physics: 1.0e-4
     ic: 1.0e-3
+  weighting:
+    scheme: static # static | ma | id | dn
+    anchor: physics # v1 keeps the paper-style anchor fixed to physics
+    ema_beta: 0.99
+    update_interval_epochs: 10
+    dynamic_components: [data, dt, ic]
+    probe:
+      # Fixed training subset used only for dynamic weight updates.
+      data_rows: 256
+      physics_rows: 256
+      init_rows: 256
+      seed: 0
   stages:
     - name: adam
       optimizer: Adam

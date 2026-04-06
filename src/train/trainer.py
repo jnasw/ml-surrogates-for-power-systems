@@ -20,6 +20,12 @@ from src.pinn.losses import LossWeights, PinnLossBreakdown
 from src.pinn.optim import OptimizerSpec, build_optimizer
 from src.pinn.residuals import compute_residual_terms, compute_supervised_dt_terms
 from src.pinn.runtime import OptimizerStage, load_optimizer_stages, resolve_torch_dtype, torch_dtype_name
+from src.pinn.weighting import (
+    WeightUpdateStats,
+    WeightingConfig,
+    build_weighting_policy,
+    weighting_config_from_config,
+)
 from src.train.device import select_torch_device
 from src.train.model import BaselineTrajectoryMLP, TimeConditionedMLP, TrajectoryMLP
 from src.train.runtime import cfg_get, configure_reproducibility, configure_reproducibility_from_config
@@ -292,6 +298,7 @@ def train_baseline_surrogate(dataset: TrajectoryDataset, seed: int, cfg: Baselin
 
 
 def _loss_weights_from_config(config: Any) -> LossWeights:
+    # Backward compatibility: static configs still read pinn.loss_weights directly.
     return LossWeights(
         data=float(cfg_get(config, "pinn.loss_weights.data", 1.0)),
         dt=float(cfg_get(config, "pinn.loss_weights.dt", 1.0e-4)),
@@ -363,6 +370,55 @@ def _sample_supervised_rows(x: torch.Tensor, y: torch.Tensor, config: Any) -> tu
     indices_np = np.random.choice(total_rows, size=target_rows, replace=False)
     indices = torch.as_tensor(indices_np, device=x.device, dtype=torch.long)
     return x.index_select(0, indices), y.index_select(0, indices)
+
+
+def _take_fixed_tensor_rows(
+    x: torch.Tensor,
+    *,
+    target_rows: int,
+    seed: int,
+    y: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+    total_rows = int(x.shape[0])
+    if target_rows >= total_rows:
+        return x if y is None else (x, y)
+
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(int(seed))
+    indices_cpu = torch.randperm(total_rows, generator=generator, device="cpu")[:target_rows]
+    indices = indices_cpu.to(device=x.device)
+    return _sample_rows_with_indices(x, indices, y)
+
+
+def _build_weight_update_probe_batch(
+    *,
+    dataset: PinnDatasetBundle,
+    weighting_config: WeightingConfig,
+) -> PinnBatch:
+    x_data, y_data = _take_fixed_tensor_rows(
+        dataset.train_x,
+        target_rows=weighting_config.probe.data_rows,
+        seed=weighting_config.probe.seed,
+        y=dataset.train_y,
+    )
+    x_col = _take_fixed_tensor_rows(
+        dataset.train_col_x,
+        target_rows=weighting_config.probe.physics_rows,
+        seed=weighting_config.probe.seed + 1,
+    )
+    x_init, y_init = _take_fixed_tensor_rows(
+        dataset.train_init_x,
+        target_rows=weighting_config.probe.init_rows,
+        seed=weighting_config.probe.seed + 2,
+        y=dataset.train_init_y,
+    )
+    return PinnBatch(
+        x_data=x_data,
+        y_data=y_data,
+        x_col=x_col,
+        x_init=x_init,
+        y_init=y_init,
+    )
 
 
 def _should_run_evaluation(global_epoch: int, config: Any) -> bool:
@@ -620,6 +676,20 @@ def _grad_norm(loss: torch.Tensor, model: nn.Module, retain_graph: bool) -> floa
     return float(torch.sqrt(sq_norm).detach().cpu().item())
 
 
+def _flattened_grads(loss: torch.Tensor, model: nn.Module, retain_graph: bool) -> torch.Tensor:
+    params = [param for param in model.parameters() if param.requires_grad]
+    grads = torch.autograd.grad(loss, params, retain_graph=retain_graph, allow_unused=True)
+    flat_parts = []
+    for param, grad in zip(params, grads):
+        if grad is None:
+            flat_parts.append(torch.zeros(param.numel(), dtype=loss.dtype, device=loss.device))
+        else:
+            flat_parts.append(grad.reshape(-1))
+    if not flat_parts:
+        return torch.zeros(0, dtype=loss.dtype, device=loss.device)
+    return torch.cat(flat_parts, dim=0)
+
+
 def _compute_gradient_telemetry(
     *,
     model: nn.Module,
@@ -638,6 +708,47 @@ def _compute_gradient_telemetry(
         total_grad_norm=_grad_norm(losses.total, model, retain_graph=True),
         component_grad_norms=component_grad_norms,
         weighted_component_grad_norms=weighted_component_grad_norms,
+    )
+
+
+def _compute_weight_update_stats(
+    *,
+    model: nn.Module,
+    losses: PinnLossBreakdown,
+    anchor_component: str,
+    epoch: int,
+    global_epoch: int,
+) -> WeightUpdateStats:
+    grad_vectors = {
+        name: _flattened_grads(losses.component(name), model, retain_graph=True)
+        for name in losses.components
+    }
+    grad_l2_norms = {
+        name: float(torch.linalg.vector_norm(grad_vector, ord=2).detach().cpu().item())
+        for name, grad_vector in grad_vectors.items()
+    }
+    grad_mean_abs = {
+        name: float(grad_vector.abs().mean().detach().cpu().item())
+        for name, grad_vector in grad_vectors.items()
+    }
+    grad_max_abs = {
+        name: float(grad_vector.abs().max().detach().cpu().item())
+        for name, grad_vector in grad_vectors.items()
+    }
+    grad_std = {}
+    for name, grad_vector in grad_vectors.items():
+        if int(grad_vector.numel()) <= 1:
+            grad_std[name] = 0.0
+            continue
+        grad_std[name] = float(grad_vector.std(unbiased=True).detach().cpu().item())
+    return WeightUpdateStats(
+        grad_l2_norms=grad_l2_norms,
+        grad_mean_abs=grad_mean_abs,
+        grad_max_abs=grad_max_abs,
+        grad_std=grad_std,
+        anchor_component=anchor_component,
+        epoch=int(epoch),
+        global_epoch=int(global_epoch),
     )
 
 
@@ -750,6 +861,10 @@ def _stage_allows_sampling(stage: OptimizerStage, optimizer_spec: OptimizerSpec)
     return bool(stage.allow_sampling)
 
 
+def _stage_supports_dynamic_weight_updates(stage: OptimizerStage) -> bool:
+    return str(stage.optimizer).strip().lower() == "adam"
+
+
 def train_pinn(
     *,
     dataset: PinnDatasetBundle,
@@ -767,7 +882,10 @@ def train_pinn(
     activation = str(cfg_get(config, "pinn.activation", "tanh"))
     formulation = str(cfg_get(config, "pinn.formulation", "odequations"))
     stages = load_optimizer_stages(config)
-    weights = _loss_weights_from_config(config)
+    base_weights = _loss_weights_from_config(config)
+    weighting_config = weighting_config_from_config(config)
+    weighting_policy = build_weighting_policy(weighting_config)
+    weighting_state = weighting_policy.initial_state(base_weights)
     gradient_telemetry_enabled = bool(cfg_get(config, "pinn.gradient_telemetry.enabled", False))
     criterion = nn.MSELoss()
 
@@ -780,6 +898,10 @@ def train_pinn(
     ).to(device=device, dtype=dtype)
 
     dataset = move_pinn_training_data_to_device(dataset, device=device, dtype=dtype)
+    weight_probe_batch = _build_weight_update_probe_batch(
+        dataset=dataset,
+        weighting_config=weighting_config,
+    )
 
     pinn_model = PinnModel(
         model=model,
@@ -830,12 +952,14 @@ def train_pinn(
             if not optimizer_spec.supports_minibatch:
                 raise ValueError(f"Optimizer '{stage.optimizer}' does not support minibatch execution.")
             stage_batch_size = stage.batch_size if stage.batch_size is not None else int(cfg_get(config, "pinn.default_batch_size", 1024))
+        stage_supports_dynamic_weight_updates = _stage_supports_dynamic_weight_updates(stage)
 
         for epoch in range(1, stage.epochs + 1):
             model.train()
             epoch_losses: list[PinnLossBreakdown] = []
             epoch_gradients: list[GradientTelemetry] = []
             capture_gradient_telemetry = gradient_telemetry_enabled
+            active_weights = weighting_policy.current_weights(weighting_state)
             if stage_allows_sampling:
                 epoch_train_x, epoch_train_y = _sample_supervised_rows(dataset.train_x, dataset.train_y, config)
                 epoch_train_col_x = _sample_collocation_rows(dataset.train_col_x, config)
@@ -850,7 +974,7 @@ def train_pinn(
                     criterion=criterion,
                     ode_model=ode_model,
                     formulation=formulation,
-                    weights=weights,
+                    weights=active_weights,
                     x_data=epoch_train_x,
                     y_data=epoch_train_y,
                     x_col=epoch_train_col_x,
@@ -881,7 +1005,7 @@ def train_pinn(
                         criterion=criterion,
                         ode_model=ode_model,
                         formulation=formulation,
-                        weights=weights,
+                        weights=active_weights,
                         x_data=batch.x_data,
                         y_data=batch.y_data,
                         x_col=batch.x_col,
@@ -913,6 +1037,31 @@ def train_pinn(
                     for name in component_names
                 }
             global_epoch += 1
+            weighting_updated = False
+            weight_update_stats = None
+            if stage_supports_dynamic_weight_updates and weighting_policy.should_update(epoch=epoch, global_epoch=global_epoch):
+                probe_losses = evaluate_pinn_loss_breakdown(
+                    model=model,
+                    criterion=criterion,
+                    ode_model=ode_model,
+                    formulation=formulation,
+                    weights=active_weights,
+                    x_data=weight_probe_batch.x_data,
+                    y_data=weight_probe_batch.y_data,
+                    x_col=weight_probe_batch.x_col,
+                    x_init=weight_probe_batch.x_init,
+                    y_init=weight_probe_batch.y_init,
+                    create_graph=True,
+                )
+                weight_update_stats = _compute_weight_update_stats(
+                    model=model,
+                    losses=probe_losses,
+                    anchor_component=weighting_config.anchor,
+                    epoch=epoch,
+                    global_epoch=global_epoch,
+                )
+                weighting_state = weighting_policy.update(weighting_state, weight_update_stats)
+                weighting_updated = True
             val_total_loss = None
             val_component_losses = None
             test_metrics = None
@@ -934,7 +1083,7 @@ def train_pinn(
                     criterion=criterion,
                     formulation=formulation,
                 )
-                val_total_loss = _compute_weighted_total_loss(val_component_losses, weights)
+                val_total_loss = _compute_weighted_total_loss(val_component_losses, active_weights)
                 test_metrics = {
                     "data_loss": _evaluate_data_loss(model=model, x=dataset.test_x, y=dataset.test_y, criterion=criterion)
                 }
@@ -951,11 +1100,21 @@ def train_pinn(
                 val_total_loss=val_total_loss,
                 val_component_losses=val_component_losses,
                 test_metrics=test_metrics,
+                weighting_scheme=weighting_config.scheme,
+                weighting_updated=weighting_updated,
+                train_loss_weights=active_weights.as_dict(),
+                weighting_raw_candidate_weights=dict(weighting_state.raw_candidate_weights),
+                weighting_probe_grad_l2_norms=None if weight_update_stats is None else dict(weight_update_stats.grad_l2_norms),
+                weighting_probe_grad_mean_abs=None if weight_update_stats is None else dict(weight_update_stats.grad_mean_abs),
+                weighting_probe_grad_max_abs=None if weight_update_stats is None else dict(weight_update_stats.grad_max_abs),
+                weighting_probe_grad_std=None if weight_update_stats is None else dict(weight_update_stats.grad_std),
+                weighting_anchor=weighting_config.anchor,
                 optimizer_diagnostics={
                     "requires_closure": optimizer_spec.requires_closure,
                     "full_batch": stage_full_batch,
                     "sampling_enabled": stage_allows_sampling,
                     "line_search": optimizer_spec.line_search_name,
+                    "dynamic_weight_updates_enabled": stage_supports_dynamic_weight_updates,
                     **(
                         optimizer_spec.optimizer.get_last_diagnostics()
                         if hasattr(optimizer_spec.optimizer, "get_last_diagnostics")
