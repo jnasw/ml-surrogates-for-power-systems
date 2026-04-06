@@ -175,7 +175,6 @@ def _optimizer_stage(
     elif optimizer == "LBFGS":
         optimizer_kwargs = "{}"
         line_search_name = "strong_wolfe"
-
     return (
         "{"
         f"name:{lower},"
