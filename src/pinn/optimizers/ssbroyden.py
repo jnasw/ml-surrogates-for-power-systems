@@ -95,20 +95,14 @@ class SSBroyden(BFGS):
             diagnostics["phi_reason"] = "invalid_curvature"
             return None, diagnostics
 
-        if context is None or "gk" not in context or "step_size" not in context:
+        if context is None or "gk" not in context:
             diagnostics["tau_reason"] = "missing_context"
             diagnostics["phi_reason"] = "missing_context"
             return None, diagnostics
 
         gk = context["gk"]
-        step_size = float(context["step_size"])
-        if step_size <= float(curvature_eps):
-            diagnostics["tau_reason"] = "invalid_step"
-            diagnostics["phi_reason"] = "invalid_step"
-            return None, diagnostics
-
         s_dot_g = float(torch.dot(s, gk).item())
-        b_k = float((-step_size * s_dot_g) / ys)
+        b_k = float((-s_dot_g) / ys)
         h_k = float(yHy / ys)
         diagnostics["b_k"] = b_k
         diagnostics["h_k"] = h_k
@@ -133,7 +127,11 @@ class SSBroyden(BFGS):
             diagnostics["tau_reason"] = "invalid_rho_minus"
             diagnostics["phi_reason"] = "invalid_rho_minus"
             return None, diagnostics
-        theta_plus = float(1.0 / rho_minus)
+        if rho_plus <= float(curvature_eps):
+            diagnostics["tau_reason"] = "invalid_rho_plus"
+            diagnostics["phi_reason"] = "invalid_rho_plus"
+            return None, diagnostics
+        theta_plus = float((rho_plus - 1.0) / a_k)
         theta_mid = float((1.0 - b_k) / b_k)
         theta = float(max(theta_minus, min(theta_plus, theta_mid)))
         sigma = float(1.0 + theta * a_k)
