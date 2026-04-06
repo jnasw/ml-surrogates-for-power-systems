@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from itertools import cycle
-from typing import Any
+from typing import Any, Iterator
 
 import numpy as np
 import os
@@ -15,7 +14,7 @@ from omegaconf import OmegaConf
 
 from src.data.loaders.trajectory_dataset import TrajectoryDataset
 from src.pinn.data import PinnDatasetBundle
-from src.pinn.evaluator import evaluate_pinn_loss_breakdown, move_pinn_dataset_to_device
+from src.pinn.evaluator import evaluate_pinn_loss_breakdown, move_pinn_training_data_to_device
 from src.pinn.logging import EpochMetrics, PinnLogger
 from src.pinn.losses import LossWeights, PinnLossBreakdown
 from src.pinn.optim import OptimizerSpec, build_optimizer
@@ -175,6 +174,15 @@ class GradientTelemetry:
     @property
     def ic_grad_norm(self) -> float:
         return self.component("ic")
+
+
+@dataclass(frozen=True)
+class PinnBatch:
+    x_data: torch.Tensor
+    y_data: torch.Tensor
+    x_col: torch.Tensor
+    x_init: torch.Tensor
+    y_init: torch.Tensor
 
 
 def train_surrogate(dataset: TrajectoryDataset, seed: int, config: Any) -> SurrogateModel:
@@ -364,6 +372,18 @@ def _should_run_evaluation(global_epoch: int, config: Any) -> bool:
     return (int(global_epoch) % frequency) == 0
 
 
+def _model_device_and_dtype(model: nn.Module) -> tuple[torch.device, torch.dtype]:
+    param = next(model.parameters())
+    return param.device, param.dtype
+
+
+def _to_model_tensor(tensor: torch.Tensor | None, model: nn.Module) -> torch.Tensor | None:
+    if tensor is None:
+        return None
+    device, dtype = _model_device_and_dtype(model)
+    return tensor.to(device=device, dtype=dtype)
+
+
 def _evaluate_data_loss(
     model: nn.Module,
     x: torch.Tensor | None,
@@ -372,10 +392,12 @@ def _evaluate_data_loss(
 ) -> float | None:
     if x is None or y is None:
         return None
+    x_eval = _to_model_tensor(x, model)
+    y_eval = _to_model_tensor(y, model)
     model.eval()
     with torch.no_grad():
-        pred = model(x)
-        return float(criterion(pred, y).item())
+        pred = model(x_eval)
+        return float(criterion(pred, y_eval).item())
 
 
 def _evaluate_physics_loss(
@@ -387,10 +409,11 @@ def _evaluate_physics_loss(
 ) -> float | None:
     if x_rows is None:
         return None
+    x_eval = _to_model_tensor(x_rows, model)
     model.eval()
     terms = compute_residual_terms(
         model=model,
-        x=x_rows,
+        x=x_eval,
         ode_model=ode_model,
         formulation=formulation,
         create_graph=False,
@@ -408,11 +431,13 @@ def _evaluate_dt_loss(
 ) -> float | None:
     if x is None or y is None:
         return None
+    x_eval = _to_model_tensor(x, model)
+    y_eval = _to_model_tensor(y, model)
     model.eval()
     terms = compute_supervised_dt_terms(
         model=model,
-        x=x,
-        y_true=y,
+        x=x_eval,
+        y_true=y_eval,
         ode_model=ode_model,
         formulation=formulation,
         create_graph=False,
@@ -437,6 +462,109 @@ def _compute_weighted_total_loss(
     if not used_any:
         return None
     return float(total)
+
+
+def _ceil_div(num: int, den: int) -> int:
+    return (int(num) + int(den) - 1) // int(den)
+
+
+class _ComponentBatchSampler:
+    def __init__(self, size: int, batch_size: int, *, shuffle: bool, seed: int) -> None:
+        if size <= 0:
+            raise ValueError("Sampler size must be > 0.")
+        if batch_size <= 0:
+            raise ValueError("Sampler batch_size must be > 0.")
+        self.size = int(size)
+        self.batch_size = int(batch_size)
+        self.shuffle = bool(shuffle)
+        self._generator = torch.Generator(device="cpu")
+        self._generator.manual_seed(int(seed))
+        self._indices = torch.empty(0, dtype=torch.long)
+        self._offset = 0
+
+    def _reset(self) -> None:
+        if self.shuffle:
+            self._indices = torch.randperm(self.size, generator=self._generator, device="cpu")
+        else:
+            self._indices = torch.arange(self.size, dtype=torch.long)
+        self._offset = 0
+
+    def next_indices(self, *, target_device: torch.device) -> torch.Tensor:
+        if self._offset >= int(self._indices.numel()):
+            self._reset()
+
+        end = min(self._offset + self.batch_size, int(self._indices.numel()))
+        chunk = self._indices[self._offset:end]
+        self._offset = end
+
+        if int(chunk.numel()) < self.batch_size:
+            remainder = self.batch_size - int(chunk.numel())
+            self._reset()
+            refill = self._indices[:remainder]
+            self._offset = remainder
+            chunk = torch.cat((chunk, refill), dim=0)
+
+        return chunk.to(device=target_device)
+
+
+def _sample_rows_with_indices(
+    x: torch.Tensor,
+    indices: torch.Tensor,
+    y: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
+    if y is None:
+        return x.index_select(0, indices)
+    return x.index_select(0, indices), y.index_select(0, indices)
+
+
+def _iter_minibatch_batches(
+    *,
+    dataset: PinnDatasetBundle,
+    batch_size: int,
+    shuffle: bool,
+    seed: int,
+) -> tuple[int, Iterator[PinnBatch]]:
+    steps_per_epoch = max(
+        _ceil_div(dataset.train_x.shape[0], batch_size),
+        _ceil_div(dataset.train_col_x.shape[0], batch_size),
+        _ceil_div(dataset.train_init_x.shape[0], batch_size),
+    )
+    data_sampler = _ComponentBatchSampler(
+        int(dataset.train_x.shape[0]),
+        batch_size,
+        shuffle=shuffle,
+        seed=seed,
+    )
+    col_sampler = _ComponentBatchSampler(
+        int(dataset.train_col_x.shape[0]),
+        batch_size,
+        shuffle=shuffle,
+        seed=seed + 1,
+    )
+    init_sampler = _ComponentBatchSampler(
+        int(dataset.train_init_x.shape[0]),
+        batch_size,
+        shuffle=shuffle,
+        seed=seed + 2,
+    )
+
+    def batch_iterator():
+        for _ in range(steps_per_epoch):
+            data_idx = data_sampler.next_indices(target_device=dataset.train_x.device)
+            col_idx = col_sampler.next_indices(target_device=dataset.train_col_x.device)
+            init_idx = init_sampler.next_indices(target_device=dataset.train_init_x.device)
+            x_data, y_data = _sample_rows_with_indices(dataset.train_x, data_idx, dataset.train_y)
+            x_init, y_init = _sample_rows_with_indices(dataset.train_init_x, init_idx, dataset.train_init_y)
+            x_col = _sample_rows_with_indices(dataset.train_col_x, col_idx)
+            yield PinnBatch(
+                x_data=x_data,
+                y_data=y_data,
+                x_col=x_col,
+                x_init=x_init,
+                y_init=y_init,
+            )
+
+    return steps_per_epoch, batch_iterator()
 
 
 def _build_checkpoint_payload(
@@ -604,7 +732,7 @@ def train_pinn(
         activation=activation,
     ).to(device=device, dtype=dtype)
 
-    dataset = move_pinn_dataset_to_device(dataset, device=device, dtype=dtype)
+    dataset = move_pinn_training_data_to_device(dataset, device=device, dtype=dtype)
 
     pinn_model = PinnModel(
         model=model,
@@ -656,20 +784,6 @@ def train_pinn(
                 raise ValueError(f"Optimizer '{stage.optimizer}' does not support minibatch execution.")
             stage_batch_size = stage.batch_size if stage.batch_size is not None else int(cfg_get(config, "pinn.default_batch_size", 1024))
 
-        if stage_batch_size is None:
-            train_batches = [(dataset.train_x, dataset.train_y)]
-            col_batches = [dataset.train_col_x]
-            init_batches = [(dataset.train_init_x, dataset.train_init_y)]
-        else:
-            data_gen = torch.Generator()
-            data_gen.manual_seed(seed + stage_idx)
-            train_loader = DataLoader(dataset.train_dataset, batch_size=stage_batch_size, shuffle=stage.shuffle, generator=data_gen)
-            col_loader = DataLoader(dataset.collocation_dataset, batch_size=stage_batch_size, shuffle=stage.shuffle, generator=data_gen)
-            init_loader = DataLoader(dataset.init_dataset, batch_size=stage_batch_size, shuffle=stage.shuffle, generator=data_gen)
-            train_batches = train_loader
-            col_batches = col_loader
-            init_batches = init_loader
-
         for epoch in range(1, stage.epochs + 1):
             model.train()
             epoch_losses: list[PinnLossBreakdown] = []
@@ -701,34 +815,19 @@ def train_pinn(
                 if gradient_telemetry is not None:
                     epoch_gradients.append(gradient_telemetry)
             else:
-                data_gen = torch.Generator()
-                data_gen.manual_seed(seed + stage_idx + global_epoch)
-                train_loader = DataLoader(
-                    TensorDataset(epoch_train_x, epoch_train_y),
+                _steps, epoch_batches = _iter_minibatch_batches(
+                    dataset=PinnDatasetBundle(
+                        train_x=epoch_train_x,
+                        train_y=epoch_train_y,
+                        train_col_x=epoch_train_col_x,
+                        train_init_x=dataset.train_init_x,
+                        train_init_y=dataset.train_init_y,
+                    ),
                     batch_size=stage_batch_size,
                     shuffle=stage.shuffle,
-                    generator=data_gen,
+                    seed=seed + stage_idx + global_epoch,
                 )
-                col_loader = DataLoader(
-                    TensorDataset(epoch_train_col_x),
-                    batch_size=stage_batch_size,
-                    shuffle=stage.shuffle,
-                    generator=data_gen,
-                )
-                init_loader = DataLoader(
-                    dataset.init_dataset,
-                    batch_size=stage_batch_size,
-                    shuffle=stage.shuffle,
-                    generator=data_gen,
-                )
-                train_batches = train_loader
-                col_batches = col_loader
-                init_batches = init_loader
-                for (x_data, y_data), x_col, (x_init, y_init) in zip(
-                    train_batches,
-                    cycle(col_batches),
-                    cycle(init_batches),
-                ):
+                for batch in epoch_batches:
                     breakdown, gradient_telemetry = _train_pinn_step(
                         model=model,
                         optimizer_spec=optimizer_spec,
@@ -736,11 +835,11 @@ def train_pinn(
                         ode_model=ode_model,
                         formulation=formulation,
                         weights=weights,
-                        x_data=x_data,
-                        y_data=y_data,
-                        x_col=x_col[0],
-                        x_init=x_init,
-                        y_init=y_init,
+                        x_data=batch.x_data,
+                        y_data=batch.y_data,
+                        x_col=batch.x_col,
+                        x_init=batch.x_init,
+                        y_init=batch.y_init,
                         capture_gradient_telemetry=capture_gradient_telemetry,
                     )
                     epoch_losses.append(breakdown)

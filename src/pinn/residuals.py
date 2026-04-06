@@ -17,6 +17,11 @@ class ResidualTerms:
     residual: torch.Tensor
 
 
+def prepare_input_for_autograd(x: torch.Tensor) -> torch.Tensor:
+    """Clone an input batch into a fresh leaf tensor that tracks gradients."""
+    return x.detach().clone().requires_grad_(True)
+
+
 def _build_ode_state(
     *,
     state_source: torch.Tensor,
@@ -85,18 +90,19 @@ def compute_residual_terms(
     ode_model: Any,
     formulation: str = "odequations",
     create_graph: bool = True,
+    prediction: torch.Tensor | None = None,
 ) -> ResidualTerms:
-    x_req = x.detach().clone().requires_grad_(True)
-    prediction = model(x_req)
-    dy_dt = compute_time_derivative(prediction=prediction, x=x_req, create_graph=create_graph)
+    x_req = x if x.requires_grad else prepare_input_for_autograd(x)
+    prediction_value = model(x_req) if prediction is None else prediction
+    dy_dt = compute_time_derivative(prediction=prediction_value, x=x_req, create_graph=create_graph)
     ode_rhs = evaluate_ode_rhs(
         ode_model=ode_model,
-        state_source=prediction,
+        state_source=prediction_value,
         x=x_req,
         formulation=formulation,
     )
     return ResidualTerms(
-        prediction=prediction,
+        prediction=prediction_value,
         dy_dt=dy_dt,
         ode_rhs=ode_rhs,
         residual=dy_dt - ode_rhs,
@@ -110,10 +116,11 @@ def compute_supervised_dt_terms(
     ode_model: Any,
     formulation: str = "odequations",
     create_graph: bool = True,
+    prediction: torch.Tensor | None = None,
 ) -> ResidualTerms:
-    x_req = x.detach().clone().requires_grad_(True)
-    prediction = model(x_req)
-    dy_dt = compute_time_derivative(prediction=prediction, x=x_req, create_graph=create_graph)
+    x_req = x if x.requires_grad else prepare_input_for_autograd(x)
+    prediction_value = model(x_req) if prediction is None else prediction
+    dy_dt = compute_time_derivative(prediction=prediction_value, x=x_req, create_graph=create_graph)
     ode_rhs = evaluate_ode_rhs(
         ode_model=ode_model,
         state_source=y_true,
@@ -121,7 +128,7 @@ def compute_supervised_dt_terms(
         formulation=formulation,
     )
     return ResidualTerms(
-        prediction=prediction,
+        prediction=prediction_value,
         dy_dt=dy_dt,
         ode_rhs=ode_rhs,
         residual=dy_dt - ode_rhs,

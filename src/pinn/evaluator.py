@@ -12,7 +12,7 @@ from torch import nn
 from src.pinn.analysis_data import PinnAnalysisBundle
 from src.pinn.data import PinnDatasetBundle
 from src.pinn.losses import LOSS_COMPONENTS, LossWeights, PinnLossBreakdown, compute_pinn_losses
-from src.pinn.residuals import compute_residual_terms, compute_supervised_dt_terms
+from src.pinn.residuals import compute_residual_terms, compute_supervised_dt_terms, prepare_input_for_autograd
 
 
 @dataclass(frozen=True)
@@ -61,6 +61,27 @@ def move_pinn_dataset_to_device(
     )
 
 
+def move_pinn_training_data_to_device(
+    dataset: PinnDatasetBundle,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> PinnDatasetBundle:
+    """Move only training tensors onto the training device."""
+    return PinnDatasetBundle(
+        train_x=dataset.train_x.to(device=device, dtype=dtype),
+        train_y=dataset.train_y.to(device=device, dtype=dtype),
+        train_col_x=dataset.train_col_x.to(device=device, dtype=dtype),
+        train_init_x=dataset.train_init_x.to(device=device, dtype=dtype),
+        train_init_y=dataset.train_init_y.to(device=device, dtype=dtype),
+        val_x=None if dataset.val_x is None else dataset.val_x.to(dtype=dtype),
+        val_y=None if dataset.val_y is None else dataset.val_y.to(dtype=dtype),
+        val_col_x=None if dataset.val_col_x is None else dataset.val_col_x.to(dtype=dtype),
+        test_x=None if dataset.test_x is None else dataset.test_x.to(dtype=dtype),
+        test_y=None if dataset.test_y is None else dataset.test_y.to(dtype=dtype),
+    )
+
+
 def evaluate_pinn_loss_breakdown(
     *,
     model: nn.Module,
@@ -76,14 +97,16 @@ def evaluate_pinn_loss_breakdown(
     create_graph: bool = True,
 ) -> PinnLossBreakdown:
     """Evaluate the supervised, dt, physics, IC, and total PINN losses."""
-    pred = model(x_data)
+    x_data_req = prepare_input_for_autograd(x_data)
+    pred = model(x_data_req)
     supervised_dt_terms = compute_supervised_dt_terms(
         model=model,
-        x=x_data,
+        x=x_data_req,
         y_true=y_data,
         ode_model=ode_model,
         formulation=formulation,
         create_graph=create_graph,
+        prediction=pred,
     )
     collocation_terms = compute_residual_terms(
         model=model,
