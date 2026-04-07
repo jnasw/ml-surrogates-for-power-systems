@@ -17,6 +17,12 @@ from src.pinn.data import PinnDatasetBundle
 from src.pinn.evaluator import evaluate_pinn_loss_breakdown, move_pinn_training_data_to_device
 from src.pinn.logging import EpochMetrics, PinnLogger
 from src.pinn.losses import LossWeights, PinnLossBreakdown
+from src.pinn.multistage import (
+    MultistagePinnEnsemble,
+    MultistageStageMLP,
+    StageDiagnostics,
+    estimate_stage_diagnostics,
+)
 from src.pinn.optim import OptimizerSpec, build_optimizer
 from src.pinn.residuals import compute_residual_terms, compute_supervised_dt_terms
 from src.pinn.runtime import OptimizerPhase, load_optimizer_phases, resolve_torch_dtype, torch_dtype_name
@@ -104,7 +110,7 @@ class BaselineConfig:
 
 @dataclass
 class PinnModel:
-    model: TimeConditionedMLP
+    model: nn.Module
     device: torch.device
     dtype: torch.dtype
     input_dim: int
@@ -112,6 +118,11 @@ class PinnModel:
     hidden_dim: int
     hidden_layers: int
     activation: str
+    architecture: str = "single_stage"
+    stage_first_activations: list[str] | None = None
+    stage_hidden_activations: list[str] | None = None
+    stage_time_scales: list[float] | None = None
+    stage_epsilons: list[float] | None = None
 
     def save_checkpoint(self, path: str) -> None:
         payload = {
@@ -122,6 +133,11 @@ class PinnModel:
             "hidden_layers": self.hidden_layers,
             "activation": self.activation,
             "dtype": torch_dtype_name(self.dtype),
+            "architecture": self.architecture,
+            "stage_first_activations": [] if self.stage_first_activations is None else list(self.stage_first_activations),
+            "stage_hidden_activations": [] if self.stage_hidden_activations is None else list(self.stage_hidden_activations),
+            "stage_time_scales": [] if self.stage_time_scales is None else [float(x) for x in self.stage_time_scales],
+            "stage_epsilons": [] if self.stage_epsilons is None else [float(x) for x in self.stage_epsilons],
         }
         torch.save(payload, path)
 
@@ -132,13 +148,35 @@ class PinnModel:
         device = select_torch_device(device_preference)
         if device.type == "mps" and dtype == torch.float64:
             device = torch.device("cpu")
-        model = TimeConditionedMLP(
-            input_dim=int(payload["input_dim"]),
-            output_dim=int(payload["output_dim"]),
-            hidden_dim=int(payload["hidden_dim"]),
-            hidden_layers=int(payload["hidden_layers"]),
-            activation=str(payload["activation"]),
-        ).to(device=device, dtype=dtype)
+        architecture = str(payload.get("architecture", "single_stage"))
+        if architecture == "multistage":
+            stage_first_activations = [str(x) for x in payload.get("stage_first_activations", [])]
+            stage_hidden_activations = [str(x) for x in payload.get("stage_hidden_activations", [])]
+            stage_time_scales = [float(x) for x in payload.get("stage_time_scales", [])]
+            stage_epsilons = [float(x) for x in payload.get("stage_epsilons", [])]
+            stage_count = len(stage_first_activations)
+            stages = []
+            for idx in range(stage_count):
+                stages.append(
+                    MultistageStageMLP(
+                        input_dim=int(payload["input_dim"]),
+                        output_dim=int(payload["output_dim"]),
+                        hidden_dim=int(payload["hidden_dim"]),
+                        hidden_layers=int(payload["hidden_layers"]),
+                        first_activation=stage_first_activations[idx],
+                        hidden_activation=stage_hidden_activations[idx],
+                        time_scale=stage_time_scales[idx],
+                    )
+                )
+            model = MultistagePinnEnsemble(stages=stages, epsilons=stage_epsilons).to(device=device, dtype=dtype)
+        else:
+            model = TimeConditionedMLP(
+                input_dim=int(payload["input_dim"]),
+                output_dim=int(payload["output_dim"]),
+                hidden_dim=int(payload["hidden_dim"]),
+                hidden_layers=int(payload["hidden_layers"]),
+                activation=str(payload["activation"]),
+            ).to(device=device, dtype=dtype)
         model.load_state_dict(payload["state_dict"])
         model.eval()
         return PinnModel(
@@ -150,6 +188,11 @@ class PinnModel:
             hidden_dim=int(payload["hidden_dim"]),
             hidden_layers=int(payload["hidden_layers"]),
             activation=str(payload["activation"]),
+            architecture=architecture,
+            stage_first_activations=None if architecture != "multistage" else [str(x) for x in payload.get("stage_first_activations", [])],
+            stage_hidden_activations=None if architecture != "multistage" else [str(x) for x in payload.get("stage_hidden_activations", [])],
+            stage_time_scales=None if architecture != "multistage" else [float(x) for x in payload.get("stage_time_scales", [])],
+            stage_epsilons=None if architecture != "multistage" else [float(x) for x in payload.get("stage_epsilons", [])],
         )
 
 
@@ -638,6 +681,11 @@ def _build_checkpoint_payload(
         "hidden_layers": pinn_model.hidden_layers,
         "activation": pinn_model.activation,
         "dtype": torch_dtype_name(pinn_model.dtype),
+        "architecture": pinn_model.architecture,
+        "stage_first_activations": [] if pinn_model.stage_first_activations is None else list(pinn_model.stage_first_activations),
+        "stage_hidden_activations": [] if pinn_model.stage_hidden_activations is None else list(pinn_model.stage_hidden_activations),
+        "stage_time_scales": [] if pinn_model.stage_time_scales is None else [float(x) for x in pinn_model.stage_time_scales],
+        "stage_epsilons": [] if pinn_model.stage_epsilons is None else [float(x) for x in pinn_model.stage_epsilons],
         "checkpoint_tag": tag,
         "metrics": metrics,
         "config": OmegaConf.to_container(config, resolve=True),
@@ -865,6 +913,426 @@ def _phase_supports_dynamic_weight_updates(phase: OptimizerPhase) -> bool:
     return str(phase.optimizer).strip().lower() == "adam"
 
 
+def _pinn_mode(config: Any) -> str:
+    return str(cfg_get(config, "pinn.mode", "single_stage")).strip().lower()
+
+
+def _multistage_max_stages(config: Any) -> int:
+    return int(cfg_get(config, "pinn.multistage.max_stages", 2))
+
+
+def _multistage_stop_threshold(config: Any) -> float:
+    return float(cfg_get(config, "pinn.multistage.stop.residual_rms_threshold", 1.0e-6))
+
+
+def _multistage_stage_epsilon(config: Any, stage_idx: int) -> float:
+    base = float(cfg_get(config, "pinn.multistage.residual_stage.epsilon", 1.0))
+    return 1.0 if stage_idx == 0 else base
+
+
+def _multistage_analysis_collocation(dataset: PinnDatasetBundle, config: Any) -> torch.Tensor:
+    target_rows = cfg_get(config, "pinn.multistage.analysis.collocation_rows", None)
+    if target_rows in (None, "null"):
+        return dataset.train_col_x
+    return _take_fixed_tensor_rows(
+        dataset.train_col_x,
+        target_rows=int(target_rows),
+        seed=int(cfg_get(config, "pinn.multistage.analysis.seed", 0)),
+    )
+
+
+def _build_multistage_stage_model_from_config(
+    *,
+    config: Any,
+    stage_idx: int,
+    input_dim: int,
+    output_dim: int,
+    hidden_dim: int,
+    hidden_layers: int,
+    base_activation: str,
+    time_scale: float,
+) -> MultistageStageMLP:
+    if stage_idx == 0:
+        first_activation = str(cfg_get(config, "pinn.multistage.base_stage.first_activation", base_activation))
+        hidden_activation = str(cfg_get(config, "pinn.multistage.base_stage.hidden_activation", base_activation))
+        return MultistageStageMLP(
+            input_dim=input_dim,
+            output_dim=output_dim,
+            hidden_dim=hidden_dim,
+            hidden_layers=hidden_layers,
+            first_activation=first_activation,
+            hidden_activation=hidden_activation,
+            time_scale=1.0,
+        )
+    first_activation = str(cfg_get(config, "pinn.multistage.residual_stage.first_activation", "sin"))
+    hidden_activation = str(cfg_get(config, "pinn.multistage.residual_stage.hidden_activation", "tanh"))
+    return MultistageStageMLP(
+        input_dim=input_dim,
+        output_dim=output_dim,
+        hidden_dim=hidden_dim,
+        hidden_layers=hidden_layers,
+        first_activation=first_activation,
+        hidden_activation=hidden_activation,
+        time_scale=time_scale,
+    )
+
+
+def _assemble_multistage_pinn_model(
+    *,
+    ensemble: MultistagePinnEnsemble,
+    device: torch.device,
+    dtype: torch.dtype,
+    input_dim: int,
+    output_dim: int,
+    hidden_dim: int,
+    hidden_layers: int,
+    activation: str,
+) -> PinnModel:
+    stage_first_activations = [stage.first_activation_name for stage in ensemble.stages]
+    stage_hidden_activations = [stage.hidden_activation_name for stage in ensemble.stages]
+    stage_time_scales = [float(stage.time_scale) for stage in ensemble.stages]
+    return PinnModel(
+        model=ensemble,
+        device=device,
+        dtype=dtype,
+        input_dim=input_dim,
+        output_dim=output_dim,
+        hidden_dim=hidden_dim,
+        hidden_layers=hidden_layers,
+        activation=activation,
+        architecture="multistage",
+        stage_first_activations=stage_first_activations,
+        stage_hidden_activations=stage_hidden_activations,
+        stage_time_scales=stage_time_scales,
+        stage_epsilons=ensemble.epsilon_values(),
+    )
+
+
+def _train_multistage_pinn(
+    *,
+    dataset: PinnDatasetBundle,
+    ode_model: Any,
+    config: Any,
+    logger: PinnLogger | None = None,
+) -> tuple[PinnModel, list[EpochMetrics]]:
+    seed = int(cfg_get(config, "model.seed", 0))
+    configure_reproducibility_from_config(seed=seed, config=config, prefix="pinn")
+
+    dtype = resolve_torch_dtype(str(cfg_get(config, "pinn.dtype", "float64")))
+    device = select_torch_device(str(cfg_get(config, "pinn.device", "auto")))
+    hidden_dim = int(cfg_get(config, "pinn.hidden_dim", 64))
+    hidden_layers = int(cfg_get(config, "pinn.hidden_layers", 4))
+    activation = str(cfg_get(config, "pinn.activation", "tanh"))
+    formulation = str(cfg_get(config, "pinn.formulation", "odequations"))
+    optimizer_phases = load_optimizer_phases(config)
+    base_weights = _loss_weights_from_config(config)
+    gradient_telemetry_enabled = bool(cfg_get(config, "pinn.gradient_telemetry.enabled", False))
+    criterion = nn.MSELoss()
+
+    dataset = move_pinn_training_data_to_device(dataset, device=device, dtype=dtype)
+    analysis_x_col = _multistage_analysis_collocation(dataset, config)
+    max_stages = _multistage_max_stages(config)
+    stop_threshold = _multistage_stop_threshold(config)
+    total_epochs = int(sum(phase.epochs for phase in optimizer_phases) * max_stages)
+    checkpoint_milestones = _resolve_checkpoint_milestones(config, total_epochs)
+
+    stages: list[MultistageStageMLP] = []
+    epsilons: list[float] = []
+    rows: list[EpochMetrics] = []
+    best_metric: float | None = None
+    global_epoch = 0
+    ensemble: MultistagePinnEnsemble | None = None
+    stage_start_diagnostics: StageDiagnostics | None = None
+
+    for stage_idx in range(max_stages):
+        if stage_idx == 0:
+            time_scale = 1.0
+        else:
+            if ensemble is None:
+                raise RuntimeError("Expected an existing ensemble before training a residual stage.")
+            residual_terms = compute_residual_terms(
+                model=ensemble,
+                x=analysis_x_col,
+                ode_model=ode_model,
+                formulation=formulation,
+                create_graph=False,
+            )
+            stage_start_diagnostics = estimate_stage_diagnostics(
+                x_col=analysis_x_col,
+                residual=residual_terms.residual,
+                min_kappa=float(cfg_get(config, "pinn.multistage.residual_stage.kappa_min", 1.0)),
+                max_kappa=float(cfg_get(config, "pinn.multistage.residual_stage.kappa_max", 100.0)),
+            )
+            if stage_start_diagnostics.residual_rms <= stop_threshold:
+                break
+            time_scale = stage_start_diagnostics.kappa_suggested
+
+        stage_model = _build_multistage_stage_model_from_config(
+            config=config,
+            stage_idx=stage_idx,
+            input_dim=dataset.input_dim,
+            output_dim=dataset.output_dim,
+            hidden_dim=hidden_dim,
+            hidden_layers=hidden_layers,
+            base_activation=activation,
+            time_scale=time_scale,
+        ).to(device=device, dtype=dtype)
+        stages.append(stage_model)
+        epsilons.append(_multistage_stage_epsilon(config, stage_idx))
+        ensemble = MultistagePinnEnsemble(stages=list(stages), epsilons=list(epsilons)).to(device=device, dtype=dtype)
+        ensemble.freeze_stages_up_to(stage_idx)
+        pinn_model = _assemble_multistage_pinn_model(
+            ensemble=ensemble,
+            device=device,
+            dtype=dtype,
+            input_dim=dataset.input_dim,
+            output_dim=dataset.output_dim,
+            hidden_dim=hidden_dim,
+            hidden_layers=hidden_layers,
+            activation=activation,
+        )
+
+        if logger is not None and stage_idx == 0 and _checkpointing_enabled(config, "save_init", True):
+            logger.save_checkpoint(
+                _build_checkpoint_payload(
+                    pinn_model=pinn_model,
+                    metrics=None,
+                    config=config,
+                    tag="init",
+                ),
+                tag="init",
+            )
+
+        current_stage = ensemble.stages[stage_idx]
+        for phase in optimizer_phases:
+            optimizer_spec = build_optimizer(
+                model=current_stage,
+                optimizer_name=phase.optimizer,
+                lr=phase.lr,
+                optimizer_kwargs=phase.optimizer_kwargs,
+                line_search=phase.line_search,
+            )
+            phase_full_batch = _phase_effective_full_batch(phase, optimizer_spec)
+            if phase_full_batch and phase.batch_size is not None:
+                raise ValueError(f"Optimizer phase '{phase.name}' is full-batch and must set batch_size=null.")
+            phase_allows_sampling = _phase_allows_sampling(phase, optimizer_spec)
+            if phase_full_batch and phase_allows_sampling:
+                raise ValueError(f"Optimizer phase '{phase.name}' is full-batch and must disable sampling for a stable objective.")
+            if phase_full_batch:
+                phase_batch_size = None
+            else:
+                if not optimizer_spec.supports_minibatch:
+                    raise ValueError(f"Optimizer '{phase.optimizer}' does not support minibatch execution.")
+                phase_batch_size = phase.batch_size if phase.batch_size is not None else int(cfg_get(config, "pinn.default_batch_size", 1024))
+
+            for epoch in range(1, phase.epochs + 1):
+                ensemble.train()
+                epoch_losses: list[PinnLossBreakdown] = []
+                epoch_gradients: list[GradientTelemetry] = []
+                active_weights = base_weights
+                if phase_allows_sampling:
+                    epoch_train_x, epoch_train_y = _sample_supervised_rows(dataset.train_x, dataset.train_y, config)
+                    epoch_train_col_x = _sample_collocation_rows(dataset.train_col_x, config)
+                else:
+                    epoch_train_x, epoch_train_y = dataset.train_x, dataset.train_y
+                    epoch_train_col_x = dataset.train_col_x
+
+                if phase_batch_size is None:
+                    breakdown, gradient_telemetry = _train_pinn_step(
+                        model=ensemble,
+                        optimizer_spec=optimizer_spec,
+                        criterion=criterion,
+                        ode_model=ode_model,
+                        formulation=formulation,
+                        weights=active_weights,
+                        x_data=epoch_train_x,
+                        y_data=epoch_train_y,
+                        x_col=epoch_train_col_x,
+                        x_init=dataset.train_init_x,
+                        y_init=dataset.train_init_y,
+                        capture_gradient_telemetry=gradient_telemetry_enabled,
+                    )
+                    epoch_losses.append(breakdown)
+                    if gradient_telemetry is not None:
+                        epoch_gradients.append(gradient_telemetry)
+                else:
+                    _steps, epoch_batches = _iter_minibatch_batches(
+                        dataset=PinnDatasetBundle(
+                            train_x=epoch_train_x,
+                            train_y=epoch_train_y,
+                            train_col_x=epoch_train_col_x,
+                            train_init_x=dataset.train_init_x,
+                            train_init_y=dataset.train_init_y,
+                        ),
+                        batch_size=phase_batch_size,
+                        shuffle=phase.shuffle,
+                        seed=seed + stage_idx * 1000 + global_epoch,
+                    )
+                    for batch in epoch_batches:
+                        breakdown, gradient_telemetry = _train_pinn_step(
+                            model=ensemble,
+                            optimizer_spec=optimizer_spec,
+                            criterion=criterion,
+                            ode_model=ode_model,
+                            formulation=formulation,
+                            weights=active_weights,
+                            x_data=batch.x_data,
+                            y_data=batch.y_data,
+                            x_col=batch.x_col,
+                            x_init=batch.x_init,
+                            y_init=batch.y_init,
+                            capture_gradient_telemetry=gradient_telemetry_enabled,
+                        )
+                        epoch_losses.append(breakdown)
+                        if gradient_telemetry is not None:
+                            epoch_gradients.append(gradient_telemetry)
+
+                train_total = float(torch.stack([x.total.detach() for x in epoch_losses]).mean().item())
+                train_component_losses = {
+                    name: float(torch.stack([loss.components[name].detach() for loss in epoch_losses]).mean().item())
+                    for name in epoch_losses[0].components
+                }
+                train_total_grad_norm = None
+                train_component_grad_norms = None
+                train_weighted_component_grad_norms = None
+                if epoch_gradients:
+                    train_total_grad_norm = float(np.mean([item.total_grad_norm for item in epoch_gradients]))
+                    component_names = epoch_gradients[0].component_grad_norms.keys()
+                    train_component_grad_norms = {
+                        name: float(np.mean([item.component_grad_norms[name] for item in epoch_gradients]))
+                        for name in component_names
+                    }
+                    train_weighted_component_grad_norms = {
+                        name: float(np.mean([item.weighted_component_grad_norms[name] for item in epoch_gradients]))
+                        for name in component_names
+                    }
+                global_epoch += 1
+                val_total_loss = None
+                val_component_losses = None
+                test_metrics = None
+                if _should_run_evaluation(global_epoch, config):
+                    val_component_losses = {}
+                    val_component_losses["data"] = _evaluate_data_loss(model=ensemble, x=dataset.val_x, y=dataset.val_y, criterion=criterion)
+                    val_component_losses["dt"] = _evaluate_dt_loss(
+                        model=ensemble,
+                        x=dataset.val_x,
+                        y=dataset.val_y,
+                        ode_model=ode_model,
+                        criterion=criterion,
+                        formulation=formulation,
+                    )
+                    val_component_losses["physics"] = _evaluate_physics_loss(
+                        model=ensemble,
+                        x_rows=dataset.val_col_x if dataset.val_col_x is not None else dataset.val_x,
+                        ode_model=ode_model,
+                        criterion=criterion,
+                        formulation=formulation,
+                    )
+                    init_val = _evaluate_data_loss(model=ensemble, x=dataset.train_init_x, y=dataset.train_init_y, criterion=criterion)
+                    val_component_losses["ic"] = init_val
+                    val_total_loss = _compute_weighted_total_loss(val_component_losses, active_weights)
+                    test_metrics = {"data_loss": _evaluate_data_loss(model=ensemble, x=dataset.test_x, y=dataset.test_y, criterion=criterion)}
+
+                optimizer_diagnostics = {
+                    "requires_closure": optimizer_spec.requires_closure,
+                    "full_batch": phase_full_batch,
+                    "sampling_enabled": phase_allows_sampling,
+                    "line_search": optimizer_spec.line_search_name,
+                    "dynamic_weight_updates_enabled": False,
+                    "multistage_stage_idx": stage_idx,
+                    "multistage_num_stages": ensemble.num_stages,
+                    "multistage_stage_time_scale": float(time_scale),
+                    "multistage_stage_epsilon": float(epsilons[stage_idx]),
+                }
+                if stage_start_diagnostics is not None and stage_idx > 0:
+                    optimizer_diagnostics["multistage_stage_start_residual_rms"] = float(stage_start_diagnostics.residual_rms)
+                    optimizer_diagnostics["multistage_stage_zero_crossings"] = int(stage_start_diagnostics.residual_zero_crossings)
+                if hasattr(optimizer_spec.optimizer, "get_last_diagnostics"):
+                    optimizer_diagnostics.update(optimizer_spec.optimizer.get_last_diagnostics())
+
+                row = EpochMetrics(
+                    epoch=epoch,
+                    global_epoch=global_epoch,
+                    phase_name=f"stage{stage_idx:02d}_{phase.name}",
+                    optimizer=phase.optimizer,
+                    train_total_loss=train_total,
+                    train_component_losses=train_component_losses,
+                    train_total_grad_norm=train_total_grad_norm,
+                    train_component_grad_norms=train_component_grad_norms,
+                    train_weighted_component_grad_norms=train_weighted_component_grad_norms,
+                    val_total_loss=val_total_loss,
+                    val_component_losses=val_component_losses,
+                    test_metrics=test_metrics,
+                    weighting_scheme="static",
+                    weighting_updated=False,
+                    train_loss_weights=active_weights.as_dict(),
+                    weighting_raw_candidate_weights={},
+                    weighting_probe_grad_l2_norms=None,
+                    weighting_probe_grad_mean_abs=None,
+                    weighting_probe_grad_max_abs=None,
+                    weighting_probe_grad_std=None,
+                    weighting_anchor="physics",
+                    optimizer_diagnostics=optimizer_diagnostics,
+                )
+                rows.append(row)
+
+                if logger is not None:
+                    logger.write_metrics(rows)
+                    logger.print_epoch_metrics(row)
+                    logger.log_epoch_metrics(row)
+                    milestone_tag = checkpoint_milestones.get(global_epoch)
+                    if milestone_tag is not None:
+                        logger.save_checkpoint(
+                            _build_checkpoint_payload(
+                                pinn_model=pinn_model,
+                                metrics=row,
+                                config=config,
+                                tag=milestone_tag,
+                            ),
+                            tag=milestone_tag,
+                        )
+                    if _checkpointing_enabled(config, "save_last", True):
+                        logger.save_checkpoint(
+                            _build_checkpoint_payload(
+                                pinn_model=pinn_model,
+                                metrics=row,
+                                config=config,
+                                tag="last",
+                            ),
+                            tag="last",
+                        )
+
+                selection_metric = row.val_total_loss if row.val_total_loss is not None else row.train_total_loss
+                if best_metric is None or selection_metric < best_metric:
+                    best_metric = selection_metric
+                    if logger is not None and _checkpointing_enabled(config, "save_best", True):
+                        logger.save_checkpoint(
+                            _build_checkpoint_payload(
+                                pinn_model=pinn_model,
+                                metrics=row,
+                                config=config,
+                                tag="best",
+                            ),
+                            tag="best",
+                        )
+
+        ensemble.eval()
+
+    if ensemble is None:
+        raise RuntimeError("Multistage PINN training did not instantiate any stages.")
+    final_model = _assemble_multistage_pinn_model(
+        ensemble=ensemble,
+        device=device,
+        dtype=dtype,
+        input_dim=dataset.input_dim,
+        output_dim=dataset.output_dim,
+        hidden_dim=hidden_dim,
+        hidden_layers=hidden_layers,
+        activation=activation,
+    )
+    return final_model, rows
+
+
 def train_pinn(
     *,
     dataset: PinnDatasetBundle,
@@ -872,6 +1340,9 @@ def train_pinn(
     config: Any,
     logger: PinnLogger | None = None,
 ) -> tuple[PinnModel, list[EpochMetrics]]:
+    if _pinn_mode(config) == "multistage":
+        return _train_multistage_pinn(dataset=dataset, ode_model=ode_model, config=config, logger=logger)
+
     seed = int(cfg_get(config, "model.seed", 0))
     configure_reproducibility_from_config(seed=seed, config=config, prefix="pinn")
 

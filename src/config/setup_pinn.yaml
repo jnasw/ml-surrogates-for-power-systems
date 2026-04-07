@@ -16,6 +16,7 @@ dataset:
   number: 1
 
 pinn:
+  mode: single_stage # single_stage | multistage
   hidden_dim: 64
   hidden_layers: 4
   activation: tanh
@@ -81,6 +82,22 @@ pinn:
       physics_rows: 256
       init_rows: 256
       seed: 0
+  multistage:
+    max_stages: 2
+    stop:
+      residual_rms_threshold: 1.0e-6
+    analysis:
+      collocation_rows: 2048
+      seed: 0
+    base_stage:
+      first_activation: ${pinn.activation}
+      hidden_activation: ${pinn.activation}
+    residual_stage:
+      first_activation: sin
+      hidden_activation: tanh
+      epsilon: 1.0
+      kappa_min: 1.0
+      kappa_max: 100.0
   optimizer_phases:
     - name: adam
       optimizer: Adam
