@@ -950,6 +950,21 @@ def _multistage_residual_optimizer_phases(config: Any) -> list[OptimizerPhase]:
     return load_optimizer_phases_from_raw(raw, config_label="config.pinn.multistage.residual_stage.optimizer_phases")
 
 
+def _multistage_stage_optimizer_phases(config: Any) -> list[list[OptimizerPhase]] | None:
+    raw = cfg_get(config, "pinn.multistage.stage_optimizer_phases", None)
+    if raw in (None, "null"):
+        return None
+    schedules: list[list[OptimizerPhase]] = []
+    for idx, raw_schedule in enumerate(raw):
+        schedules.append(
+            load_optimizer_phases_from_raw(
+                raw_schedule,
+                config_label=f"config.pinn.multistage.stage_optimizer_phases[{idx}]",
+            )
+        )
+    return schedules
+
+
 def _multistage_analysis_collocation(dataset: PinnDatasetBundle, config: Any) -> torch.Tensor:
     target_rows = cfg_get(config, "pinn.multistage.analysis.collocation_rows", None)
     if target_rows in (None, "null"):
@@ -1044,6 +1059,7 @@ def _train_multistage_pinn(
     hidden_layers = int(cfg_get(config, "pinn.hidden_layers", 4))
     activation = str(cfg_get(config, "pinn.activation", "tanh"))
     formulation = str(cfg_get(config, "pinn.formulation", "odequations"))
+    explicit_stage_optimizer_phases = _multistage_stage_optimizer_phases(config)
     base_optimizer_phases = _multistage_base_optimizer_phases(config)
     residual_optimizer_phases = _multistage_residual_optimizer_phases(config)
     base_weights = _loss_weights_from_config(config)
@@ -1052,11 +1068,14 @@ def _train_multistage_pinn(
 
     dataset = move_pinn_training_data_to_device(dataset, device=device, dtype=dtype)
     analysis_x_col = _multistage_analysis_collocation(dataset, config)
-    max_stages = _multistage_max_stages(config)
+    max_stages = len(explicit_stage_optimizer_phases) if explicit_stage_optimizer_phases is not None else _multistage_max_stages(config)
     stop_threshold = _multistage_stop_threshold(config)
-    base_total_epochs = int(sum(phase.epochs for phase in base_optimizer_phases))
-    residual_total_epochs = int(sum(phase.epochs for phase in residual_optimizer_phases))
-    total_epochs = int(base_total_epochs + max(0, max_stages - 1) * residual_total_epochs)
+    if explicit_stage_optimizer_phases is not None:
+        total_epochs = int(sum(sum(phase.epochs for phase in schedule) for schedule in explicit_stage_optimizer_phases))
+    else:
+        base_total_epochs = int(sum(phase.epochs for phase in base_optimizer_phases))
+        residual_total_epochs = int(sum(phase.epochs for phase in residual_optimizer_phases))
+        total_epochs = int(base_total_epochs + max(0, max_stages - 1) * residual_total_epochs)
     checkpoint_milestones = _resolve_checkpoint_milestones(config, total_epochs)
 
     stages: list[MultistageStageMLP] = []
@@ -1127,7 +1146,10 @@ def _train_multistage_pinn(
             )
 
         current_stage = ensemble.stages[stage_idx]
-        stage_optimizer_phases = base_optimizer_phases if stage_idx == 0 else residual_optimizer_phases
+        if explicit_stage_optimizer_phases is not None:
+            stage_optimizer_phases = explicit_stage_optimizer_phases[stage_idx]
+        else:
+            stage_optimizer_phases = base_optimizer_phases if stage_idx == 0 else residual_optimizer_phases
         for phase in stage_optimizer_phases:
             optimizer_spec = build_optimizer(
                 model=current_stage,

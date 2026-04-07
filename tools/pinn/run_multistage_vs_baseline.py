@@ -15,11 +15,14 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PHASE_SEQUENCES = [
+DEFAULT_SINGLE_STAGE_PHASE_SEQUENCES = [
     "LBFGS:300",
-    "Adam:300;LBFGS:100",
-    "Adam:300;LBFGS:100;Adam:300",
-    "Adam:300;LBFGS:100;Adam:300;SSBroyden:300",
+]
+DEFAULT_MULTISTAGE_STAGE_PLANS = [
+    "LBFGS:300||Adam:300",
+    "Adam:300||LBFGS:100",
+    "Adam:300||LBFGS:100||Adam:300||SSBroyden:300",
+    "Adam:300||LBFGS:100||Adam:300||LBFGS:100",
 ]
 PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
     "benchmark": {
@@ -29,7 +32,8 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
         "stage2_overrides": ["time=0.05", "num_of_points=20"],
         "gradient_telemetry": True,
         "log_every_epoch": 1,
-        "phase_sequences": DEFAULT_PHASE_SEQUENCES,
+        "single_stage_phase_sequences": DEFAULT_SINGLE_STAGE_PHASE_SEQUENCES,
+        "multistage_stage_plans": DEFAULT_MULTISTAGE_STAGE_PLANS,
     }
 }
 
@@ -153,6 +157,31 @@ def _optimizer_phases_override(
     return key_path + "=[" + ",".join(phases) + "]"
 
 
+def _multistage_stage_plan_override(
+    raw_plan: str,
+    *,
+    batch_size: int,
+    adam_lr: float,
+    quasi_newton_lr: float,
+    line_search_name: str,
+) -> tuple[str, int]:
+    raw_stage_sequences = [item.strip() for item in raw_plan.split("||") if item.strip()]
+    if not raw_stage_sequences:
+        raise ValueError("Each multistage stage plan must include at least one stage schedule.")
+    serialized_stages = [
+        _optimizer_phases_override(
+            "",
+            raw_sequence,
+            batch_size=batch_size,
+            adam_lr=adam_lr,
+            quasi_newton_lr=quasi_newton_lr,
+            line_search_name=line_search_name,
+        )[1:]
+        for raw_sequence in raw_stage_sequences
+    ]
+    return "pinn.multistage.stage_optimizer_phases=[" + ",".join(serialized_stages) + "]", len(raw_stage_sequences)
+
+
 def _build_dataset_command(
     *,
     python_bin: str,
@@ -226,7 +255,7 @@ def _build_pinn_command(
     dtype_name: str,
     batch_size: int,
     raw_sequence: str,
-    residual_raw_sequence: str,
+    multistage_stage_plan: str | None,
     adam_lr: float,
     quasi_newton_lr: float,
     line_search_name: str,
@@ -263,7 +292,6 @@ def _build_pinn_command(
         f"pinn.loss_weights.dt={loss_weight_dt}",
         f"pinn.loss_weights.physics={loss_weight_physics}",
         f"pinn.loss_weights.ic={loss_weight_ic}",
-        f"pinn.multistage.max_stages={int(multistage_max_stages)}",
         f"pinn.multistage.analysis.collocation_rows={int(analysis_collocation_rows)}",
         "wandb.use=true",
         f"wandb.project={wandb_project}",
@@ -283,26 +311,19 @@ def _build_pinn_command(
     if wandb_entity:
         command.append(f"wandb.entity={wandb_entity}")
     if mode == "multistage":
-        command.append(
-            _optimizer_phases_override(
-                "pinn.multistage.base_stage.optimizer_phases",
-                raw_sequence,
-                batch_size=batch_size,
-                adam_lr=adam_lr,
-                quasi_newton_lr=quasi_newton_lr,
-                line_search_name=line_search_name,
-            )
+        if multistage_stage_plan is None:
+            raise ValueError("multistage_stage_plan must be provided when mode=multistage.")
+        stage_plan_override, stage_count = _multistage_stage_plan_override(
+            multistage_stage_plan,
+            batch_size=batch_size,
+            adam_lr=adam_lr,
+            quasi_newton_lr=quasi_newton_lr,
+            line_search_name=line_search_name,
         )
-        command.append(
-            _optimizer_phases_override(
-                "pinn.multistage.residual_stage.optimizer_phases",
-                residual_raw_sequence,
-                batch_size=batch_size,
-                adam_lr=adam_lr,
-                quasi_newton_lr=quasi_newton_lr,
-                line_search_name=line_search_name,
-            )
-        )
+        command.append(f"pinn.multistage.max_stages={int(stage_count)}")
+        command.append(stage_plan_override)
+    else:
+        command.append(f"pinn.multistage.max_stages={int(multistage_max_stages)}")
     return command
 
 
@@ -327,8 +348,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--adam-lr", type=float, default=1e-3, help="Adam learning rate.")
     parser.add_argument("--quasi-newton-lr", type=float, default=1.0, help="Quasi-Newton learning rate.")
     parser.add_argument("--line-search", default="strong_wolfe", choices=["strong_wolfe", "backtracking"], help="Line-search method.")
-    parser.add_argument("--phase-sequence", action="append", default=[], help="Custom optimizer phase sequence. Can be repeated.")
-    parser.add_argument("--multistage-residual-phase-sequence", default="Adam:300", help="Optimizer phase sequence used for residual stages in multistage mode.")
+    parser.add_argument("--phase-sequence", action="append", default=[], help="Custom optimizer phase sequence for single-stage mode. Can be repeated.")
+    parser.add_argument("--multistage-stage-plan", action="append", default=[], help="Explicit multistage stage plan with stages separated by '||'. Example: 'Adam:300||LBFGS:100||Adam:300'. Can be repeated.")
     parser.add_argument("--modes", default="single_stage,multistage", help="Comma-separated PINN modes to run.")
     parser.add_argument("--multistage-max-stages", type=int, default=2, help="Maximum number of multistage residual stages.")
     parser.add_argument("--analysis-collocation-rows", type=int, default=2048, help="Probe collocation rows for multistage diagnostics.")
@@ -352,7 +373,8 @@ def main() -> None:
     args = parser.parse_args()
 
     profile_config = _profile_config(args.profile)
-    resolved_sequences = _parse_sequences(args.phase_sequence, list(profile_config["phase_sequences"]))
+    resolved_sequences = _parse_sequences(args.phase_sequence, list(profile_config["single_stage_phase_sequences"]))
+    resolved_multistage_stage_plans = _parse_sequences(args.multistage_stage_plan, list(profile_config["multistage_stage_plans"]))
     resolved_budget = args.budget or str(profile_config["budget"])
     resolved_preset = args.preset or str(profile_config["preset"])
     resolved_stage1_overrides = [*list(profile_config["stage1_overrides"]), *list(args.stage1_override)]
@@ -413,7 +435,7 @@ def main() -> None:
         "dataset_pipeline_root": None if dataset_pipeline_root is None else str(dataset_pipeline_root),
         "modes": modes,
         "phase_sequences": resolved_sequences,
-        "multistage_residual_phase_sequence": str(args.multistage_residual_phase_sequence),
+        "multistage_stage_plans": resolved_multistage_stage_plans,
         "gradient_telemetry": resolved_gradient_telemetry,
         "analysis_collocation_rows": int(args.analysis_collocation_rows),
         "multistage_max_stages": int(args.multistage_max_stages),
@@ -431,8 +453,9 @@ def main() -> None:
     ]
 
     for mode in modes:
-        for raw_sequence in resolved_sequences:
-            sequence_slug = _sequence_slug(raw_sequence)
+        run_sequences = resolved_multistage_stage_plans if mode == "multistage" else resolved_sequences
+        for raw_sequence in run_sequences:
+            sequence_slug = _sequence_slug(raw_sequence.replace("||", "_then_"))
             run_name = f"{mode}_{sequence_slug}"
             run_dir = output_root / "runs" / run_name
             wandb_tags = [
@@ -460,7 +483,7 @@ def main() -> None:
                 dtype_name=args.dtype,
                 batch_size=args.batch_size,
                 raw_sequence=raw_sequence,
-                residual_raw_sequence=str(args.multistage_residual_phase_sequence),
+                multistage_stage_plan=None if mode != "multistage" else raw_sequence,
                 adam_lr=args.adam_lr,
                 quasi_newton_lr=args.quasi_newton_lr,
                 line_search_name=args.line_search,
@@ -477,8 +500,8 @@ def main() -> None:
             summary["runs"].append(
                 {
                     "mode": mode,
-                    "phase_sequence": raw_sequence,
-                    "multistage_residual_phase_sequence": None if mode != "multistage" else str(args.multistage_residual_phase_sequence),
+                    "phase_sequence": None if mode == "multistage" else raw_sequence,
+                    "multistage_stage_plan": None if mode != "multistage" else raw_sequence,
                     "run_name": run_name,
                     "run_dir": str(run_dir),
                 }

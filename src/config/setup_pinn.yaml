@@ -84,6 +84,7 @@ pinn:
       seed: 0
   multistage:
     max_stages: 2
+    stage_optimizer_phases: null
     stop:
       residual_rms_threshold: 1.0e-6
     analysis:
