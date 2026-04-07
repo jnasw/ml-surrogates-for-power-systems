@@ -221,3 +221,4 @@ src/data/**/*.pyc
 obsolete/
 tests/
 other_repos/
+.DS_Storeshou

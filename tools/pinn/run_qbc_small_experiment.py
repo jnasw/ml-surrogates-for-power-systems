@@ -126,8 +126,8 @@ def _build_pinn_command(
     loss_weight_physics: float,
     loss_weight_ic: float,
 ) -> list[str]:
-    stage_override = (
-        "pinn.stages="
+    phase_override = (
+        "pinn.optimizer_phases="
         f"[{{name:adam,optimizer:Adam,lr:{lr},epochs:{int(epochs)},batch_size:{int(batch_size)},shuffle:true}}]"
     )
     command = [
@@ -152,7 +152,7 @@ def _build_pinn_command(
         f"wandb.name=pinn_{model_flag.lower()}_qbc_b1024_adam300",
         f"wandb.tags={_format_hydra_list(wandb_tags)}",
         f"logging.log_every_epoch={int(log_every_epoch)}",
-        stage_override,
+        phase_override,
     ]
     if wandb_entity:
         command.append(f"wandb.entity={wandb_entity}")

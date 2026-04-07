@@ -1,4 +1,4 @@
-"""Loss helpers for phase-1 PINN training."""
+"""Loss helpers for PINN training objectives."""
 
 from __future__ import annotations
 

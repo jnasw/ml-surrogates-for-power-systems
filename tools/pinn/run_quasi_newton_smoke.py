@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run a local deterministic smoke benchmark for quasi-Newton PINN optimizers.
 
-This script launches one PINN training run per optimizer using a comparable full-batch
-stage setup. It is intended for Phase 5A sanity checks before longer HPC campaigns.
+This script launches one PINN training run per optimizer using a comparable optimizer-phase
+setup. It is intended for Phase 5A sanity checks before longer HPC campaigns.
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ def _optimizer_stage(
     )
 
 
-def _stage_override(
+def _optimizer_phase_override(
     *,
     optimizer: str,
     adam_warmup_epochs: int,
@@ -93,9 +93,9 @@ def _stage_override(
     batch_size: int,
     line_search_name: str,
 ) -> str:
-    stages: list[str] = []
+    phases: list[str] = []
     if adam_warmup_epochs > 0:
-        stages.append(
+        phases.append(
             "{"
             "name:adam,"
             "optimizer:Adam,"
@@ -110,7 +110,7 @@ def _stage_override(
             "convergence:null"
             "}"
         )
-    stages.append(
+    phases.append(
         _optimizer_stage(
             optimizer=optimizer,
             epochs=quasi_newton_epochs,
@@ -118,7 +118,7 @@ def _stage_override(
             line_search_name=line_search_name,
         )
     )
-    return "pinn.stages=[" + ",".join(stages) + "]"
+    return "pinn.optimizer_phases=[" + ",".join(phases) + "]"
 
 
 def _base_overrides(args: argparse.Namespace, group: str) -> list[str]:
@@ -175,11 +175,11 @@ def main() -> None:
     parser.add_argument("--hidden-layers", type=int, default=4, help="PINN hidden depth.")
     parser.add_argument("--activation", default="tanh", help="PINN activation.")
     parser.add_argument("--batch-size", type=int, default=1024, help="Adam warm-up batch size.")
-    parser.add_argument("--adam-warmup-epochs", type=int, default=0, help="Optional Adam warm-up epochs prepended before the quasi-Newton stage.")
+    parser.add_argument("--adam-warmup-epochs", type=int, default=0, help="Optional Adam warm-up epochs prepended before the quasi-Newton optimizer phase.")
     parser.add_argument("--adam-lr", type=float, default=1e-3, help="Learning rate for optional Adam warm-up.")
-    parser.add_argument("--quasi-newton-epochs", type=int, default=20, help="Iterations/epochs for each quasi-Newton optimizer stage.")
-    parser.add_argument("--quasi-newton-lr", type=float, default=1.0, help="Learning rate passed to the quasi-Newton optimizer stage.")
-    parser.add_argument("--line-search", default="strong_wolfe", choices=["strong_wolfe", "backtracking"], help="Line-search method for BFGS-family stages.")
+    parser.add_argument("--quasi-newton-epochs", type=int, default=20, help="Iterations/epochs for each quasi-Newton optimizer phase.")
+    parser.add_argument("--quasi-newton-lr", type=float, default=1.0, help="Learning rate passed to the quasi-Newton optimizer phase.")
+    parser.add_argument("--line-search", default="strong_wolfe", choices=["strong_wolfe", "backtracking"], help="Line-search method for BFGS-family optimizer phases.")
     parser.add_argument("--optimizers", default="LBFGS,BFGS,SSBFGS,SSBroyden", help="Comma-separated list of optimizers to run.")
     parser.add_argument("--loss-weight-data", type=float, default=1.0, help="Supervised data loss weight.")
     parser.add_argument("--loss-weight-dt", type=float, default=1.0e-4, help="Supervised derivative-consistency loss weight.")
@@ -218,7 +218,7 @@ def main() -> None:
 
     for optimizer in optimizers:
         run_dir = run_root / optimizer.lower()
-        stage_override = _stage_override(
+        phase_override = _optimizer_phase_override(
             optimizer=optimizer,
             adam_warmup_epochs=args.adam_warmup_epochs,
             adam_lr=args.adam_lr,
@@ -231,7 +231,7 @@ def main() -> None:
             *common_cmd,
             f"pinn.run_dir={run_dir}",
             f"wandb.name=pinn_{optimizer.lower()}_smoke" if args.wandb_use else "hydra.job.name=pinn_smoke",
-            stage_override,
+            phase_override,
         ]
         _run_command(command, dry_run=args.dry_run)
 

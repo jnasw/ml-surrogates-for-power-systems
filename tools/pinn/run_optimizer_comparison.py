@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a staged PINN optimizer comparison on one shared QBC dataset.
+"""Run an optimizer-phase PINN comparison on one shared QBC dataset.
 
 This launcher creates one dataset through the normal experiment pipeline and then
 reuses the preprocessed dataset root for a matrix of PINN runs. It is intended for:
@@ -189,7 +189,7 @@ def _optimizer_stage(
     )
 
 
-def _stage_override(
+def _optimizer_phase_override(
     *,
     optimizer: str,
     adam_warmup_epochs: int,
@@ -199,9 +199,9 @@ def _stage_override(
     batch_size: int,
     line_search_name: str,
 ) -> str:
-    stages: list[str] = []
+    phases: list[str] = []
     if adam_warmup_epochs > 0:
-        stages.append(
+        phases.append(
             "{"
             "name:adam,"
             "optimizer:Adam,"
@@ -216,7 +216,7 @@ def _stage_override(
             "convergence:null"
             "}"
         )
-    stages.append(
+    phases.append(
         _optimizer_stage(
             optimizer=optimizer,
             epochs=quasi_newton_epochs,
@@ -224,7 +224,7 @@ def _stage_override(
             line_search_name=line_search_name,
         )
     )
-    return "pinn.stages=[" + ",".join(stages) + "]"
+    return "pinn.optimizer_phases=[" + ",".join(phases) + "]"
 
 
 def _build_pinn_command(
@@ -258,7 +258,7 @@ def _build_pinn_command(
     loss_weight_ic: float,
     gradient_telemetry: bool,
 ) -> list[str]:
-    stage_override = _stage_override(
+    phase_override = _optimizer_phase_override(
         optimizer=optimizer,
         adam_warmup_epochs=adam_warmup_epochs,
         adam_lr=adam_lr,
@@ -293,7 +293,7 @@ def _build_pinn_command(
         f"wandb.name={wandb_name}",
         f"wandb.tags={_format_hydra_list(wandb_tags)}",
         f"logging.log_every_epoch={int(log_every_epoch)}",
-        stage_override,
+        phase_override,
     ]
     if wandb_entity:
         command.append(f"wandb.entity={wandb_entity}")
@@ -319,8 +319,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dtype", default="float64", help="PINN dtype.")
     parser.add_argument("--batch-size", type=int, default=1024, help="Adam warm-up batch size.")
     parser.add_argument("--adam-lr", type=float, default=1e-3, help="Adam learning rate.")
-    parser.add_argument("--quasi-newton-lr", type=float, default=1.0, help="Learning rate passed to quasi-Newton stages.")
-    parser.add_argument("--line-search", default="strong_wolfe", choices=["strong_wolfe", "backtracking"], help="Line-search method for BFGS-family stages.")
+    parser.add_argument("--quasi-newton-lr", type=float, default=1.0, help="Learning rate passed to quasi-Newton optimizer phases.")
+    parser.add_argument("--line-search", default="strong_wolfe", choices=["strong_wolfe", "backtracking"], help="Line-search method for BFGS-family optimizer phases.")
     parser.add_argument("--optimizers", default="LBFGS,BFGS,SSBFGS,SSBroyden", help="Comma-separated optimizer list.")
     parser.add_argument("--warmup-epochs", default=None, help="Comma-separated Adam warm-up lengths. Default depends on --profile.")
     parser.add_argument("--quasi-newton-epochs", default=None, help="Comma-separated quasi-Newton epoch counts. Default depends on --profile.")

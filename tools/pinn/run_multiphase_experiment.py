@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Run fixed multistage PINN experiments on one shared QBC dataset.
+"""Run fixed optimizer-phase PINN experiments on one shared QBC dataset.
 
 This launcher creates one dataset through the normal experiment pipeline and then
-reuses the preprocessed dataset root for one or more explicit multistage PINN runs.
-It is intended for experiments where the stage sequence itself is the subject of
-the study, for example:
+reuses the preprocessed dataset root for one or more explicit optimizer-phase PINN
+runs. This script studies optimizer schedules for a single model, not paper-style
+multistage residual PINNs. It is intended for experiments where the
+optimizer-phase sequence itself is the subject of the study, for example:
 
 1. Adam -> LBFGS -> Adam -> BFGS
 2. Adam -> SSBFGS -> Adam -> SSBroyden
@@ -30,7 +31,7 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
     "smoke": {
         "budget": "b256",
         "preset": "default",
-        "stage_sequences": [
+        "phase_sequences": [
             "Adam:20;LBFGS:10;Adam:20;BFGS:10",
         ],
         "stage1_overrides": [],
@@ -41,7 +42,7 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
     "benchmark": {
         "budget": "b256",
         "preset": "default",
-        "stage_sequences": [
+        "phase_sequences": [
             "Adam:300;LBFGS:100",
             "Adam:300;LBFGS:100;Adam:300;LBFGS:100",
             "Adam:3000;LBFGS:100",
@@ -58,7 +59,7 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
 
 
 @dataclass(frozen=True)
-class LauncherStageSpec:
+class LauncherPhaseSpec:
     optimizer: str
     epochs: int
     lr: float
@@ -75,7 +76,7 @@ class LauncherStageSpec:
 
 
 def _run(command: list[str], *, dry_run: bool, extra_env: dict[str, str] | None = None) -> None:
-    print("[multistage-experiment] command:")
+    print("[optimizer-phase-experiment] command:")
     print(" ".join(command))
     if dry_run:
         return
@@ -107,10 +108,10 @@ def _profile_config(profile: str) -> dict[str, Any]:
     return dict(PROFILE_CONFIGS[profile_name])
 
 
-def _parse_stage_sequences(raw_values: list[str]) -> list[str]:
+def _parse_phase_sequences(raw_values: list[str]) -> list[str]:
     parsed = [item.strip() for item in raw_values if item.strip()]
     if not parsed:
-        raise ValueError("At least one stage sequence must be configured.")
+        raise ValueError("At least one optimizer-phase sequence must be configured.")
     return parsed
 
 
@@ -135,43 +136,43 @@ def _optimizer_defaults(
     return optimizer_kwargs, resolved_line_search_name
 
 
-def _parse_stage_sequence(
+def _parse_phase_sequence(
     raw: str,
     *,
     adam_lr: float,
     quasi_newton_lr: float,
     batch_size: int,
     line_search_name: str,
-) -> list[LauncherStageSpec]:
+) -> list[LauncherPhaseSpec]:
     parts = [item.strip() for item in raw.split(";") if item.strip()]
     if not parts:
-        raise ValueError("Each --stage-sequence must include at least one stage.")
+        raise ValueError("Each --phase-sequence must include at least one optimizer phase.")
 
-    stages: list[LauncherStageSpec] = []
+    phases: list[LauncherPhaseSpec] = []
     for part in parts:
         fields = [item.strip() for item in part.split(":")]
         if len(fields) not in {2, 3}:
             raise ValueError(
-                "Stage sequence entries must use OPTIMIZER:EPOCHS or OPTIMIZER:EPOCHS:LR, "
+                "Optimizer-phase sequence entries must use OPTIMIZER:EPOCHS or OPTIMIZER:EPOCHS:LR, "
                 f"got '{part}'."
             )
         optimizer = fields[0]
         if optimizer not in SUPPORTED_OPTIMIZERS:
             raise ValueError(
-                f"Unsupported stage optimizer '{optimizer}'. "
+                f"Unsupported optimizer-phase optimizer '{optimizer}'. "
                 f"Use one of: {', '.join(SUPPORTED_OPTIMIZERS)}."
             )
         epochs = int(fields[1])
         if epochs <= 0:
-            raise ValueError(f"Stage '{part}' must set epochs > 0.")
+            raise ValueError(f"Optimizer phase '{part}' must set epochs > 0.")
         lr = float(fields[2]) if len(fields) == 3 else (adam_lr if optimizer == "Adam" else quasi_newton_lr)
         optimizer_kwargs, resolved_line_search_name = _optimizer_defaults(
             optimizer=optimizer,
             line_search_name=line_search_name,
         )
         is_adam = optimizer == "Adam"
-        stages.append(
-            LauncherStageSpec(
+        phases.append(
+            LauncherPhaseSpec(
                 optimizer=optimizer,
                 epochs=epochs,
                 lr=lr,
@@ -183,38 +184,38 @@ def _parse_stage_sequence(
                 line_search_name=resolved_line_search_name if not is_adam else None,
             )
         )
-    return stages
+    return phases
 
 
-def _serialize_stage(stage: LauncherStageSpec, *, index: int) -> str:
-    lower = stage.optimizer.lower()
+def _serialize_phase(phase: LauncherPhaseSpec, *, index: int) -> str:
+    lower = phase.optimizer.lower()
     return (
         "{"
         f"name:{lower}_{int(index):02d},"
-        f"optimizer:{stage.optimizer},"
-        f"lr:{stage.lr},"
-        f"epochs:{int(stage.epochs)},"
-        f"batch_size:{'null' if stage.batch_size is None else int(stage.batch_size)},"
-        f"shuffle:{'true' if stage.shuffle else 'false'},"
-        f"full_batch:{'true' if stage.full_batch else 'false'},"
-        f"allow_sampling:{'true' if stage.allow_sampling else 'false'},"
-        f"optimizer_kwargs:{stage.optimizer_kwargs},"
-        f"line_search:{'null' if stage.line_search_name is None else '{name:' + stage.line_search_name + '}'},"  # noqa: E501
+        f"optimizer:{phase.optimizer},"
+        f"lr:{phase.lr},"
+        f"epochs:{int(phase.epochs)},"
+        f"batch_size:{'null' if phase.batch_size is None else int(phase.batch_size)},"
+        f"shuffle:{'true' if phase.shuffle else 'false'},"
+        f"full_batch:{'true' if phase.full_batch else 'false'},"
+        f"allow_sampling:{'true' if phase.allow_sampling else 'false'},"
+        f"optimizer_kwargs:{phase.optimizer_kwargs},"
+        f"line_search:{'null' if phase.line_search_name is None else '{name:' + phase.line_search_name + '}'},"  # noqa: E501
         "convergence:null"
         "}"
     )
 
 
-def _stage_override(stages: list[LauncherStageSpec]) -> str:
-    return "pinn.stages=[" + ",".join(_serialize_stage(stage, index=idx) for idx, stage in enumerate(stages)) + "]"
+def _optimizer_phase_override(phases: list[LauncherPhaseSpec]) -> str:
+    return "pinn.optimizer_phases=[" + ",".join(_serialize_phase(phase, index=idx) for idx, phase in enumerate(phases)) + "]"
 
 
-def _sequence_slug(stages: list[LauncherStageSpec]) -> str:
-    return "_".join(f"{stage.short_name}{int(stage.epochs)}" for stage in stages)
+def _sequence_slug(phases: list[LauncherPhaseSpec]) -> str:
+    return "_".join(f"{phase.short_name}{int(phase.epochs)}" for phase in phases)
 
 
-def _sequence_tag(stages: list[LauncherStageSpec]) -> str:
-    slug = _sequence_slug(stages)
+def _sequence_tag(phases: list[LauncherPhaseSpec]) -> str:
+    slug = _sequence_slug(phases)
     safe = re.sub(r"[^a-z0-9_]+", "_", slug.lower()).strip("_")
     return safe or "sequence"
 
@@ -290,7 +291,7 @@ def _build_pinn_command(
     activation: str,
     dtype_name: str,
     batch_size: int,
-    stages: list[LauncherStageSpec],
+    phases: list[LauncherPhaseSpec],
     log_every_epoch: int,
     loss_weight_data: float,
     loss_weight_dt: float,
@@ -324,7 +325,7 @@ def _build_pinn_command(
         f"wandb.name={wandb_name}",
         f"wandb.tags={_format_hydra_list(wandb_tags)}",
         f"logging.log_every_epoch={int(log_every_epoch)}",
-        _stage_override(stages),
+        _optimizer_phase_override(phases),
     ]
     if wandb_entity:
         command.append(f"wandb.entity={wandb_entity}")
@@ -334,9 +335,9 @@ def _build_pinn_command(
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python-bin", default=sys.executable, help="Python executable for pipeline and training.")
-    parser.add_argument("--profile", default="benchmark", choices=["smoke", "benchmark"], help="Run a reduced multistage smoke setup or the longer benchmark variant.")
+    parser.add_argument("--profile", default="benchmark", choices=["smoke", "benchmark"], help="Run a reduced optimizer-phase smoke setup or the longer benchmark variant.")
     parser.add_argument("--experiment-tag", default=None, help="Output/W&B tag suffix. Default: timestamp.")
-    parser.add_argument("--output-root", default=None, help="Explicit output root. Default: outputs/pinn/multistage_experiment/<tag>.")
+    parser.add_argument("--output-root", default=None, help="Explicit output root. Default: outputs/pinn/optimizer_phase_experiment/<tag>.")
     parser.add_argument("--model-flag", default="SM4", help="Model flag.")
     parser.add_argument("--preset", default=None, help="Dataset pipeline preset. Defaults from --profile.")
     parser.add_argument("--budget", default=None, help="Budget label for QBC dataset generation. Defaults from --profile.")
@@ -348,20 +349,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hidden-layers", type=int, default=4, help="PINN hidden depth.")
     parser.add_argument("--activation", default="tanh", help="PINN activation.")
     parser.add_argument("--dtype", default="float64", help="PINN dtype.")
-    parser.add_argument("--batch-size", type=int, default=1024, help="Adam stage batch size.")
-    parser.add_argument("--adam-lr", type=float, default=1e-3, help="Default learning rate for Adam stages.")
-    parser.add_argument("--quasi-newton-lr", type=float, default=1.0, help="Default learning rate for quasi-Newton stages.")
-    parser.add_argument("--line-search", default="strong_wolfe", choices=["strong_wolfe", "backtracking"], help="Line-search method for BFGS-family stages.")
+    parser.add_argument("--batch-size", type=int, default=1024, help="Adam optimizer-phase batch size.")
+    parser.add_argument("--adam-lr", type=float, default=1e-3, help="Default learning rate for Adam optimizer phases.")
+    parser.add_argument("--quasi-newton-lr", type=float, default=1.0, help="Default learning rate for quasi-Newton optimizer phases.")
+    parser.add_argument("--line-search", default="strong_wolfe", choices=["strong_wolfe", "backtracking"], help="Line-search method for BFGS-family optimizer phases.")
     parser.add_argument(
-        "--stage-sequence",
+        "--phase-sequence",
         action="append",
         default=[],
         help=(
-            "Explicit multistage sequence using 'OPTIMIZER:EPOCHS[:LR]' entries separated by ';'. "
+            "Explicit optimizer-phase sequence using 'OPTIMIZER:EPOCHS[:LR]' entries separated by ';'. "
             "Example: 'Adam:100;LBFGS:100;Adam:100;BFGS:100'. Can be passed multiple times."
         ),
     )
-    parser.add_argument("--wandb-project", default="sm-surrogates-pinn-multistage", help="Dedicated W&B project for this experiment.")
+    parser.add_argument("--wandb-project", default="sm-surrogates-pinn-optimizer-phases", help="Dedicated W&B project for this experiment.")
     parser.add_argument("--wandb-entity", default=None, help="Optional W&B entity.")
     parser.add_argument("--loss-weight-data", type=float, default=1.0, help="Static supervised loss weight.")
     parser.add_argument("--loss-weight-dt", type=float, default=1.0e-4, help="Static dt loss weight.")
@@ -386,10 +387,10 @@ def main() -> None:
     args = parser.parse_args()
 
     profile_config = _profile_config(args.profile)
-    resolved_stage_sequences = (
-        _parse_stage_sequences(args.stage_sequence)
-        if args.stage_sequence
-        else _parse_stage_sequences(list(profile_config["stage_sequences"]))
+    resolved_phase_sequences = (
+        _parse_phase_sequences(args.phase_sequence)
+        if args.phase_sequence
+        else _parse_phase_sequences(list(profile_config["phase_sequences"]))
     )
     resolved_budget = args.budget or str(profile_config["budget"])
     resolved_preset = args.preset or str(profile_config["preset"])
@@ -406,12 +407,12 @@ def main() -> None:
     output_root = (
         Path(args.output_root).resolve()
         if args.output_root
-        else (REPO_ROOT / "outputs" / "pinn" / "multistage_experiment" / stamp).resolve()
+        else (REPO_ROOT / "outputs" / "pinn" / "optimizer_phase_experiment" / stamp).resolve()
     )
     output_root.mkdir(parents=True, exist_ok=True)
 
-    experiment_id = f"multistage_experiment_{resolved_budget}_{stamp}"
-    wandb_group = f"multistage_experiment_{args.model_flag.lower()}_{stamp}"
+    experiment_id = f"optimizer_phase_experiment_{resolved_budget}_{stamp}"
+    wandb_group = f"optimizer_phase_experiment_{args.model_flag.lower()}_{stamp}"
 
     if args.dataset_root:
         dataset_root = Path(args.dataset_root).resolve()
@@ -452,13 +453,14 @@ def main() -> None:
         "log_every_epoch": resolved_log_every_epoch,
         "dataset_root": str(dataset_root),
         "dataset_pipeline_root": None if dataset_pipeline_root is None else str(dataset_pipeline_root),
-        "stage_sequences": resolved_stage_sequences,
+        "optimizer_phase_sequences": resolved_phase_sequences,
+        "stage_sequences": resolved_phase_sequences,
         "output_root": str(output_root),
         "runs": [],
     }
 
     tags_base = [
-        "multistage_experiment",
+        "optimizer_phase_experiment",
         args.profile,
         "qbc_deep_ensemble",
         resolved_budget,
@@ -466,18 +468,18 @@ def main() -> None:
         *args.tag,
     ]
 
-    for raw_sequence in resolved_stage_sequences:
-        stages = _parse_stage_sequence(
+    for raw_sequence in resolved_phase_sequences:
+        phases = _parse_phase_sequence(
             raw_sequence,
             adam_lr=args.adam_lr,
             quasi_newton_lr=args.quasi_newton_lr,
             batch_size=args.batch_size,
             line_search_name=args.line_search,
         )
-        sequence_slug = _sequence_slug(stages)
-        run_name = f"multistage_{sequence_slug}"
+        sequence_slug = _sequence_slug(phases)
+        run_name = f"optimizer_phase_{sequence_slug}"
         run_dir = output_root / "runs" / run_name
-        wandb_tags = [*tags_base, f"sequence_{_sequence_tag(stages)}"]
+        wandb_tags = [*tags_base, f"sequence_{_sequence_tag(phases)}"]
         command = _build_pinn_command(
             python_bin=args.python_bin,
             model_flag=args.model_flag,
@@ -495,7 +497,7 @@ def main() -> None:
             activation=args.activation,
             dtype_name=args.dtype,
             batch_size=args.batch_size,
-            stages=stages,
+            phases=phases,
             log_every_epoch=resolved_log_every_epoch,
             loss_weight_data=args.loss_weight_data,
             loss_weight_dt=args.loss_weight_dt,
@@ -508,10 +510,15 @@ def main() -> None:
             {
                 "run_name": run_name,
                 "run_dir": str(run_dir),
+                "optimizer_phase_sequence": raw_sequence,
                 "stage_sequence": raw_sequence,
+                "optimizer_phases": [
+                    {"optimizer": phase.optimizer, "epochs": int(phase.epochs), "lr": float(phase.lr)}
+                    for phase in phases
+                ],
                 "stages": [
-                    {"optimizer": stage.optimizer, "epochs": int(stage.epochs), "lr": float(stage.lr)}
-                    for stage in stages
+                    {"optimizer": phase.optimizer, "epochs": int(phase.epochs), "lr": float(phase.lr)}
+                    for phase in phases
                 ],
             }
         )
@@ -519,7 +526,7 @@ def main() -> None:
     summary_path = output_root / "experiment_manifest.json"
     with summary_path.open("w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2)
-    print(f"[multistage-experiment] summary_manifest={summary_path}")
+    print(f"[optimizer-phase-experiment] summary_manifest={summary_path}")
 
 
 if __name__ == "__main__":
