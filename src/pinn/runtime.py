@@ -81,13 +81,13 @@ def _validate_optimizer_phase(phase: OptimizerPhase) -> None:
             raise ValueError(f"{phase.optimizer} phases must not enable sampling because curvature updates require a stable objective.")
 
 
-def load_optimizer_phases(config: Any) -> list[OptimizerPhase]:
-    raw_phases = getattr(config.pinn, "optimizer_phases", None)
+def load_optimizer_phases_from_raw(
+    raw_phases: Any,
+    *,
+    config_label: str = "config.pinn.optimizer_phases",
+) -> list[OptimizerPhase]:
     if raw_phases is None:
-        raw_phases = getattr(config.pinn, "stages", None)
-    if raw_phases is None:
-        raise ValueError("config.pinn.optimizer_phases must be configured.")
-
+        raise ValueError(f"{config_label} must be configured.")
     phases: list[OptimizerPhase] = []
     for idx, item in enumerate(raw_phases):
         optimizer = str(item.optimizer)
@@ -124,6 +124,13 @@ def load_optimizer_phases(config: Any) -> list[OptimizerPhase]:
         phases.append(phase)
 
     return phases
+
+
+def load_optimizer_phases(config: Any) -> list[OptimizerPhase]:
+    raw_phases = getattr(config.pinn, "optimizer_phases", None)
+    if raw_phases is None:
+        raw_phases = getattr(config.pinn, "stages", None)
+    return load_optimizer_phases_from_raw(raw_phases, config_label="config.pinn.optimizer_phases")
 
 
 def load_optimizer_stages(config: Any) -> list[OptimizerPhase]:

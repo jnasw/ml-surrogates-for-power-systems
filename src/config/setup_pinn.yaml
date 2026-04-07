@@ -92,12 +92,25 @@ pinn:
     base_stage:
       first_activation: ${pinn.activation}
       hidden_activation: ${pinn.activation}
+      optimizer_phases: null
     residual_stage:
       first_activation: sin
       hidden_activation: tanh
       epsilon: 1.0
       kappa_min: 1.0
       kappa_max: 100.0
+      optimizer_phases:
+        - name: adam_residual
+          optimizer: Adam
+          lr: 0.001
+          epochs: 300
+          batch_size: 1024
+          shuffle: true
+          full_batch: false
+          allow_sampling: false
+          optimizer_kwargs: {}
+          line_search: null
+          convergence: null
   optimizer_phases:
     - name: adam
       optimizer: Adam

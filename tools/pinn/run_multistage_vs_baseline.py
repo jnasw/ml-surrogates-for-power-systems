@@ -129,6 +129,7 @@ def _parse_phase_entry(
 
 
 def _optimizer_phases_override(
+    key_path: str,
     raw_sequence: str,
     *,
     batch_size: int,
@@ -149,7 +150,7 @@ def _optimizer_phases_override(
         )
         for entry in entries
     ]
-    return "pinn.optimizer_phases=[" + ",".join(phases) + "]"
+    return key_path + "=[" + ",".join(phases) + "]"
 
 
 def _build_dataset_command(
@@ -225,6 +226,7 @@ def _build_pinn_command(
     dtype_name: str,
     batch_size: int,
     raw_sequence: str,
+    residual_raw_sequence: str,
     adam_lr: float,
     quasi_newton_lr: float,
     line_search_name: str,
@@ -270,6 +272,7 @@ def _build_pinn_command(
         f"wandb.tags={_format_hydra_list(wandb_tags)}",
         f"logging.log_every_epoch={int(log_every_epoch)}",
         _optimizer_phases_override(
+            "pinn.optimizer_phases",
             raw_sequence,
             batch_size=batch_size,
             adam_lr=adam_lr,
@@ -279,6 +282,27 @@ def _build_pinn_command(
     ]
     if wandb_entity:
         command.append(f"wandb.entity={wandb_entity}")
+    if mode == "multistage":
+        command.append(
+            _optimizer_phases_override(
+                "pinn.multistage.base_stage.optimizer_phases",
+                raw_sequence,
+                batch_size=batch_size,
+                adam_lr=adam_lr,
+                quasi_newton_lr=quasi_newton_lr,
+                line_search_name=line_search_name,
+            )
+        )
+        command.append(
+            _optimizer_phases_override(
+                "pinn.multistage.residual_stage.optimizer_phases",
+                residual_raw_sequence,
+                batch_size=batch_size,
+                adam_lr=adam_lr,
+                quasi_newton_lr=quasi_newton_lr,
+                line_search_name=line_search_name,
+            )
+        )
     return command
 
 
@@ -304,6 +328,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--quasi-newton-lr", type=float, default=1.0, help="Quasi-Newton learning rate.")
     parser.add_argument("--line-search", default="strong_wolfe", choices=["strong_wolfe", "backtracking"], help="Line-search method.")
     parser.add_argument("--phase-sequence", action="append", default=[], help="Custom optimizer phase sequence. Can be repeated.")
+    parser.add_argument("--multistage-residual-phase-sequence", default="Adam:300", help="Optimizer phase sequence used for residual stages in multistage mode.")
     parser.add_argument("--modes", default="single_stage,multistage", help="Comma-separated PINN modes to run.")
     parser.add_argument("--multistage-max-stages", type=int, default=2, help="Maximum number of multistage residual stages.")
     parser.add_argument("--analysis-collocation-rows", type=int, default=2048, help="Probe collocation rows for multistage diagnostics.")
@@ -388,6 +413,7 @@ def main() -> None:
         "dataset_pipeline_root": None if dataset_pipeline_root is None else str(dataset_pipeline_root),
         "modes": modes,
         "phase_sequences": resolved_sequences,
+        "multistage_residual_phase_sequence": str(args.multistage_residual_phase_sequence),
         "gradient_telemetry": resolved_gradient_telemetry,
         "analysis_collocation_rows": int(args.analysis_collocation_rows),
         "multistage_max_stages": int(args.multistage_max_stages),
@@ -434,6 +460,7 @@ def main() -> None:
                 dtype_name=args.dtype,
                 batch_size=args.batch_size,
                 raw_sequence=raw_sequence,
+                residual_raw_sequence=str(args.multistage_residual_phase_sequence),
                 adam_lr=args.adam_lr,
                 quasi_newton_lr=args.quasi_newton_lr,
                 line_search_name=args.line_search,
@@ -451,6 +478,7 @@ def main() -> None:
                 {
                     "mode": mode,
                     "phase_sequence": raw_sequence,
+                    "multistage_residual_phase_sequence": None if mode != "multistage" else str(args.multistage_residual_phase_sequence),
                     "run_name": run_name,
                     "run_dir": str(run_dir),
                 }
