@@ -38,7 +38,7 @@ def torch_dtype_to_numpy(dtype: torch.dtype) -> np.dtype:
 
 
 @dataclass(frozen=True)
-class OptimizerStage:
+class OptimizerPhase:
     name: str
     optimizer: str
     lr: float
@@ -62,32 +62,34 @@ def _normalize_optional_mapping(value: Any, field_name: str) -> dict[str, Any] |
     raise ValueError(f"{field_name} must be a mapping or null.")
 
 
-def _validate_optimizer_stage(stage: OptimizerStage) -> None:
-    if stage.epochs <= 0:
-        raise ValueError("Each optimizer stage must have epochs > 0.")
-    if stage.lr <= 0.0:
-        raise ValueError("Each optimizer stage must have lr > 0.")
-    if stage.batch_size is not None and stage.batch_size <= 0:
-        raise ValueError("Each optimizer stage batch_size must be > 0 when provided.")
+def _validate_optimizer_phase(phase: OptimizerPhase) -> None:
+    if phase.epochs <= 0:
+        raise ValueError("Each optimizer phase must have epochs > 0.")
+    if phase.lr <= 0.0:
+        raise ValueError("Each optimizer phase must have lr > 0.")
+    if phase.batch_size is not None and phase.batch_size <= 0:
+        raise ValueError("Each optimizer phase batch_size must be > 0 when provided.")
 
-    optimizer_name = stage.optimizer.strip().lower()
+    optimizer_name = phase.optimizer.strip().lower()
     if optimizer_name in {"lbfgs", "bfgs", "ssbfgs", "ssbroyden"}:
-        effective_full_batch = True if stage.full_batch is None else bool(stage.full_batch)
+        effective_full_batch = True if phase.full_batch is None else bool(phase.full_batch)
         if not effective_full_batch:
-            raise ValueError(f"{stage.optimizer} stages must use full_batch=true.")
-        if stage.batch_size is not None:
-            raise ValueError(f"{stage.optimizer} stages must set batch_size=null because they are full-batch.")
-        if stage.allow_sampling is True:
-            raise ValueError(f"{stage.optimizer} stages must not enable sampling because curvature updates require a stable objective.")
+            raise ValueError(f"{phase.optimizer} phases must use full_batch=true.")
+        if phase.batch_size is not None:
+            raise ValueError(f"{phase.optimizer} phases must set batch_size=null because they are full-batch.")
+        if phase.allow_sampling is True:
+            raise ValueError(f"{phase.optimizer} phases must not enable sampling because curvature updates require a stable objective.")
 
 
-def load_optimizer_stages(config: Any) -> list[OptimizerStage]:
-    raw_stages = getattr(config.pinn, "stages", None)
-    if raw_stages is None:
-        raise ValueError("config.pinn.stages must be configured.")
+def load_optimizer_phases(config: Any) -> list[OptimizerPhase]:
+    raw_phases = getattr(config.pinn, "optimizer_phases", None)
+    if raw_phases is None:
+        raw_phases = getattr(config.pinn, "stages", None)
+    if raw_phases is None:
+        raise ValueError("config.pinn.optimizer_phases must be configured.")
 
-    stages: list[OptimizerStage] = []
-    for idx, item in enumerate(raw_stages):
+    phases: list[OptimizerPhase] = []
+    for idx, item in enumerate(raw_phases):
         optimizer = str(item.optimizer)
         epochs = int(item.epochs)
         batch_size = None if getattr(item, "batch_size", None) in (None, "null") else int(item.batch_size)
@@ -105,8 +107,8 @@ def load_optimizer_stages(config: Any) -> list[OptimizerStage]:
             getattr(item, "convergence", None),
             field_name="convergence",
         )
-        stage = OptimizerStage(
-            name=str(getattr(item, "name", f"stage_{idx:02d}")),
+        phase = OptimizerPhase(
+            name=str(getattr(item, "name", f"phase_{idx:02d}")),
             optimizer=optimizer,
             lr=float(item.lr),
             epochs=epochs,
@@ -118,7 +120,12 @@ def load_optimizer_stages(config: Any) -> list[OptimizerStage]:
             line_search=line_search,
             convergence=convergence,
         )
-        _validate_optimizer_stage(stage)
-        stages.append(stage)
+        _validate_optimizer_phase(phase)
+        phases.append(phase)
 
-    return stages
+    return phases
+
+
+def load_optimizer_stages(config: Any) -> list[OptimizerPhase]:
+    """Backward-compatible alias for older code paths."""
+    return load_optimizer_phases(config)

@@ -19,7 +19,7 @@ from src.pinn.losses import LOSS_COMPONENTS
 class EpochMetrics:
     epoch: int
     global_epoch: int
-    stage_name: str
+    phase_name: str
     optimizer: str
     train_total_loss: float
     train_component_losses: dict[str, float]
@@ -39,6 +39,11 @@ class EpochMetrics:
     weighting_probe_grad_std: dict[str, float] | None = None
     weighting_anchor: str | None = None
     optimizer_diagnostics: dict[str, float | int | str | bool | None] | None = None
+
+    @property
+    def stage_name(self) -> str:
+        """Backward-compatible alias for older code paths."""
+        return self.phase_name
 
     def _component_loss(self, split: str, name: str) -> float | None:
         if split == "train":
@@ -107,7 +112,7 @@ class EpochMetrics:
         flat = {
             "epoch": int(self.epoch),
             "global_epoch": int(self.global_epoch),
-            "stage_name": str(self.stage_name),
+            "phase_name": str(self.phase_name),
             "optimizer": str(self.optimizer),
             "train_total_loss": float(self.train_total_loss),
             "train_total_grad_norm": self.train_total_grad_norm,
@@ -116,6 +121,7 @@ class EpochMetrics:
             "weighting_updated": bool(self.weighting_updated),
             "weighting_anchor": self.weighting_anchor,
         }
+        flat["stage_name"] = str(self.phase_name)
         for name, value in self.train_component_losses.items():
             flat[f"train_{name}_loss"] = value
         for name in LOSS_COMPONENTS:
@@ -229,7 +235,7 @@ class PinnLogger:
         parts = [
             "[pinn]",
             f"global_epoch={int(row.global_epoch)}",
-            f"stage={row.stage_name}",
+            f"phase={row.phase_name}",
             f"optimizer={row.optimizer}",
             f"train_total={float(row.train_total_loss):.6e}",
         ]
@@ -271,13 +277,17 @@ class PinnLogger:
         if not self._should_log_epoch(row):
             return
         payload = {
-            "stage/epoch": int(row.epoch),
-            "stage/global_epoch": int(row.global_epoch),
-            "stage/name": str(row.stage_name),
-            "stage/optimizer": str(row.optimizer),
+            "phase/epoch": int(row.epoch),
+            "phase/global_epoch": int(row.global_epoch),
+            "phase/name": str(row.phase_name),
+            "phase/optimizer": str(row.optimizer),
             "train/total_loss": float(row.train_total_loss),
             "weighting/updated": bool(row.weighting_updated),
         }
+        payload["stage/epoch"] = int(row.epoch)
+        payload["stage/global_epoch"] = int(row.global_epoch)
+        payload["stage/name"] = str(row.phase_name)
+        payload["stage/optimizer"] = str(row.optimizer)
         if row.weighting_scheme is not None:
             payload["weighting/scheme"] = str(row.weighting_scheme)
         if row.weighting_anchor is not None:

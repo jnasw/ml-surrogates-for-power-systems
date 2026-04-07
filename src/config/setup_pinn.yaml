@@ -81,7 +81,7 @@ pinn:
       physics_rows: 256
       init_rows: 256
       seed: 0
-  stages:
+  optimizer_phases:
     - name: adam
       optimizer: Adam
       lr: 0.001
@@ -105,8 +105,8 @@ pinn:
       line_search:
         name: strong_wolfe
       convergence: null
-  # Example SSBFGS stage override:
-  # stages:
+  # Example SSBFGS optimizer-phase override:
+  # optimizer_phases:
   #   - name: ssbfgs
   #     optimizer: SSBFGS
   #     lr: 1.0

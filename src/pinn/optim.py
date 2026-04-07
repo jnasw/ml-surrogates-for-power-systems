@@ -34,7 +34,7 @@ def build_optimizer(
 
     if normalized == "adam":
         if line_search not in (None, {}):
-            raise ValueError("Adam stages must not configure line_search.")
+            raise ValueError("Adam phases must not configure line_search.")
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, **kwargs)
         return OptimizerSpec(
             optimizer=optimizer,

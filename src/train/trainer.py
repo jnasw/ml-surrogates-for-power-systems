@@ -19,7 +19,7 @@ from src.pinn.logging import EpochMetrics, PinnLogger
 from src.pinn.losses import LossWeights, PinnLossBreakdown
 from src.pinn.optim import OptimizerSpec, build_optimizer
 from src.pinn.residuals import compute_residual_terms, compute_supervised_dt_terms
-from src.pinn.runtime import OptimizerStage, load_optimizer_stages, resolve_torch_dtype, torch_dtype_name
+from src.pinn.runtime import OptimizerPhase, load_optimizer_phases, resolve_torch_dtype, torch_dtype_name
 from src.pinn.weighting import (
     WeightUpdateStats,
     WeightingConfig,
@@ -851,18 +851,18 @@ def _train_pinn_step(
     return breakdown_box["losses"], telemetry_box["telemetry"]
 
 
-def _stage_effective_full_batch(stage: OptimizerStage, optimizer_spec: OptimizerSpec) -> bool:
-    return optimizer_spec.default_full_batch if stage.full_batch is None else bool(stage.full_batch)
+def _phase_effective_full_batch(phase: OptimizerPhase, optimizer_spec: OptimizerSpec) -> bool:
+    return optimizer_spec.default_full_batch if phase.full_batch is None else bool(phase.full_batch)
 
 
-def _stage_allows_sampling(stage: OptimizerStage, optimizer_spec: OptimizerSpec) -> bool:
-    if stage.allow_sampling is None:
-        return not _stage_effective_full_batch(stage, optimizer_spec)
-    return bool(stage.allow_sampling)
+def _phase_allows_sampling(phase: OptimizerPhase, optimizer_spec: OptimizerSpec) -> bool:
+    if phase.allow_sampling is None:
+        return not _phase_effective_full_batch(phase, optimizer_spec)
+    return bool(phase.allow_sampling)
 
 
-def _stage_supports_dynamic_weight_updates(stage: OptimizerStage) -> bool:
-    return str(stage.optimizer).strip().lower() == "adam"
+def _phase_supports_dynamic_weight_updates(phase: OptimizerPhase) -> bool:
+    return str(phase.optimizer).strip().lower() == "adam"
 
 
 def train_pinn(
@@ -881,7 +881,7 @@ def train_pinn(
     hidden_layers = int(cfg_get(config, "pinn.hidden_layers", 4))
     activation = str(cfg_get(config, "pinn.activation", "tanh"))
     formulation = str(cfg_get(config, "pinn.formulation", "odequations"))
-    stages = load_optimizer_stages(config)
+    optimizer_phases = load_optimizer_phases(config)
     base_weights = _loss_weights_from_config(config)
     weighting_config = weighting_config_from_config(config)
     weighting_policy = build_weighting_policy(weighting_config)
@@ -917,7 +917,7 @@ def train_pinn(
     rows: list[EpochMetrics] = []
     best_metric: float | None = None
     global_epoch = 0
-    total_epochs = int(sum(stage.epochs for stage in stages))
+    total_epochs = int(sum(phase.epochs for phase in optimizer_phases))
     checkpoint_milestones = _resolve_checkpoint_milestones(config, total_epochs)
 
     if logger is not None and _checkpointing_enabled(config, "save_init", True):
@@ -931,43 +931,43 @@ def train_pinn(
             tag="init",
         )
 
-    for stage_idx, stage in enumerate(stages):
+    for phase_idx, phase in enumerate(optimizer_phases):
         optimizer_spec = build_optimizer(
             model=model,
-            optimizer_name=stage.optimizer,
-            lr=stage.lr,
-            optimizer_kwargs=stage.optimizer_kwargs,
-            line_search=stage.line_search,
+            optimizer_name=phase.optimizer,
+            lr=phase.lr,
+            optimizer_kwargs=phase.optimizer_kwargs,
+            line_search=phase.line_search,
         )
-        stage_full_batch = _stage_effective_full_batch(stage, optimizer_spec)
-        if stage_full_batch and stage.batch_size is not None:
-            raise ValueError(f"Stage '{stage.name}' is full-batch and must set batch_size=null.")
-        stage_allows_sampling = _stage_allows_sampling(stage, optimizer_spec)
-        if stage_full_batch and stage_allows_sampling:
-            raise ValueError(f"Stage '{stage.name}' is full-batch and must disable sampling for a stable objective.")
+        phase_full_batch = _phase_effective_full_batch(phase, optimizer_spec)
+        if phase_full_batch and phase.batch_size is not None:
+            raise ValueError(f"Optimizer phase '{phase.name}' is full-batch and must set batch_size=null.")
+        phase_allows_sampling = _phase_allows_sampling(phase, optimizer_spec)
+        if phase_full_batch and phase_allows_sampling:
+            raise ValueError(f"Optimizer phase '{phase.name}' is full-batch and must disable sampling for a stable objective.")
 
-        if stage_full_batch:
-            stage_batch_size = None
+        if phase_full_batch:
+            phase_batch_size = None
         else:
             if not optimizer_spec.supports_minibatch:
-                raise ValueError(f"Optimizer '{stage.optimizer}' does not support minibatch execution.")
-            stage_batch_size = stage.batch_size if stage.batch_size is not None else int(cfg_get(config, "pinn.default_batch_size", 1024))
-        stage_supports_dynamic_weight_updates = _stage_supports_dynamic_weight_updates(stage)
+                raise ValueError(f"Optimizer '{phase.optimizer}' does not support minibatch execution.")
+            phase_batch_size = phase.batch_size if phase.batch_size is not None else int(cfg_get(config, "pinn.default_batch_size", 1024))
+        phase_supports_dynamic_weight_updates = _phase_supports_dynamic_weight_updates(phase)
 
-        for epoch in range(1, stage.epochs + 1):
+        for epoch in range(1, phase.epochs + 1):
             model.train()
             epoch_losses: list[PinnLossBreakdown] = []
             epoch_gradients: list[GradientTelemetry] = []
             capture_gradient_telemetry = gradient_telemetry_enabled
             active_weights = weighting_policy.current_weights(weighting_state)
-            if stage_allows_sampling:
+            if phase_allows_sampling:
                 epoch_train_x, epoch_train_y = _sample_supervised_rows(dataset.train_x, dataset.train_y, config)
                 epoch_train_col_x = _sample_collocation_rows(dataset.train_col_x, config)
             else:
                 epoch_train_x, epoch_train_y = dataset.train_x, dataset.train_y
                 epoch_train_col_x = dataset.train_col_x
 
-            if stage_batch_size is None:
+            if phase_batch_size is None:
                 breakdown, gradient_telemetry = _train_pinn_step(
                     model=model,
                     optimizer_spec=optimizer_spec,
@@ -994,9 +994,9 @@ def train_pinn(
                         train_init_x=dataset.train_init_x,
                         train_init_y=dataset.train_init_y,
                     ),
-                    batch_size=stage_batch_size,
-                    shuffle=stage.shuffle,
-                    seed=seed + stage_idx + global_epoch,
+                    batch_size=phase_batch_size,
+                    shuffle=phase.shuffle,
+                    seed=seed + phase_idx + global_epoch,
                 )
                 for batch in epoch_batches:
                     breakdown, gradient_telemetry = _train_pinn_step(
@@ -1039,7 +1039,7 @@ def train_pinn(
             global_epoch += 1
             weighting_updated = False
             weight_update_stats = None
-            if stage_supports_dynamic_weight_updates and weighting_policy.should_update(epoch=epoch, global_epoch=global_epoch):
+            if phase_supports_dynamic_weight_updates and weighting_policy.should_update(epoch=epoch, global_epoch=global_epoch):
                 probe_losses = evaluate_pinn_loss_breakdown(
                     model=model,
                     criterion=criterion,
@@ -1090,8 +1090,8 @@ def train_pinn(
             row = EpochMetrics(
                 epoch=epoch,
                 global_epoch=global_epoch,
-                stage_name=stage.name,
-                optimizer=stage.optimizer,
+                phase_name=phase.name,
+                optimizer=phase.optimizer,
                 train_total_loss=train_total,
                 train_component_losses=train_component_losses,
                 train_total_grad_norm=train_total_grad_norm,
@@ -1111,10 +1111,10 @@ def train_pinn(
                 weighting_anchor=weighting_config.anchor,
                 optimizer_diagnostics={
                     "requires_closure": optimizer_spec.requires_closure,
-                    "full_batch": stage_full_batch,
-                    "sampling_enabled": stage_allows_sampling,
+                    "full_batch": phase_full_batch,
+                    "sampling_enabled": phase_allows_sampling,
                     "line_search": optimizer_spec.line_search_name,
-                    "dynamic_weight_updates_enabled": stage_supports_dynamic_weight_updates,
+                    "dynamic_weight_updates_enabled": phase_supports_dynamic_weight_updates,
                     **(
                         optimizer_spec.optimizer.get_last_diagnostics()
                         if hasattr(optimizer_spec.optimizer, "get_last_diagnostics")
