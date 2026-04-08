@@ -294,29 +294,40 @@ class PinnLogger:
             payload["weighting/anchor"] = str(row.weighting_anchor)
         for name, value in row.train_component_losses.items():
             payload[f"train/{name}_loss"] = float(value)
+            payload[f"train/loss/{name}"] = float(value)
         for name, value in (row.train_loss_weights or {}).items():
             payload[f"weighting/active_{name}"] = float(value)
+            payload[f"weighting/active/{name}"] = float(value)
         for name, value in (row.weighting_raw_candidate_weights or {}).items():
             payload[f"weighting/candidate_{name}"] = float(value)
+            payload[f"weighting/candidate/{name}"] = float(value)
         if row.train_total_grad_norm is not None:
             payload["train/grad_total_norm"] = float(row.train_total_grad_norm)
+            payload["train/grad_norm/total"] = float(row.train_total_grad_norm)
         for name, value in (row.train_component_grad_norms or {}).items():
             if value is not None:
                 payload[f"train/grad_{name}_norm"] = float(value)
+                payload[f"train/grad_norm/{name}"] = float(value)
         for name, value in (row.train_weighted_component_grad_norms or {}).items():
             if value is not None:
                 payload[f"train/grad_weighted_{name}_norm"] = float(value)
+                payload[f"train/grad_weighted_norm/{name}"] = float(value)
         for name, value in (row.weighting_probe_grad_l2_norms or {}).items():
             payload[f"weighting/probe_{name}_l2_norm"] = float(value)
+            payload[f"weighting/probe/l2_norm/{name}"] = float(value)
         for name, value in (row.weighting_probe_grad_mean_abs or {}).items():
             payload[f"weighting/probe_{name}_mean_abs"] = float(value)
+            payload[f"weighting/probe/mean_abs/{name}"] = float(value)
         for name, value in (row.weighting_probe_grad_max_abs or {}).items():
             payload[f"weighting/probe_{name}_max_abs"] = float(value)
+            payload[f"weighting/probe/max_abs/{name}"] = float(value)
         for name, value in (row.weighting_probe_grad_std or {}).items():
             payload[f"weighting/probe_{name}_std"] = float(value)
+            payload[f"weighting/probe/std/{name}"] = float(value)
         for name, value in (row.val_component_losses or {}).items():
             if value is not None:
                 payload[f"val/{name}_loss"] = float(value)
+                payload[f"val/loss/{name}"] = float(value)
         if row.val_total_loss is not None:
             payload["val/total_loss"] = float(row.val_total_loss)
         for key, value in (row.test_metrics or {}).items():
