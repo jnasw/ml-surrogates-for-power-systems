@@ -19,10 +19,9 @@ DEFAULT_SINGLE_STAGE_PHASE_SEQUENCES = [
     "LBFGS:300",
 ]
 DEFAULT_MULTISTAGE_STAGE_PLANS = [
-    "LBFGS:300||Adam:300",
     "Adam:300||LBFGS:100",
-    "Adam:300||LBFGS:100||Adam:300||SSBroyden:300",
-    "Adam:300||LBFGS:100||Adam:300||LBFGS:100",
+    "Adam:300||LBFGS:100||Adam:1000||SSBroyden:300",
+    "Adam:300||LBFGS:100||Adam:1000||LBFGS:100",
 ]
 PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
     "benchmark": {
