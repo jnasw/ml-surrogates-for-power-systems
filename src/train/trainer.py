@@ -769,7 +769,7 @@ def _compute_weight_update_stats(
     *,
     model: nn.Module,
     losses: PinnLossBreakdown,
-    anchor_component: str,
+    anchor_component: str | None,
     epoch: int,
     global_epoch: int,
 ) -> WeightUpdateStats:
@@ -800,6 +800,10 @@ def _compute_weight_update_stats(
         grad_mean_abs=grad_mean_abs,
         grad_max_abs=grad_max_abs,
         grad_std=grad_std,
+        component_losses={
+            name: float(losses.component(name).detach().cpu().item())
+            for name in losses.components
+        },
         anchor_component=anchor_component,
         epoch=int(epoch),
         global_epoch=int(global_epoch),
@@ -863,6 +867,7 @@ def _train_pinn_step(
     telemetry_box: dict[str, GradientTelemetry | None] = {"telemetry": None}
     optimizer = optimizer_spec.optimizer
     scale = max(float(objective_scale), 1.0e-12)
+    retain_graph_for_telemetry = bool(capture_gradient_telemetry and not optimizer_spec.requires_closure)
 
     def closure() -> torch.Tensor:
         optimizer.zero_grad(set_to_none=True)
@@ -880,7 +885,7 @@ def _train_pinn_step(
             create_graph=True,
         )
         scaled_total = losses.total / scale
-        scaled_total.backward()
+        scaled_total.backward(retain_graph=retain_graph_for_telemetry)
         breakdown_box["losses"] = losses
         return scaled_total
 
@@ -904,6 +909,12 @@ def _train_pinn_step(
         telemetry_box["telemetry"] = measured_telemetry
     else:
         closure()
+        if capture_gradient_telemetry:
+            telemetry_box["telemetry"] = _compute_gradient_telemetry(
+                model=model,
+                losses=breakdown_box["losses"],
+                weights=weights,
+            )
         optimizer.step()
     return breakdown_box["losses"], telemetry_box["telemetry"]
 

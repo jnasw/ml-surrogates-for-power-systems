@@ -71,11 +71,16 @@ pinn:
     physics: 1.0e-4
     ic: 1.0e-3
   weighting:
-    scheme: static # static | ma | id | dn
-    anchor: physics # v1 keeps the paper-style anchor fixed to physics
+    scheme: static # static | ma | id | dn | relobralo
+    anchor: physics # v1 keeps the paper-style anchor fixed to physics for ma/id/dn; relobralo ignores it
     ema_beta: 0.99
     update_interval_epochs: 10
-    dynamic_components: [data, dt, ic]
+    dynamic_components: [data, dt, ic] # relobralo expands to all loss components in v1 unless explicitly overridden
+    random_seed: 0
+    relobralo:
+      temperature: 1.0
+      alpha: 0.999
+      rho: 1.0
     probe:
       # Fixed training subset used only for dynamic weight updates.
       data_rows: 256
