@@ -39,6 +39,7 @@ class MultistageStageMLP(nn.Module):
         first_activation: str = "tanh",
         hidden_activation: str = "tanh",
         time_scale: float = 1.0,
+        output_init_scale: float = 1.0,
     ) -> None:
         super().__init__()
         if hidden_layers <= 0:
@@ -50,6 +51,7 @@ class MultistageStageMLP(nn.Module):
         self.first_activation_name = str(first_activation)
         self.hidden_activation_name = str(hidden_activation)
         self.time_scale = float(time_scale)
+        self.output_init_scale = float(output_init_scale)
 
         self.input_layer = nn.Linear(input_dim, hidden_dim)
         self.first_activation = _activation(first_activation)
@@ -59,6 +61,15 @@ class MultistageStageMLP(nn.Module):
             hidden_blocks.append(_activation(hidden_activation))
         self.hidden_stack = nn.Sequential(*hidden_blocks)
         self.output_layer = nn.Linear(hidden_dim, output_dim)
+        self._initialize_parameters()
+
+    def _initialize_parameters(self) -> None:
+        # Residual stages should enter as small corrections rather than a
+        # full-amplitude perturbation of the existing ensemble prediction.
+        if self.output_init_scale != 1.0:
+            with torch.no_grad():
+                self.output_layer.weight.mul_(self.output_init_scale)
+                self.output_layer.bias.mul_(self.output_init_scale)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_scaled = x
@@ -112,12 +123,16 @@ class MultistagePinnEnsemble(nn.Module):
     def epsilon_values(self) -> list[float]:
         return [float(value) for value in self.epsilons.detach().cpu().tolist()]
 
+    def set_stage_epsilon(self, stage_idx: int, value: float) -> None:
+        self.epsilons[int(stage_idx)] = float(value)
+
 
 @dataclass(frozen=True)
 class StageDiagnostics:
     residual_rms: float
     residual_zero_crossings: int
     kappa_suggested: float
+    dominant_residual_channel: int = 0
 
 
 def estimate_stage_diagnostics(
@@ -128,15 +143,27 @@ def estimate_stage_diagnostics(
     max_kappa: float = 100.0,
 ) -> StageDiagnostics:
     if residual.numel() == 0:
-        return StageDiagnostics(residual_rms=0.0, residual_zero_crossings=0, kappa_suggested=float(min_kappa))
+        return StageDiagnostics(
+            residual_rms=0.0,
+            residual_zero_crossings=0,
+            kappa_suggested=float(min_kappa),
+            dominant_residual_channel=0,
+        )
 
     residual_rms = float(torch.sqrt(torch.mean(residual.pow(2))).detach().cpu().item())
     if int(x_col.shape[0]) < 3:
-        return StageDiagnostics(residual_rms=residual_rms, residual_zero_crossings=0, kappa_suggested=float(min_kappa))
+        return StageDiagnostics(
+            residual_rms=residual_rms,
+            residual_zero_crossings=0,
+            kappa_suggested=float(min_kappa),
+            dominant_residual_channel=0,
+        )
 
     order = torch.argsort(x_col[:, 0])
     residual_sorted = residual.index_select(0, order)
-    probe = residual_sorted[:, 0] - residual_sorted[:, 0].mean()
+    channel_rms = torch.sqrt(torch.mean(residual_sorted.pow(2), dim=0))
+    dominant_channel = int(torch.argmax(channel_rms).detach().cpu().item())
+    probe = residual_sorted[:, dominant_channel] - residual_sorted[:, dominant_channel].mean()
     signs = torch.sign(probe)
     sign_products = signs[:-1] * signs[1:]
     zero_crossings = int((sign_products < 0).sum().detach().cpu().item())
@@ -145,4 +172,5 @@ def estimate_stage_diagnostics(
         residual_rms=residual_rms,
         residual_zero_crossings=zero_crossings,
         kappa_suggested=kappa,
+        dominant_residual_channel=dominant_channel,
     )

@@ -81,6 +81,16 @@ def _sequence_slug(raw: str) -> str:
     return safe or "sequence"
 
 
+def _wandb_safe_sequence_tag(raw: str) -> str:
+    slug = _sequence_slug(raw)
+    prefix = "sequence_"
+    max_len = 64
+    available = max_len - len(prefix)
+    if len(slug) <= available:
+        return prefix + slug
+    return prefix + slug[:available]
+
+
 def _parse_phase_entry(
     entry: str,
     *,
@@ -299,15 +309,18 @@ def _build_pinn_command(
         f"wandb.name={wandb_name}",
         f"wandb.tags={_format_hydra_list(wandb_tags)}",
         f"logging.log_every_epoch={int(log_every_epoch)}",
-        _optimizer_phases_override(
-            "pinn.optimizer_phases",
-            raw_sequence,
-            batch_size=batch_size,
-            adam_lr=adam_lr,
-            quasi_newton_lr=quasi_newton_lr,
-            line_search_name=line_search_name,
-        ),
     ]
+    if mode == "single_stage":
+        command.append(
+            _optimizer_phases_override(
+                "pinn.optimizer_phases",
+                raw_sequence,
+                batch_size=batch_size,
+                adam_lr=adam_lr,
+                quasi_newton_lr=quasi_newton_lr,
+                line_search_name=line_search_name,
+            )
+        )
     if wandb_entity:
         command.append(f"wandb.entity={wandb_entity}")
     if mode == "multistage":
@@ -461,7 +474,7 @@ def main() -> None:
             wandb_tags = [
                 *tags_base,
                 mode,
-                f"sequence_{sequence_slug}",
+                _wandb_safe_sequence_tag(raw_sequence.replace("||", "_then_")),
                 "gradient_telemetry" if resolved_gradient_telemetry else "no_gradient_telemetry",
             ]
             command = _build_pinn_command(

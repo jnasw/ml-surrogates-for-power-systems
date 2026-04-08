@@ -85,6 +85,9 @@ pinn:
   multistage:
     max_stages: 2
     stage_optimizer_phases: null
+    loss_ref:
+      enabled: true
+      min_value: 1.0e-12
     stop:
       residual_rms_threshold: 1.0e-6
     analysis:
@@ -97,7 +100,10 @@ pinn:
     residual_stage:
       first_activation: sin
       hidden_activation: tanh
-      epsilon: 1.0
+      epsilon: 1.0e-2
+      epsilon_warmup_epochs: 50
+      epsilon_start_fraction: 0.0
+      output_init_scale: 1.0e-3
       kappa_min: 1.0
       kappa_max: 100.0
       optimizer_phases:

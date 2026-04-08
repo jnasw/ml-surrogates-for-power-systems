@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "${REPO_ROOT}"
+
+if [[ -f "${REPO_ROOT}/.venv/bin/activate" ]]; then
+  # shellcheck source=/dev/null
+  source "${REPO_ROOT}/.venv/bin/activate"
+fi
+
+if [[ -z "${PYTHON_BIN:-}" ]]; then
+  if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
+    PYTHON_BIN="${REPO_ROOT}/.venv/bin/python"
+  else
+    PYTHON_BIN="python3"
+  fi
+fi
+
+STAMP="$(date +%Y%m%d_%H%M%S)"
+PROFILE="${PROFILE:-benchmark}"
+EXPERIMENT_TAG="${EXPERIMENT_TAG:-multistage_local_${PROFILE}_${STAMP}}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_ROOT}/outputs/pinn_local_experiments/${EXPERIMENT_TAG}}"
+MODEL_FLAG="${MODEL_FLAG:-SM4}"
+PRESET="${PRESET:-}"
+PINN_BUDGET="${PINN_BUDGET:-b256}"
+DATASET_SEED="${DATASET_SEED:-s01}"
+PINN_DEVICE="${PINN_DEVICE:-cpu}"
+PINN_HIDDEN_DIM="${PINN_HIDDEN_DIM:-64}"
+PINN_HIDDEN_LAYERS="${PINN_HIDDEN_LAYERS:-4}"
+PINN_ACTIVATION="${PINN_ACTIVATION:-tanh}"
+PINN_DTYPE="${PINN_DTYPE:-float64}"
+PINN_BATCH_SIZE="${PINN_BATCH_SIZE:-1024}"
+ADAM_LR="${ADAM_LR:-1e-3}"
+QUASI_NEWTON_LR="${QUASI_NEWTON_LR:-1.0}"
+LINE_SEARCH="${LINE_SEARCH:-strong_wolfe}"
+PHASE_SEQUENCES="${PHASE_SEQUENCES:-LBFGS:300}"
+MULTISTAGE_STAGE_PLANS="${MULTISTAGE_STAGE_PLANS:-LBFGS:300||Adam:300@@@Adam:300||LBFGS:100@@@Adam:300||LBFGS:100||Adam:300||SSBroyden:300@@@Adam:300||LBFGS:100||Adam:300||LBFGS:100}"
+MODES="${MODES:-multistage}"
+MULTISTAGE_MAX_STAGES="${MULTISTAGE_MAX_STAGES:-4}"
+ANALYSIS_COLLOCATION_ROWS="${ANALYSIS_COLLOCATION_ROWS:-2048}"
+WANDB_PROJECT="${WANDB_PROJECT:-sm-surrogates-pinn-multistage-vs-baseline}"
+WANDB_ENTITY="${WANDB_ENTITY:-}"
+LOG_EVERY_EPOCH="${LOG_EVERY_EPOCH:-1}"
+LOSS_WEIGHT_DATA="${LOSS_WEIGHT_DATA:-1.0}"
+LOSS_WEIGHT_DT="${LOSS_WEIGHT_DT:-1.0e-4}"
+LOSS_WEIGHT_PHYSICS="${LOSS_WEIGHT_PHYSICS:-1.0e-4}"
+LOSS_WEIGHT_IC="${LOSS_WEIGHT_IC:-1.0e-3}"
+GRADIENT_TELEMETRY="${GRADIENT_TELEMETRY:-true}"
+DATASET_ROOT="${DATASET_ROOT:-}"
+STAGE1_OVERRIDES="${STAGE1_OVERRIDES:-}"
+STAGE2_OVERRIDES="${STAGE2_OVERRIDES:-}"
+DRY_RUN="${DRY_RUN:-false}"
+
+CMD=(
+  "${PYTHON_BIN}"
+  tools/pinn/run_multistage_vs_baseline.py
+  --profile "${PROFILE}"
+  --experiment-tag "${EXPERIMENT_TAG}"
+  --output-root "${OUTPUT_ROOT}"
+  --model-flag "${MODEL_FLAG}"
+  --dataset-seed "${DATASET_SEED}"
+  --device "${PINN_DEVICE}"
+  --hidden-dim "${PINN_HIDDEN_DIM}"
+  --hidden-layers "${PINN_HIDDEN_LAYERS}"
+  --activation "${PINN_ACTIVATION}"
+  --dtype "${PINN_DTYPE}"
+  --batch-size "${PINN_BATCH_SIZE}"
+  --adam-lr "${ADAM_LR}"
+  --quasi-newton-lr "${QUASI_NEWTON_LR}"
+  --line-search "${LINE_SEARCH}"
+  --modes "${MODES}"
+  --multistage-max-stages "${MULTISTAGE_MAX_STAGES}"
+  --analysis-collocation-rows "${ANALYSIS_COLLOCATION_ROWS}"
+  --wandb-project "${WANDB_PROJECT}"
+  --log-every-epoch "${LOG_EVERY_EPOCH}"
+  --loss-weight-data "${LOSS_WEIGHT_DATA}"
+  --loss-weight-dt "${LOSS_WEIGHT_DT}"
+  --loss-weight-physics "${LOSS_WEIGHT_PHYSICS}"
+  --loss-weight-ic "${LOSS_WEIGHT_IC}"
+)
+
+if [[ "${GRADIENT_TELEMETRY}" == "true" ]]; then
+  CMD+=(--gradient-telemetry)
+else
+  CMD+=(--no-gradient-telemetry)
+fi
+
+if [[ -n "${PRESET}" ]]; then
+  CMD+=(--preset "${PRESET}")
+fi
+if [[ -n "${PINN_BUDGET}" ]]; then
+  CMD+=(--budget "${PINN_BUDGET}")
+fi
+if [[ -n "${PHASE_SEQUENCES}" ]]; then
+  IFS='|' read -r -a _phase_sequence_array <<< "${PHASE_SEQUENCES}"
+  for sequence in "${_phase_sequence_array[@]}"; do
+    if [[ -n "${sequence}" ]]; then
+      CMD+=(--phase-sequence "${sequence}")
+    fi
+  done
+fi
+if [[ -n "${MULTISTAGE_STAGE_PLANS}" ]]; then
+  IFS='@' read -r -a _multistage_stage_plan_array <<< "${MULTISTAGE_STAGE_PLANS//@@@/@}"
+  for plan in "${_multistage_stage_plan_array[@]}"; do
+    if [[ -n "${plan}" ]]; then
+      CMD+=(--multistage-stage-plan "${plan}")
+    fi
+  done
+fi
+if [[ -n "${WANDB_ENTITY}" ]]; then
+  CMD+=(--wandb-entity "${WANDB_ENTITY}")
+fi
+if [[ -n "${DATASET_ROOT}" ]]; then
+  CMD+=(--dataset-root "${DATASET_ROOT}")
+fi
+if [[ -n "${STAGE1_OVERRIDES}" ]]; then
+  IFS='|' read -r -a _stage1_override_array <<< "${STAGE1_OVERRIDES}"
+  for override in "${_stage1_override_array[@]}"; do
+    if [[ -n "${override}" ]]; then
+      CMD+=(--stage1-override "${override}")
+    fi
+  done
+fi
+if [[ -n "${STAGE2_OVERRIDES}" ]]; then
+  IFS='|' read -r -a _stage2_override_array <<< "${STAGE2_OVERRIDES}"
+  for override in "${_stage2_override_array[@]}"; do
+    if [[ -n "${override}" ]]; then
+      CMD+=(--stage2-override "${override}")
+    fi
+  done
+fi
+if [[ "${DRY_RUN}" == "true" ]]; then
+  CMD+=(--dry-run)
+fi
+
+echo "[multistage-local] repo_root=${REPO_ROOT}"
+echo "[multistage-local] output_root=${OUTPUT_ROOT}"
+echo "[multistage-local] profile=${PROFILE}"
+echo "[multistage-local] model_flag=${MODEL_FLAG}"
+echo "[multistage-local] dataset_seed=${DATASET_SEED}"
+echo "[multistage-local] modes=${MODES}"
+echo "[multistage-local] multistage_stage_plans=${MULTISTAGE_STAGE_PLANS}"
+if [[ -n "${DATASET_ROOT}" ]]; then
+  echo "[multistage-local] dataset_root=${DATASET_ROOT}"
+fi
+echo "[multistage-local] command=${CMD[*]}"
+
+"${CMD[@]}"

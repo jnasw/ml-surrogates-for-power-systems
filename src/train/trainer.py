@@ -857,10 +857,12 @@ def _train_pinn_step(
     x_init: torch.Tensor,
     y_init: torch.Tensor,
     capture_gradient_telemetry: bool = False,
+    objective_scale: float = 1.0,
 ) -> tuple[PinnLossBreakdown, GradientTelemetry | None]:
     breakdown_box: dict[str, PinnLossBreakdown] = {}
     telemetry_box: dict[str, GradientTelemetry | None] = {"telemetry": None}
     optimizer = optimizer_spec.optimizer
+    scale = max(float(objective_scale), 1.0e-12)
 
     def closure() -> torch.Tensor:
         optimizer.zero_grad(set_to_none=True)
@@ -877,9 +879,10 @@ def _train_pinn_step(
             y_init=y_init,
             create_graph=True,
         )
-        losses.total.backward()
+        scaled_total = losses.total / scale
+        scaled_total.backward()
         breakdown_box["losses"] = losses
-        return losses.total
+        return scaled_total
 
     if optimizer_spec.requires_closure:
         optimizer.step(closure)
@@ -932,8 +935,30 @@ def _multistage_stop_threshold(config: Any) -> float:
 
 
 def _multistage_stage_epsilon(config: Any, stage_idx: int) -> float:
-    base = float(cfg_get(config, "pinn.multistage.residual_stage.epsilon", 1.0))
+    base = float(cfg_get(config, "pinn.multistage.residual_stage.epsilon", 1.0e-2))
     return 1.0 if stage_idx == 0 else base
+
+
+def _multistage_stage_output_init_scale(config: Any, stage_idx: int) -> float:
+    if stage_idx == 0:
+        return 1.0
+    return float(cfg_get(config, "pinn.multistage.residual_stage.output_init_scale", 1.0e-3))
+
+
+def _multistage_loss_ref_enabled(config: Any) -> bool:
+    return bool(cfg_get(config, "pinn.multistage.loss_ref.enabled", True))
+
+
+def _multistage_loss_ref_min_value(config: Any) -> float:
+    return float(cfg_get(config, "pinn.multistage.loss_ref.min_value", 1.0e-12))
+
+
+def _multistage_stage_epsilon_warmup_epochs(config: Any) -> int:
+    return int(cfg_get(config, "pinn.multistage.residual_stage.epsilon_warmup_epochs", 50))
+
+
+def _multistage_stage_epsilon_start_fraction(config: Any) -> float:
+    return float(cfg_get(config, "pinn.multistage.residual_stage.epsilon_start_fraction", 0.0))
 
 
 def _multistage_base_optimizer_phases(config: Any) -> list[OptimizerPhase]:
@@ -998,6 +1023,7 @@ def _build_multistage_stage_model_from_config(
             first_activation=first_activation,
             hidden_activation=hidden_activation,
             time_scale=1.0,
+            output_init_scale=1.0,
         )
     first_activation = str(cfg_get(config, "pinn.multistage.residual_stage.first_activation", "sin"))
     hidden_activation = str(cfg_get(config, "pinn.multistage.residual_stage.hidden_activation", "tanh"))
@@ -1009,6 +1035,7 @@ def _build_multistage_stage_model_from_config(
         first_activation=first_activation,
         hidden_activation=hidden_activation,
         time_scale=time_scale,
+        output_init_scale=_multistage_stage_output_init_scale(config, stage_idx),
     )
 
 
@@ -1041,6 +1068,25 @@ def _assemble_multistage_pinn_model(
         stage_time_scales=stage_time_scales,
         stage_epsilons=ensemble.epsilon_values(),
     )
+
+
+def _multistage_effective_epsilon(
+    *,
+    target_epsilon: float,
+    stage_idx: int,
+    stage_epoch: int,
+    stage_total_epochs: int,
+    config: Any,
+) -> float:
+    if stage_idx == 0:
+        return 1.0
+    warmup_epochs = min(_multistage_stage_epsilon_warmup_epochs(config), max(0, int(stage_total_epochs)))
+    if warmup_epochs <= 0:
+        return float(target_epsilon)
+    start_fraction = max(0.0, min(1.0, _multistage_stage_epsilon_start_fraction(config)))
+    progress = min(1.0, max(0.0, float(stage_epoch) / float(warmup_epochs)))
+    fraction = start_fraction + (1.0 - start_fraction) * progress
+    return float(target_epsilon) * fraction
 
 
 def _train_multistage_pinn(
@@ -1150,6 +1196,36 @@ def _train_multistage_pinn(
             stage_optimizer_phases = explicit_stage_optimizer_phases[stage_idx]
         else:
             stage_optimizer_phases = base_optimizer_phases if stage_idx == 0 else residual_optimizer_phases
+        stage_total_epochs = int(sum(phase.epochs for phase in stage_optimizer_phases))
+        target_stage_epsilon = float(epsilons[stage_idx])
+        initial_stage_epsilon = _multistage_effective_epsilon(
+            target_epsilon=target_stage_epsilon,
+            stage_idx=stage_idx,
+            stage_epoch=0,
+            stage_total_epochs=stage_total_epochs,
+            config=config,
+        )
+        ensemble.set_stage_epsilon(stage_idx, initial_stage_epsilon)
+        stage_loss_ref = 1.0
+        if _multistage_loss_ref_enabled(config):
+            stage_ref_losses, _ = _measure_pinn_state(
+                model=ensemble,
+                criterion=criterion,
+                ode_model=ode_model,
+                formulation=formulation,
+                weights=base_weights,
+                x_data=dataset.train_x,
+                y_data=dataset.train_y,
+                x_col=dataset.train_col_x,
+                x_init=dataset.train_init_x,
+                y_init=dataset.train_init_y,
+                capture_gradient_telemetry=False,
+            )
+            stage_loss_ref = max(
+                float(stage_ref_losses.total.detach().cpu().item()),
+                _multistage_loss_ref_min_value(config),
+            )
+        stage_epoch_cursor = 0
         for phase in stage_optimizer_phases:
             optimizer_spec = build_optimizer(
                 model=current_stage,
@@ -1172,6 +1248,15 @@ def _train_multistage_pinn(
                 phase_batch_size = phase.batch_size if phase.batch_size is not None else int(cfg_get(config, "pinn.default_batch_size", 1024))
 
             for epoch in range(1, phase.epochs + 1):
+                stage_epoch_cursor += 1
+                effective_stage_epsilon = _multistage_effective_epsilon(
+                    target_epsilon=target_stage_epsilon,
+                    stage_idx=stage_idx,
+                    stage_epoch=stage_epoch_cursor,
+                    stage_total_epochs=stage_total_epochs,
+                    config=config,
+                )
+                ensemble.set_stage_epsilon(stage_idx, effective_stage_epsilon)
                 ensemble.train()
                 epoch_losses: list[PinnLossBreakdown] = []
                 epoch_gradients: list[GradientTelemetry] = []
@@ -1197,6 +1282,7 @@ def _train_multistage_pinn(
                         x_init=dataset.train_init_x,
                         y_init=dataset.train_init_y,
                         capture_gradient_telemetry=gradient_telemetry_enabled,
+                        objective_scale=stage_loss_ref,
                     )
                     epoch_losses.append(breakdown)
                     if gradient_telemetry is not None:
@@ -1228,6 +1314,7 @@ def _train_multistage_pinn(
                             x_init=batch.x_init,
                             y_init=batch.y_init,
                             capture_gradient_telemetry=gradient_telemetry_enabled,
+                            objective_scale=stage_loss_ref,
                         )
                         epoch_losses.append(breakdown)
                         if gradient_telemetry is not None:
@@ -1288,11 +1375,14 @@ def _train_multistage_pinn(
                     "multistage_stage_idx": stage_idx,
                     "multistage_num_stages": ensemble.num_stages,
                     "multistage_stage_time_scale": float(time_scale),
-                    "multistage_stage_epsilon": float(epsilons[stage_idx]),
+                    "multistage_stage_epsilon_target": float(target_stage_epsilon),
+                    "multistage_stage_epsilon": float(effective_stage_epsilon),
+                    "multistage_stage_loss_ref": float(stage_loss_ref),
                 }
                 if stage_start_diagnostics is not None and stage_idx > 0:
                     optimizer_diagnostics["multistage_stage_start_residual_rms"] = float(stage_start_diagnostics.residual_rms)
                     optimizer_diagnostics["multistage_stage_zero_crossings"] = int(stage_start_diagnostics.residual_zero_crossings)
+                    optimizer_diagnostics["multistage_stage_dominant_residual_channel"] = int(stage_start_diagnostics.dominant_residual_channel)
                 if hasattr(optimizer_spec.optimizer, "get_last_diagnostics"):
                     optimizer_diagnostics.update(optimizer_spec.optimizer.get_last_diagnostics())
 
