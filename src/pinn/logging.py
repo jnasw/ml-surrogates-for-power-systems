@@ -38,6 +38,15 @@ class EpochMetrics:
     weighting_probe_grad_max_abs: dict[str, float] | None = None
     weighting_probe_grad_std: dict[str, float] | None = None
     weighting_anchor: str | None = None
+    epoch_wall_seconds: float | None = None
+    cumulative_wall_seconds: float | None = None
+    num_batches: int | None = None
+    num_train_steps: int | None = None
+    num_supervised_rows: int | None = None
+    num_collocation_rows: int | None = None
+    num_init_rows: int | None = None
+    peak_gpu_memory_allocated_bytes: int | None = None
+    peak_gpu_memory_reserved_bytes: int | None = None
     optimizer_diagnostics: dict[str, float | int | str | bool | None] | None = None
 
     @property
@@ -120,6 +129,15 @@ class EpochMetrics:
             "weighting_scheme": self.weighting_scheme,
             "weighting_updated": bool(self.weighting_updated),
             "weighting_anchor": self.weighting_anchor,
+            "epoch_wall_seconds": self.epoch_wall_seconds,
+            "cumulative_wall_seconds": self.cumulative_wall_seconds,
+            "num_batches": self.num_batches,
+            "num_train_steps": self.num_train_steps,
+            "num_supervised_rows": self.num_supervised_rows,
+            "num_collocation_rows": self.num_collocation_rows,
+            "num_init_rows": self.num_init_rows,
+            "peak_gpu_memory_allocated_bytes": self.peak_gpu_memory_allocated_bytes,
+            "peak_gpu_memory_reserved_bytes": self.peak_gpu_memory_reserved_bytes,
         }
         flat["stage_name"] = str(self.phase_name)
         for name, value in self.train_component_losses.items():
@@ -250,6 +268,14 @@ class PinnLogger:
         parts.append(f"weight_updated={bool(row.weighting_updated)}")
         if row.train_total_grad_norm is not None:
             parts.append(f"grad_total={float(row.train_total_grad_norm):.6e}")
+        if row.epoch_wall_seconds is not None:
+            parts.append(f"epoch_s={float(row.epoch_wall_seconds):.3f}")
+        if row.cumulative_wall_seconds is not None:
+            parts.append(f"elapsed_s={float(row.cumulative_wall_seconds):.3f}")
+        if row.num_train_steps is not None:
+            parts.append(f"steps={int(row.num_train_steps)}")
+        if row.peak_gpu_memory_allocated_bytes is not None:
+            parts.append(f"gpu_peak_mem_mb={float(row.peak_gpu_memory_allocated_bytes) / (1024.0 * 1024.0):.1f}")
         for name, value in (row.train_component_grad_norms or {}).items():
             if value is not None:
                 parts.append(f"grad_{name}={float(value):.6e}")
@@ -304,6 +330,26 @@ class PinnLogger:
         if row.train_total_grad_norm is not None:
             payload["train/grad_total_norm"] = float(row.train_total_grad_norm)
             payload["train/grad_norm/total"] = float(row.train_total_grad_norm)
+        if row.epoch_wall_seconds is not None:
+            payload["cost/epoch_wall_seconds"] = float(row.epoch_wall_seconds)
+        if row.cumulative_wall_seconds is not None:
+            payload["cost/cumulative_wall_seconds"] = float(row.cumulative_wall_seconds)
+        if row.num_batches is not None:
+            payload["cost/num_batches"] = int(row.num_batches)
+        if row.num_train_steps is not None:
+            payload["cost/num_train_steps"] = int(row.num_train_steps)
+        if row.num_supervised_rows is not None:
+            payload["cost/num_supervised_rows"] = int(row.num_supervised_rows)
+        if row.num_collocation_rows is not None:
+            payload["cost/num_collocation_rows"] = int(row.num_collocation_rows)
+        if row.num_init_rows is not None:
+            payload["cost/num_init_rows"] = int(row.num_init_rows)
+        if row.peak_gpu_memory_allocated_bytes is not None:
+            payload["cost/peak_gpu_memory_allocated_bytes"] = int(row.peak_gpu_memory_allocated_bytes)
+            payload["cost/peak_gpu_memory_allocated_mb"] = float(row.peak_gpu_memory_allocated_bytes) / (1024.0 * 1024.0)
+        if row.peak_gpu_memory_reserved_bytes is not None:
+            payload["cost/peak_gpu_memory_reserved_bytes"] = int(row.peak_gpu_memory_reserved_bytes)
+            payload["cost/peak_gpu_memory_reserved_mb"] = float(row.peak_gpu_memory_reserved_bytes) / (1024.0 * 1024.0)
         for name, value in (row.train_component_grad_norms or {}).items():
             if value is not None:
                 payload[f"train/grad_{name}_norm"] = float(value)

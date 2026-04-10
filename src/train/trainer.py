@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Any, Iterator
 
 import numpy as np
@@ -235,6 +236,23 @@ class GradientTelemetry:
     @property
     def ic_grad_norm(self) -> float:
         return self.component("ic")
+
+
+def _cost_tracking_enabled(config: Any) -> bool:
+    return bool(cfg_get(config, "pinn.cost_tracking.enabled", True))
+
+
+def _reset_peak_memory_if_cuda(device: torch.device, *, enabled: bool) -> None:
+    if not enabled or device.type != "cuda":
+        return
+    torch.cuda.reset_peak_memory_stats(device)
+
+
+def _peak_memory_if_cuda(device: torch.device, *, enabled: bool) -> tuple[int | None, int | None]:
+    if not enabled or device.type != "cuda":
+        return None, None
+    torch.cuda.synchronize(device)
+    return int(torch.cuda.max_memory_allocated(device)), int(torch.cuda.max_memory_reserved(device))
 
 
 @dataclass(frozen=True)
@@ -1174,6 +1192,7 @@ def _train_multistage_pinn(
     residual_optimizer_phases = _multistage_residual_optimizer_phases(config)
     base_weights = _loss_weights_from_config(config)
     gradient_telemetry_enabled = bool(cfg_get(config, "pinn.gradient_telemetry.enabled", False))
+    cost_tracking_enabled = _cost_tracking_enabled(config)
     criterion = nn.MSELoss()
 
     dataset = move_pinn_training_data_to_device(dataset, device=device, dtype=dtype)
@@ -1193,6 +1212,7 @@ def _train_multistage_pinn(
     rows: list[EpochMetrics] = []
     best_metric: float | None = None
     global_epoch = 0
+    train_started = time.perf_counter()
     ensemble: MultistagePinnEnsemble | None = None
     stage_start_diagnostics: StageDiagnostics | None = None
 
@@ -1313,6 +1333,8 @@ def _train_multistage_pinn(
 
             for epoch in range(1, phase.epochs + 1):
                 stage_epoch_cursor += 1
+                epoch_started = time.perf_counter()
+                _reset_peak_memory_if_cuda(device, enabled=cost_tracking_enabled)
                 effective_stage_epsilon = _multistage_effective_epsilon(
                     target_epsilon=target_stage_epsilon,
                     stage_idx=stage_idx,
@@ -1331,6 +1353,11 @@ def _train_multistage_pinn(
                 else:
                     epoch_train_x, epoch_train_y = dataset.train_x, dataset.train_y
                     epoch_train_col_x = dataset.train_col_x
+                num_batches = 0
+                num_train_steps = 0
+                num_supervised_rows = 0
+                num_collocation_rows = 0
+                num_init_rows = 0
 
                 if phase_batch_size is None:
                     breakdown, gradient_telemetry = _train_pinn_step(
@@ -1349,6 +1376,11 @@ def _train_multistage_pinn(
                         objective_scale=stage_loss_ref,
                     )
                     epoch_losses.append(breakdown)
+                    num_batches = 1
+                    num_train_steps = 1
+                    num_supervised_rows = int(epoch_train_x.shape[0])
+                    num_collocation_rows = int(epoch_train_col_x.shape[0])
+                    num_init_rows = int(dataset.train_init_x.shape[0])
                     if gradient_telemetry is not None:
                         epoch_gradients.append(gradient_telemetry)
                 else:
@@ -1365,6 +1397,11 @@ def _train_multistage_pinn(
                         seed=seed + stage_idx * 1000 + global_epoch,
                     )
                     for batch in epoch_batches:
+                        num_batches += 1
+                        num_train_steps += 1
+                        num_supervised_rows += int(batch.x_data.shape[0])
+                        num_collocation_rows += int(batch.x_col.shape[0])
+                        num_init_rows += int(batch.x_init.shape[0])
                         breakdown, gradient_telemetry = _train_pinn_step(
                             model=ensemble,
                             optimizer_spec=optimizer_spec,
@@ -1384,6 +1421,12 @@ def _train_multistage_pinn(
                         if gradient_telemetry is not None:
                             epoch_gradients.append(gradient_telemetry)
 
+                epoch_wall_seconds = float(time.perf_counter() - epoch_started) if cost_tracking_enabled else None
+                cumulative_wall_seconds = float(time.perf_counter() - train_started) if cost_tracking_enabled else None
+                peak_gpu_memory_allocated_bytes, peak_gpu_memory_reserved_bytes = _peak_memory_if_cuda(
+                    device,
+                    enabled=cost_tracking_enabled,
+                )
                 train_total = float(torch.stack([x.total.detach() for x in epoch_losses]).mean().item())
                 train_component_losses = {
                     name: float(torch.stack([loss.components[name].detach() for loss in epoch_losses]).mean().item())
@@ -1472,6 +1515,15 @@ def _train_multistage_pinn(
                     weighting_probe_grad_max_abs=None,
                     weighting_probe_grad_std=None,
                     weighting_anchor="physics",
+                    epoch_wall_seconds=epoch_wall_seconds,
+                    cumulative_wall_seconds=cumulative_wall_seconds,
+                    num_batches=num_batches if cost_tracking_enabled else None,
+                    num_train_steps=num_train_steps if cost_tracking_enabled else None,
+                    num_supervised_rows=num_supervised_rows if cost_tracking_enabled else None,
+                    num_collocation_rows=num_collocation_rows if cost_tracking_enabled else None,
+                    num_init_rows=num_init_rows if cost_tracking_enabled else None,
+                    peak_gpu_memory_allocated_bytes=peak_gpu_memory_allocated_bytes,
+                    peak_gpu_memory_reserved_bytes=peak_gpu_memory_reserved_bytes,
                     optimizer_diagnostics=optimizer_diagnostics,
                 )
                 rows.append(row)
@@ -1561,6 +1613,7 @@ def train_pinn(
     weighting_policy = build_weighting_policy(weighting_config)
     weighting_state = weighting_policy.initial_state(base_weights)
     gradient_telemetry_enabled = bool(cfg_get(config, "pinn.gradient_telemetry.enabled", False))
+    cost_tracking_enabled = _cost_tracking_enabled(config)
     criterion = nn.MSELoss()
 
     model = TimeConditionedMLP(
@@ -1591,6 +1644,7 @@ def train_pinn(
     rows: list[EpochMetrics] = []
     best_metric: float | None = None
     global_epoch = 0
+    train_started = time.perf_counter()
     total_epochs = int(sum(phase.epochs for phase in optimizer_phases))
     checkpoint_milestones = _resolve_checkpoint_milestones(config, total_epochs)
 
@@ -1629,6 +1683,8 @@ def train_pinn(
         phase_supports_dynamic_weight_updates = _phase_supports_dynamic_weight_updates(phase)
 
         for epoch in range(1, phase.epochs + 1):
+            epoch_started = time.perf_counter()
+            _reset_peak_memory_if_cuda(device, enabled=cost_tracking_enabled)
             model.train()
             epoch_losses: list[PinnLossBreakdown] = []
             epoch_gradients: list[GradientTelemetry] = []
@@ -1645,6 +1701,11 @@ def train_pinn(
             else:
                 epoch_train_x, epoch_train_y = dataset.train_x, dataset.train_y
                 epoch_train_col_x = dataset.train_col_x
+            num_batches = 0
+            num_train_steps = 0
+            num_supervised_rows = 0
+            num_collocation_rows = 0
+            num_init_rows = 0
 
             if phase_batch_size is None:
                 breakdown, gradient_telemetry = _train_pinn_step(
@@ -1662,6 +1723,11 @@ def train_pinn(
                     capture_gradient_telemetry=capture_gradient_telemetry,
                 )
                 epoch_losses.append(breakdown)
+                num_batches = 1
+                num_train_steps = 1
+                num_supervised_rows = int(epoch_train_x.shape[0])
+                num_collocation_rows = int(epoch_train_col_x.shape[0])
+                num_init_rows = int(dataset.train_init_x.shape[0])
                 if gradient_telemetry is not None:
                     epoch_gradients.append(gradient_telemetry)
             else:
@@ -1678,6 +1744,11 @@ def train_pinn(
                     seed=seed + phase_idx + global_epoch,
                 )
                 for batch in epoch_batches:
+                    num_batches += 1
+                    num_train_steps += 1
+                    num_supervised_rows += int(batch.x_data.shape[0])
+                    num_collocation_rows += int(batch.x_col.shape[0])
+                    num_init_rows += int(batch.x_init.shape[0])
                     breakdown, gradient_telemetry = _train_pinn_step(
                         model=model,
                         optimizer_spec=optimizer_spec,
@@ -1696,6 +1767,12 @@ def train_pinn(
                     if gradient_telemetry is not None:
                         epoch_gradients.append(gradient_telemetry)
 
+            epoch_wall_seconds = float(time.perf_counter() - epoch_started) if cost_tracking_enabled else None
+            cumulative_wall_seconds = float(time.perf_counter() - train_started) if cost_tracking_enabled else None
+            peak_gpu_memory_allocated_bytes, peak_gpu_memory_reserved_bytes = _peak_memory_if_cuda(
+                device,
+                enabled=cost_tracking_enabled,
+            )
             train_total = float(torch.stack([x.total.detach() for x in epoch_losses]).mean().item())
             train_component_losses = {
                 name: float(torch.stack([loss.components[name].detach() for loss in epoch_losses]).mean().item())
@@ -1788,6 +1865,15 @@ def train_pinn(
                 weighting_probe_grad_max_abs=None if weight_update_stats is None else dict(weight_update_stats.grad_max_abs),
                 weighting_probe_grad_std=None if weight_update_stats is None else dict(weight_update_stats.grad_std),
                 weighting_anchor=weighting_config.anchor,
+                epoch_wall_seconds=epoch_wall_seconds,
+                cumulative_wall_seconds=cumulative_wall_seconds,
+                num_batches=num_batches if cost_tracking_enabled else None,
+                num_train_steps=num_train_steps if cost_tracking_enabled else None,
+                num_supervised_rows=num_supervised_rows if cost_tracking_enabled else None,
+                num_collocation_rows=num_collocation_rows if cost_tracking_enabled else None,
+                num_init_rows=num_init_rows if cost_tracking_enabled else None,
+                peak_gpu_memory_allocated_bytes=peak_gpu_memory_allocated_bytes,
+                peak_gpu_memory_reserved_bytes=peak_gpu_memory_reserved_bytes,
                 optimizer_diagnostics={
                     "requires_closure": optimizer_spec.requires_closure,
                     "full_batch": phase_full_batch,

@@ -28,6 +28,8 @@ pinn:
   default_batch_size: 1024
   gradient_telemetry:
     enabled: false
+  cost_tracking:
+    enabled: true
   collocation_sampling:
     enabled: false
     rows_per_epoch: null
