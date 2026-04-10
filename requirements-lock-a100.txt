@@ -33,6 +33,7 @@ omegaconf==2.3.0
 packaging==26.0
 platformdirs==4.4.0
 protobuf==6.33.5
+pytorch-optimizer==3.10.0
 pydantic==2.12.5
 pydantic_core==2.41.5
 PyYAML==6.0.3

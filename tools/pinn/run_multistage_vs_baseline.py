@@ -15,6 +15,7 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+MINIBATCH_OPTIMIZERS = frozenset({"Adam", "SOAP"})
 DEFAULT_SINGLE_STAGE_PHASE_SEQUENCES = [
     "LBFGS:300",
 ]
@@ -108,12 +109,12 @@ def _parse_phase_entry(
     epochs = int(fields[1])
     if epochs <= 0:
         raise ValueError(f"Phase '{entry}' must set epochs > 0.")
-    lr = float(fields[2]) if len(fields) == 3 else (adam_lr if optimizer == "Adam" else quasi_newton_lr)
+    lr = float(fields[2]) if len(fields) == 3 else (adam_lr if optimizer in MINIBATCH_OPTIMIZERS else quasi_newton_lr)
     lower = optimizer.lower()
-    is_adam = optimizer == "Adam"
+    is_minibatch = optimizer in MINIBATCH_OPTIMIZERS
     optimizer_kwargs = "{}"
     resolved_line_search_name = "null"
-    if not is_adam:
+    if not is_minibatch:
         resolved_line_search = line_search_name
         if optimizer == "LBFGS":
             resolved_line_search = "strong_wolfe"
@@ -130,12 +131,12 @@ def _parse_phase_entry(
         f"optimizer:{optimizer},"
         f"lr:{lr},"
         f"epochs:{epochs},"
-        f"batch_size:{int(batch_size) if is_adam else 'null'},"
-        f"shuffle:{'true' if is_adam else 'false'},"
-        f"full_batch:{'false' if is_adam else 'true'},"
+        f"batch_size:{int(batch_size) if is_minibatch else 'null'},"
+        f"shuffle:{'true' if is_minibatch else 'false'},"
+        f"full_batch:{'false' if is_minibatch else 'true'},"
         "allow_sampling:false,"
         f"optimizer_kwargs:{optimizer_kwargs},"
-        f"line_search:{'null' if is_adam else resolved_line_search_name},"
+        f"line_search:{'null' if is_minibatch else resolved_line_search_name},"
         "convergence:null"
         "}"
     )

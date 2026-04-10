@@ -7,6 +7,10 @@ from typing import Any
 
 import torch
 from torch import nn
+try:
+    from pytorch_optimizer import SOAP
+except ImportError:  # pragma: no cover - optional dependency
+    SOAP = None
 
 from src.pinn.optimizers.bfgs import BFGS
 from src.pinn.optimizers.ssbroyden import SSBroyden
@@ -36,6 +40,22 @@ def build_optimizer(
         if line_search not in (None, {}):
             raise ValueError("Adam phases must not configure line_search.")
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, **kwargs)
+        return OptimizerSpec(
+            optimizer=optimizer,
+            requires_closure=False,
+            supports_minibatch=True,
+            default_full_batch=False,
+            line_search_name=None,
+        )
+    if normalized == "soap":
+        if line_search not in (None, {}):
+            raise ValueError("SOAP phases must not configure line_search.")
+        if SOAP is None:
+            raise ImportError(
+                "SOAP requires the optional 'pytorch-optimizer' package. "
+                "Install it with `pip install pytorch-optimizer`."
+            )
+        optimizer = SOAP(model.parameters(), lr=lr, **kwargs)
         return OptimizerSpec(
             optimizer=optimizer,
             requires_closure=False,
@@ -107,4 +127,4 @@ def build_optimizer(
             default_full_batch=True,
             line_search_name=str(line_search_cfg["name"]).strip().lower(),
         )
-    raise ValueError("Unsupported optimizer. Use one of: Adam, LBFGS, BFGS, SSBFGS, SSBroyden.")
+    raise ValueError("Unsupported optimizer. Use one of: Adam, SOAP, LBFGS, BFGS, SSBFGS, SSBroyden.")

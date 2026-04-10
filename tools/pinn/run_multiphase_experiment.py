@@ -26,7 +26,8 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SUPPORTED_OPTIMIZERS = ("Adam", "LBFGS", "BFGS", "SSBFGS", "SSBroyden")
+SUPPORTED_OPTIMIZERS = ("Adam", "SOAP", "LBFGS", "BFGS", "SSBFGS", "SSBroyden")
+MINIBATCH_OPTIMIZERS = frozenset({"Adam", "SOAP"})
 PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
     "smoke": {
         "budget": "b256",
@@ -122,7 +123,7 @@ def _optimizer_defaults(
 ) -> tuple[str, str | None]:
     optimizer_kwargs = "{}"
     resolved_line_search_name: str | None = None
-    if optimizer == "Adam":
+    if optimizer in MINIBATCH_OPTIMIZERS:
         return optimizer_kwargs, None
     resolved_line_search_name = line_search_name
     if optimizer == "SSBFGS":
@@ -165,23 +166,23 @@ def _parse_phase_sequence(
         epochs = int(fields[1])
         if epochs <= 0:
             raise ValueError(f"Optimizer phase '{part}' must set epochs > 0.")
-        lr = float(fields[2]) if len(fields) == 3 else (adam_lr if optimizer == "Adam" else quasi_newton_lr)
+        lr = float(fields[2]) if len(fields) == 3 else (adam_lr if optimizer in MINIBATCH_OPTIMIZERS else quasi_newton_lr)
         optimizer_kwargs, resolved_line_search_name = _optimizer_defaults(
             optimizer=optimizer,
             line_search_name=line_search_name,
         )
-        is_adam = optimizer == "Adam"
+        is_minibatch = optimizer in MINIBATCH_OPTIMIZERS
         phases.append(
             LauncherPhaseSpec(
                 optimizer=optimizer,
                 epochs=epochs,
                 lr=lr,
-                batch_size=int(batch_size) if is_adam else None,
-                shuffle=is_adam,
-                full_batch=not is_adam,
+                batch_size=int(batch_size) if is_minibatch else None,
+                shuffle=is_minibatch,
+                full_batch=not is_minibatch,
                 allow_sampling=False,
                 optimizer_kwargs=optimizer_kwargs,
-                line_search_name=resolved_line_search_name if not is_adam else None,
+                line_search_name=resolved_line_search_name if not is_minibatch else None,
             )
         )
     return phases

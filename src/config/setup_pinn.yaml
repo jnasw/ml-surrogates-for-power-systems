@@ -165,6 +165,17 @@ pinn:
       convergence: null
   # Example SSBFGS optimizer-phase override:
   # optimizer_phases:
+  #   - name: soap
+  #     optimizer: SOAP
+  #     lr: 1.0e-3
+  #     epochs: 100
+  #     batch_size: 1024
+  #     shuffle: true
+  #     full_batch: false
+  #     allow_sampling: true
+  #     optimizer_kwargs: {}
+  #     line_search: null
+  #     convergence: null
   #   - name: ssbfgs
   #     optimizer: SSBFGS
   #     lr: 1.0
