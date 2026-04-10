@@ -298,12 +298,25 @@ def _adam_stage_override(*, epochs: int, lr: float, batch_size: int, allow_sampl
         f"batch_size:{int(batch_size)},"
         "shuffle:true,"
         "full_batch:false,"
-        f"allow_sampling:{'true' if allow_sampling else 'false'},"
-        "optimizer_kwargs:{},"
-        "line_search:null,"
-        "convergence:null"
+        f"allow_sampling:{'true' if allow_sampling else 'false'}"
         "}"
         "]"
+    )
+
+
+def _loss_weight_schedule_override(*, warmup_epochs: int, base_weights: dict[str, float]) -> str:
+    return (
+        "pinn.loss_weight_schedule=["
+        "{epochs:"
+        f"{int(warmup_epochs)},"
+        "weights:{data:1.0,dt:0.0,physics:0.0,ic:0.0}"
+        "},"
+        "{epochs:null,weights:{"
+        f"data:{float(base_weights['data'])},"
+        f"dt:{float(base_weights['dt'])},"
+        f"physics:{float(base_weights['physics'])},"
+        f"ic:{float(base_weights['ic'])}"
+        "}}]"
     )
 
 
@@ -341,6 +354,7 @@ def _build_pinn_command(
     probe_physics_rows: int,
     probe_init_rows: int,
     probe_seed: int,
+    loss_weight_schedule_override: str | None = None,
 ) -> list[str]:
     command = [
         python_bin,
@@ -380,6 +394,8 @@ def _build_pinn_command(
         f"logging.log_every_epoch={int(log_every_epoch)}",
         _adam_stage_override(epochs=epochs, lr=adam_lr, batch_size=batch_size, allow_sampling=allow_sampling),
     ]
+    if loss_weight_schedule_override is not None:
+        command.append(loss_weight_schedule_override)
     if wandb_entity:
         command.append(f"wandb.entity={wandb_entity}")
     return command
@@ -408,6 +424,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--adam-lr", type=float, default=1e-3, help="Adam learning rate.")
     parser.add_argument("--allow-sampling", action=argparse.BooleanOptionalAction, default=False, help="Whether the Adam stage may use configured sampling.")
     parser.add_argument("--schemes", default="static,ma,id,dn", help="Comma-separated weighting schemes.")
+    parser.add_argument("--include-static-uniform", action="store_true", help="Add a static baseline with uniform 1:1:1:1 loss weights.")
+    parser.add_argument("--include-static-data-only", action="store_true", help="Add a static baseline with data-only loss weights (1,0,0,0).")
+    parser.add_argument("--static-data-warmup-epochs", type=int, default=0, help="Add a static run that uses data-only weights for N epochs, then switches to the configured static loss weights.")
     parser.add_argument("--ema-beta", type=float, default=0.99, help="EMA beta used by dynamic weighting.")
     parser.add_argument("--update-interval-epochs", type=int, default=10, help="Dynamic weighting update cadence.")
     parser.add_argument("--probe-data-rows", type=int, default=None, help="Fixed supervised probe rows. Defaults from --profile.")
@@ -500,6 +519,9 @@ def main() -> None:
     manifest["artifacts"]["adam_lr"] = args.adam_lr
     manifest["artifacts"]["gradient_telemetry"] = resolved_gradient_telemetry
     manifest["artifacts"]["weighting_schemes"] = schemes
+    manifest["artifacts"]["include_static_uniform"] = bool(args.include_static_uniform)
+    manifest["artifacts"]["include_static_data_only"] = bool(args.include_static_data_only)
+    manifest["artifacts"]["static_data_warmup_epochs"] = int(args.static_data_warmup_epochs)
     manifest["artifacts"]["weighting_probe_rows"] = {
         "data": probe_data_rows,
         "physics": probe_physics_rows,
@@ -557,10 +579,70 @@ def main() -> None:
         *args.tag,
     ]
 
+    run_specs: list[dict[str, Any]] = []
     for scheme in schemes:
-        run_name = f"{scheme}_adam{int(resolved_epochs)}"
+        run_specs.append(
+            {
+                "run_name": f"{scheme}_adam{int(resolved_epochs)}",
+                "weighting_scheme": scheme,
+                "loss_weights": {
+                    "data": loss_weight_data,
+                    "dt": loss_weight_dt,
+                    "physics": loss_weight_physics,
+                    "ic": loss_weight_ic,
+                },
+                "schedule_override": None,
+                "extra_tags": [scheme],
+            }
+        )
+    if args.include_static_uniform:
+        run_specs.append(
+            {
+                "run_name": f"static_uniform_adam{int(resolved_epochs)}",
+                "weighting_scheme": "static",
+                "loss_weights": {"data": 1.0, "dt": 1.0, "physics": 1.0, "ic": 1.0},
+                "schedule_override": None,
+                "extra_tags": ["static", "uniform_weights"],
+            }
+        )
+    if args.include_static_data_only:
+        run_specs.append(
+            {
+                "run_name": f"static_data_only_adam{int(resolved_epochs)}",
+                "weighting_scheme": "static",
+                "loss_weights": {"data": 1.0, "dt": 0.0, "physics": 0.0, "ic": 0.0},
+                "schedule_override": None,
+                "extra_tags": ["static", "data_only"],
+            }
+        )
+    if int(args.static_data_warmup_epochs) > 0:
+        run_specs.append(
+            {
+                "run_name": f"static_data_warmup{int(args.static_data_warmup_epochs)}_adam{int(resolved_epochs)}",
+                "weighting_scheme": "static",
+                "loss_weights": {
+                    "data": loss_weight_data,
+                    "dt": loss_weight_dt,
+                    "physics": loss_weight_physics,
+                    "ic": loss_weight_ic,
+                },
+                "schedule_override": _loss_weight_schedule_override(
+                    warmup_epochs=int(args.static_data_warmup_epochs),
+                    base_weights={
+                        "data": loss_weight_data,
+                        "dt": loss_weight_dt,
+                        "physics": loss_weight_physics,
+                        "ic": loss_weight_ic,
+                    },
+                ),
+                "extra_tags": ["static", "data_warmup", f"warmup{int(args.static_data_warmup_epochs)}"],
+            }
+        )
+
+    for spec in run_specs:
+        run_name = str(spec["run_name"])
         run_dir = output_root / "runs" / run_name
-        wandb_tags = [*tags_base, scheme]
+        wandb_tags = [*tags_base, *list(spec["extra_tags"])]
         command = _build_pinn_command(
             python_bin=args.python_bin,
             model_flag=args.model_flag,
@@ -582,18 +664,19 @@ def main() -> None:
             adam_lr=args.adam_lr,
             allow_sampling=bool(args.allow_sampling),
             log_every_epoch=args.log_every_epoch,
-            loss_weight_data=loss_weight_data,
-            loss_weight_dt=loss_weight_dt,
-            loss_weight_physics=loss_weight_physics,
-            loss_weight_ic=loss_weight_ic,
+            loss_weight_data=float(spec["loss_weights"]["data"]),
+            loss_weight_dt=float(spec["loss_weights"]["dt"]),
+            loss_weight_physics=float(spec["loss_weights"]["physics"]),
+            loss_weight_ic=float(spec["loss_weights"]["ic"]),
             gradient_telemetry=resolved_gradient_telemetry,
-            weighting_scheme=scheme,
+            weighting_scheme=str(spec["weighting_scheme"]),
             update_interval_epochs=args.update_interval_epochs,
             ema_beta=args.ema_beta,
             probe_data_rows=probe_data_rows,
             probe_physics_rows=probe_physics_rows,
             probe_init_rows=probe_init_rows,
             probe_seed=args.probe_seed,
+            loss_weight_schedule_override=spec["schedule_override"],
         )
         log_path = output_root / "logs" / "runs" / f"{run_name}.log"
         _set_run_status(
@@ -601,7 +684,7 @@ def main() -> None:
             run_name=run_name,
             status="running" if not args.dry_run else "dry_run",
             run_dir=str(run_dir),
-            weighting_scheme=scheme,
+            weighting_scheme=str(spec["weighting_scheme"]),
             epochs=resolved_epochs,
             command=command,
             log_file=str(log_path),
@@ -617,7 +700,7 @@ def main() -> None:
                 run_name=run_name,
                 status="dry_run",
                 run_dir=str(run_dir),
-                weighting_scheme=scheme,
+                weighting_scheme=str(spec["weighting_scheme"]),
                 epochs=resolved_epochs,
                 completed_at_utc=utc_now_iso(),
                 return_code=0,
@@ -636,7 +719,7 @@ def main() -> None:
             run_name=run_name,
             status=status,
             run_dir=str(run_dir),
-            weighting_scheme=scheme,
+            weighting_scheme=str(spec["weighting_scheme"]),
             epochs=resolved_epochs,
             completed_at_utc=utc_now_iso(),
             return_code=proc.returncode,
