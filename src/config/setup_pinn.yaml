@@ -70,6 +70,22 @@ pinn:
     dt: 1.0e-4
     physics: 1.0e-4
     ic: 1.0e-3
+  loss_weight_schedule: null
+  # Optional static-only schedule for changing loss weights during a run.
+  # Example:
+  # loss_weight_schedule:
+  #   - epochs: 500
+  #     weights:
+  #       data: 1.0
+  #       dt: 0.0
+  #       physics: 0.0
+  #       ic: 0.0
+  #   - epochs: null
+  #     weights:
+  #       data: 1.0
+  #       dt: 1.0e-4
+  #       physics: 1.0e-4
+  #       ic: 1.0e-3
   weighting:
     scheme: static # static | ma | id | dn | relobralo
     anchor: physics # v1 keeps the paper-style anchor fixed to physics for ma/id/dn; relobralo ignores it

@@ -114,6 +114,12 @@ class BaselineConfig:
     device: str = "auto"  # auto | cuda | mps | cpu
 
 
+@dataclass(frozen=True)
+class LossWeightScheduleStage:
+    epochs: int | None
+    weights: LossWeights
+
+
 @dataclass
 class PinnModel:
     model: nn.Module
@@ -354,6 +360,53 @@ def _loss_weights_from_config(config: Any) -> LossWeights:
         physics=float(cfg_get(config, "pinn.loss_weights.physics", 1.0)),
         ic=float(cfg_get(config, "pinn.loss_weights.ic", 1.0)),
     )
+
+
+def _loss_weight_schedule_from_config(config: Any) -> list[LossWeightScheduleStage] | None:
+    raw_schedule = cfg_get(config, "pinn.loss_weight_schedule", None)
+    if raw_schedule in (None, "null"):
+        return None
+    schedule: list[LossWeightScheduleStage] = []
+    for idx, item in enumerate(raw_schedule):
+        raw_epochs = getattr(item, "epochs", None)
+        epochs = None if raw_epochs in (None, "null") else int(raw_epochs)
+        if epochs is not None and epochs <= 0:
+            raise ValueError(f"config.pinn.loss_weight_schedule[{idx}].epochs must be > 0 when provided.")
+        raw_weights = getattr(item, "weights", None)
+        if raw_weights in (None, "null"):
+            raise ValueError(f"config.pinn.loss_weight_schedule[{idx}].weights must be provided.")
+        schedule.append(
+            LossWeightScheduleStage(
+                epochs=epochs,
+                weights=LossWeights(
+                    data=float(getattr(raw_weights, "data")),
+                    dt=float(getattr(raw_weights, "dt")),
+                    physics=float(getattr(raw_weights, "physics")),
+                    ic=float(getattr(raw_weights, "ic")),
+                ),
+            )
+        )
+    if not schedule:
+        raise ValueError("config.pinn.loss_weight_schedule must not be empty when provided.")
+    return schedule
+
+
+def _scheduled_loss_weights(
+    *,
+    base_weights: LossWeights,
+    schedule: list[LossWeightScheduleStage] | None,
+    next_global_epoch: int,
+) -> LossWeights:
+    if not schedule:
+        return base_weights
+    cursor = 0
+    for stage in schedule:
+        if stage.epochs is None:
+            return stage.weights
+        cursor += int(stage.epochs)
+        if int(next_global_epoch) <= cursor:
+            return stage.weights
+    return schedule[-1].weights
 
 
 def _sample_collocation_rows(x_col: torch.Tensor, config: Any) -> torch.Tensor:
@@ -1501,7 +1554,10 @@ def train_pinn(
     formulation = str(cfg_get(config, "pinn.formulation", "odequations"))
     optimizer_phases = load_optimizer_phases(config)
     base_weights = _loss_weights_from_config(config)
+    loss_weight_schedule = _loss_weight_schedule_from_config(config)
     weighting_config = weighting_config_from_config(config)
+    if loss_weight_schedule is not None and weighting_config.scheme != "static":
+        raise ValueError("pinn.loss_weight_schedule currently supports static weighting only. Set pinn.weighting.scheme=static.")
     weighting_policy = build_weighting_policy(weighting_config)
     weighting_state = weighting_policy.initial_state(base_weights)
     gradient_telemetry_enabled = bool(cfg_get(config, "pinn.gradient_telemetry.enabled", False))
@@ -1577,7 +1633,12 @@ def train_pinn(
             epoch_losses: list[PinnLossBreakdown] = []
             epoch_gradients: list[GradientTelemetry] = []
             capture_gradient_telemetry = gradient_telemetry_enabled
-            active_weights = weighting_policy.current_weights(weighting_state)
+            scheduled_base_weights = _scheduled_loss_weights(
+                base_weights=base_weights,
+                schedule=loss_weight_schedule,
+                next_global_epoch=global_epoch + 1,
+            )
+            active_weights = scheduled_base_weights if weighting_config.scheme == "static" else weighting_policy.current_weights(weighting_state)
             if phase_allows_sampling:
                 epoch_train_x, epoch_train_y = _sample_supervised_rows(dataset.train_x, dataset.train_y, config)
                 epoch_train_col_x = _sample_collocation_rows(dataset.train_col_x, config)
