@@ -382,6 +382,7 @@ def _build_pinn_command(
         f"pinn.weighting.ema_beta={ema_beta}",
         f"pinn.weighting.update_interval_epochs={int(update_interval_epochs)}",
         "pinn.weighting.dynamic_components=[data,dt,ic]",
+        "pinn.weighting.relobralo.rho=0.95",
         f"pinn.weighting.probe.data_rows={int(probe_data_rows)}",
         f"pinn.weighting.probe.physics_rows={int(probe_physics_rows)}",
         f"pinn.weighting.probe.init_rows={int(probe_init_rows)}",

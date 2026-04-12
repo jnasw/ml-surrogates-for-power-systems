@@ -38,6 +38,7 @@ class WeightingState:
     baseline_losses: dict[str, float] | None = None
     last_update_epoch: int = 0
     last_update_global_epoch: int = 0
+    update_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -141,7 +142,7 @@ def weighting_config_from_config(config: Any) -> WeightingConfig:
     relobralo_alpha = float(cfg_get(config, "pinn.weighting.relobralo.alpha", 0.999))
     if not (0.0 <= relobralo_alpha <= 1.0):
         raise ValueError("pinn.weighting.relobralo.alpha must be in [0, 1].")
-    relobralo_rho = float(cfg_get(config, "pinn.weighting.relobralo.rho", 1.0))
+    relobralo_rho = float(cfg_get(config, "pinn.weighting.relobralo.rho", 0.95))
     if not (0.0 <= relobralo_rho <= 1.0):
         raise ValueError("pinn.weighting.relobralo.rho must be in [0, 1].")
     random_seed = int(cfg_get(config, "pinn.weighting.random_seed", 0))
@@ -201,6 +202,8 @@ class BaseWeightingPolicy:
     def should_update(self, *, epoch: int, global_epoch: int) -> bool:
         if not self.config.is_dynamic:
             return False
+        if self.config.scheme == "relobralo":
+            return True
         return int(epoch) % int(self.config.update_interval_epochs) == 0
 
     def update(self, state: WeightingState, stats: WeightUpdateStats) -> WeightingState:
@@ -227,6 +230,7 @@ class BaseWeightingPolicy:
             baseline_losses=dict(stats.component_losses) if state.baseline_losses is None else dict(state.baseline_losses),
             last_update_epoch=int(stats.epoch),
             last_update_global_epoch=int(stats.global_epoch),
+            update_count=int(state.update_count) + 1,
         )
 
     def _raw_candidate_weights(self, state: WeightingState, stats: WeightUpdateStats) -> dict[str, float]:
@@ -290,9 +294,10 @@ class ReLoBRaLoWeightingPolicy(BaseWeightingPolicy):
             raw_candidate_weights={name: float(raw_candidate_weights[name]) for name in self.config.dynamic_components},
             ema_weights={name: float(raw_candidate_weights[name]) for name in self.config.dynamic_components},
             previous_losses=dict(stats.component_losses),
-            baseline_losses=dict(stats.component_losses) if state.baseline_losses is None else dict(state.baseline_losses),
+            baseline_losses=_relobralo_next_baseline_losses(state=state, stats=stats),
             last_update_epoch=int(stats.epoch),
             last_update_global_epoch=int(stats.global_epoch),
+            update_count=int(state.update_count) + 1,
         )
 
     def _raw_candidate_weights(self, state: WeightingState, stats: WeightUpdateStats) -> dict[str, float]:
@@ -315,7 +320,7 @@ class ReLoBRaLoWeightingPolicy(BaseWeightingPolicy):
         lambs_hat = _softmax_weights(progress_logits)
         lambs0_hat = _softmax_weights(lookback_logits)
 
-        alpha = float(self.config.relobralo_alpha)
+        alpha = _relobralo_effective_alpha(self.config, state)
         rho_keep_history = 1.0 if _sample_relobralo_rho(self.config, stats.global_epoch) else 0.0
         return {
             name: (
@@ -349,6 +354,29 @@ def _sample_relobralo_rho(config: WeightingConfig, global_epoch: int) -> bool:
         return True
     rng = random.Random(int(config.random_seed) + int(global_epoch))
     return rng.random() < float(config.relobralo_rho)
+
+
+def _relobralo_effective_alpha(config: WeightingConfig, state: WeightingState) -> float:
+    if int(state.update_count) == 0:
+        return 1.0
+    if int(state.update_count) == 1:
+        return 0.0
+    return float(config.relobralo_alpha)
+
+
+def _relobralo_next_baseline_losses(
+    *,
+    state: WeightingState,
+    stats: WeightUpdateStats,
+) -> dict[str, float]:
+    current_losses = dict(stats.component_losses)
+    if state.baseline_losses is None:
+        return current_losses
+    if int(state.update_count) == 1:
+        # Reference-style warmup: after the second update, anchor the random
+        # lookback baseline to the current losses.
+        return current_losses
+    return dict(state.baseline_losses)
 
 
 def build_weighting_policy(weighting_config: WeightingConfig) -> LossWeightingPolicy:

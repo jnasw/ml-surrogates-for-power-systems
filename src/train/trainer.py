@@ -17,7 +17,7 @@ from src.data.loaders.trajectory_dataset import TrajectoryDataset
 from src.pinn.data import PinnDatasetBundle
 from src.pinn.evaluator import evaluate_pinn_loss_breakdown, move_pinn_training_data_to_device
 from src.pinn.logging import EpochMetrics, PinnLogger
-from src.pinn.losses import LossWeights, PinnLossBreakdown
+from src.pinn.losses import LOSS_COMPONENTS, LossWeights, PinnLossBreakdown
 from src.pinn.multistage import (
     MultistagePinnEnsemble,
     MultistageStageMLP,
@@ -1796,26 +1796,39 @@ def train_pinn(
             weighting_updated = False
             weight_update_stats = None
             if phase_supports_dynamic_weight_updates and weighting_policy.should_update(epoch=epoch, global_epoch=global_epoch):
-                probe_losses = evaluate_pinn_loss_breakdown(
-                    model=model,
-                    criterion=criterion,
-                    ode_model=ode_model,
-                    formulation=formulation,
-                    weights=active_weights,
-                    x_data=weight_probe_batch.x_data,
-                    y_data=weight_probe_batch.y_data,
-                    x_col=weight_probe_batch.x_col,
-                    x_init=weight_probe_batch.x_init,
-                    y_init=weight_probe_batch.y_init,
-                    create_graph=True,
-                )
-                weight_update_stats = _compute_weight_update_stats(
-                    model=model,
-                    losses=probe_losses,
-                    anchor_component=weighting_config.anchor,
-                    epoch=epoch,
-                    global_epoch=global_epoch,
-                )
+                if weighting_config.scheme == "relobralo":
+                    zero_stats = {name: 0.0 for name in LOSS_COMPONENTS}
+                    weight_update_stats = WeightUpdateStats(
+                        grad_l2_norms=dict(zero_stats),
+                        grad_mean_abs=dict(zero_stats),
+                        grad_max_abs=dict(zero_stats),
+                        grad_std=dict(zero_stats),
+                        component_losses=dict(train_component_losses),
+                        anchor_component=weighting_config.anchor,
+                        epoch=epoch,
+                        global_epoch=global_epoch,
+                    )
+                else:
+                    probe_losses = evaluate_pinn_loss_breakdown(
+                        model=model,
+                        criterion=criterion,
+                        ode_model=ode_model,
+                        formulation=formulation,
+                        weights=active_weights,
+                        x_data=weight_probe_batch.x_data,
+                        y_data=weight_probe_batch.y_data,
+                        x_col=weight_probe_batch.x_col,
+                        x_init=weight_probe_batch.x_init,
+                        y_init=weight_probe_batch.y_init,
+                        create_graph=True,
+                    )
+                    weight_update_stats = _compute_weight_update_stats(
+                        model=model,
+                        losses=probe_losses,
+                        anchor_component=weighting_config.anchor,
+                        epoch=epoch,
+                        global_epoch=global_epoch,
+                    )
                 weighting_state = weighting_policy.update(weighting_state, weight_update_stats)
                 weighting_updated = True
             val_total_loss = None

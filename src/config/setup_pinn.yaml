@@ -98,7 +98,7 @@ pinn:
     relobralo:
       temperature: 1.0
       alpha: 0.999
-      rho: 1.0
+      rho: 0.95
     probe:
       # Fixed training subset used only for dynamic weight updates.
       data_rows: 256
