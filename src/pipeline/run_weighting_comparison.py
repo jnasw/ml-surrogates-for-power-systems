@@ -25,7 +25,7 @@ from src.pipeline.manifest import save_manifest, set_stage_status, utc_now_iso
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SUPPORTED_WEIGHTING_SCHEMES = ("static", "ma", "id", "dn", "relobralo")
+SUPPORTED_WEIGHTING_SCHEMES = ("static", "ma", "id", "dn", "relobralo", "ntk_random_batch")
 PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
     "smoke": {
         "method": "qbc_deep_ensemble",
@@ -354,8 +354,16 @@ def _build_pinn_command(
     probe_physics_rows: int,
     probe_init_rows: int,
     probe_seed: int,
+    ntk_batch_size_data: int,
+    ntk_batch_size_dt: int,
+    ntk_batch_size_physics: int,
+    ntk_batch_size_ic: int,
+    ntk_seed: int,
+    ntk_refresh_each_update: bool,
+    ntk_use_ema: bool,
     loss_weight_schedule_override: str | None = None,
 ) -> list[str]:
+    dynamic_components = "[data,dt,physics,ic]" if weighting_scheme == "ntk_random_batch" else "[data,dt,ic]"
     command = [
         python_bin,
         "20_run_pinn.py",
@@ -381,12 +389,19 @@ def _build_pinn_command(
         "pinn.weighting.anchor=physics",
         f"pinn.weighting.ema_beta={ema_beta}",
         f"pinn.weighting.update_interval_epochs={int(update_interval_epochs)}",
-        "pinn.weighting.dynamic_components=[data,dt,ic]",
+        f"pinn.weighting.dynamic_components={dynamic_components}",
         "pinn.weighting.relobralo.rho=0.95",
         f"pinn.weighting.probe.data_rows={int(probe_data_rows)}",
         f"pinn.weighting.probe.physics_rows={int(probe_physics_rows)}",
         f"pinn.weighting.probe.init_rows={int(probe_init_rows)}",
         f"pinn.weighting.probe.seed={int(probe_seed)}",
+        f"pinn.weighting.probe.refresh_each_update={'true' if ntk_refresh_each_update else 'false'}",
+        f"pinn.weighting.ntk.batch_size.data={int(ntk_batch_size_data)}",
+        f"pinn.weighting.ntk.batch_size.dt={int(ntk_batch_size_dt)}",
+        f"pinn.weighting.ntk.batch_size.physics={int(ntk_batch_size_physics)}",
+        f"pinn.weighting.ntk.batch_size.ic={int(ntk_batch_size_ic)}",
+        f"pinn.weighting.ntk.seed={int(ntk_seed)}",
+        f"pinn.weighting.ntk.use_ema={'true' if ntk_use_ema else 'false'}",
         "wandb.use=true",
         f"wandb.project={wandb_project}",
         f"wandb.group={wandb_group}",
@@ -434,6 +449,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--probe-physics-rows", type=int, default=None, help="Fixed physics probe rows. Defaults from --profile.")
     parser.add_argument("--probe-init-rows", type=int, default=None, help="Fixed init probe rows. Defaults from --profile.")
     parser.add_argument("--probe-seed", type=int, default=0, help="Probe subset seed.")
+    parser.add_argument("--ntk-batch-size-data", type=int, default=None, help="NTK random-batch size for the supervised data term.")
+    parser.add_argument("--ntk-batch-size-dt", type=int, default=None, help="NTK random-batch size for the supervised dt term.")
+    parser.add_argument("--ntk-batch-size-physics", type=int, default=None, help="NTK random-batch size for the physics term.")
+    parser.add_argument("--ntk-batch-size-ic", type=int, default=None, help="NTK random-batch size for the IC term.")
+    parser.add_argument("--ntk-seed", type=int, default=0, help="NTK random-batch seed.")
+    parser.add_argument(
+        "--ntk-refresh-each-update",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Refresh the weighting probe subset on each NTK update.",
+    )
+    parser.add_argument(
+        "--ntk-use-ema",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Apply EMA smoothing to NTK-derived weights.",
+    )
     parser.add_argument(
         "--wandb-project",
         default="sm-surrogates-pinn-weighting-comparison",
@@ -487,6 +519,12 @@ def main() -> None:
         profile_probe_rows["physics"] if args.probe_physics_rows is None else args.probe_physics_rows
     )
     probe_init_rows = int(profile_probe_rows["init"] if args.probe_init_rows is None else args.probe_init_rows)
+    ntk_batch_size_data = int(probe_data_rows if args.ntk_batch_size_data is None else args.ntk_batch_size_data)
+    ntk_batch_size_dt = int(probe_data_rows if args.ntk_batch_size_dt is None else args.ntk_batch_size_dt)
+    ntk_batch_size_physics = int(
+        probe_physics_rows if args.ntk_batch_size_physics is None else args.ntk_batch_size_physics
+    )
+    ntk_batch_size_ic = int(probe_init_rows if args.ntk_batch_size_ic is None else args.ntk_batch_size_ic)
 
     stamp = args.experiment_tag or _tag_stamp()
     output_root = (
@@ -528,6 +566,17 @@ def main() -> None:
         "physics": probe_physics_rows,
         "init": probe_init_rows,
         "seed": int(args.probe_seed),
+    }
+    manifest["artifacts"]["weighting_ntk"] = {
+        "batch_size": {
+            "data": ntk_batch_size_data,
+            "dt": ntk_batch_size_dt,
+            "physics": ntk_batch_size_physics,
+            "ic": ntk_batch_size_ic,
+        },
+        "seed": int(args.ntk_seed),
+        "refresh_each_update": bool(args.ntk_refresh_each_update),
+        "use_ema": bool(args.ntk_use_ema),
     }
     save_manifest(str(manifest_path), manifest)
 
@@ -677,6 +726,13 @@ def main() -> None:
             probe_physics_rows=probe_physics_rows,
             probe_init_rows=probe_init_rows,
             probe_seed=args.probe_seed,
+            ntk_batch_size_data=ntk_batch_size_data,
+            ntk_batch_size_dt=ntk_batch_size_dt,
+            ntk_batch_size_physics=ntk_batch_size_physics,
+            ntk_batch_size_ic=ntk_batch_size_ic,
+            ntk_seed=args.ntk_seed,
+            ntk_refresh_each_update=bool(args.ntk_refresh_each_update),
+            ntk_use_ema=bool(args.ntk_use_ema),
             loss_weight_schedule_override=spec["schedule_override"],
         )
         log_path = output_root / "logs" / "runs" / f"{run_name}.log"

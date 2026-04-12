@@ -40,6 +40,14 @@ class PinnLossScalars:
         return self.component("ic")
 
 
+@dataclass(frozen=True)
+class PinnWeightingTerms:
+    components: dict[str, torch.Tensor]
+
+    def component(self, name: str) -> torch.Tensor:
+        return self.components[name]
+
+
 def move_pinn_dataset_to_device(
     dataset: PinnDatasetBundle,
     *,
@@ -125,6 +133,49 @@ def evaluate_pinn_loss_breakdown(
         init_prediction=init_pred,
         init_target=y_init,
         weights=weights,
+    )
+
+
+def evaluate_pinn_weighting_terms(
+    *,
+    model: nn.Module,
+    ode_model: Any,
+    formulation: str,
+    x_data: torch.Tensor,
+    y_data: torch.Tensor,
+    x_col: torch.Tensor,
+    x_init: torch.Tensor,
+    y_init: torch.Tensor,
+    create_graph: bool = True,
+) -> PinnWeightingTerms:
+    """Return unreduced per-sample terms used for adaptive weighting updates."""
+
+    x_data_req = prepare_input_for_autograd(x_data)
+    pred = model(x_data_req)
+    supervised_dt_terms = compute_supervised_dt_terms(
+        model=model,
+        x=x_data_req,
+        y_true=y_data,
+        ode_model=ode_model,
+        formulation=formulation,
+        create_graph=create_graph,
+        prediction=pred,
+    )
+    collocation_terms = compute_residual_terms(
+        model=model,
+        x=x_col,
+        ode_model=ode_model,
+        formulation=formulation,
+        create_graph=create_graph,
+    )
+    init_pred = model(x_init)
+    return PinnWeightingTerms(
+        components={
+            "data": pred - y_data,
+            "dt": supervised_dt_terms.residual,
+            "physics": collocation_terms.residual,
+            "ic": init_pred - y_init,
+        }
     )
 
 

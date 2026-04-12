@@ -37,6 +37,8 @@ class EpochMetrics:
     weighting_probe_grad_mean_abs: dict[str, float] | None = None
     weighting_probe_grad_max_abs: dict[str, float] | None = None
     weighting_probe_grad_std: dict[str, float] | None = None
+    weighting_probe_ntk_mean_trace: dict[str, float] | None = None
+    weighting_probe_ntk_batch_sizes: dict[str, int] | None = None
     weighting_anchor: str | None = None
     epoch_wall_seconds: float | None = None
     cumulative_wall_seconds: float | None = None
@@ -157,6 +159,8 @@ class EpochMetrics:
             ("weight_probe", "mean_abs", self.weighting_probe_grad_mean_abs),
             ("weight_probe", "max_abs", self.weighting_probe_grad_max_abs),
             ("weight_probe", "std", self.weighting_probe_grad_std),
+            ("weight_probe", "ntk_mean_trace", self.weighting_probe_ntk_mean_trace),
+            ("weight_probe", "ntk_batch_size", self.weighting_probe_ntk_batch_sizes),
         ]
         for prefix, suffix, values in source_maps:
             values = {} if values is None else values
@@ -289,6 +293,8 @@ class PinnLogger:
             parts.append(f"val_total={float(row.val_total_loss):.6e}")
         for name, value in (row.weighting_raw_candidate_weights or {}).items():
             parts.append(f"weight_candidate_{name}={float(value):.6e}")
+        for name, value in (row.weighting_probe_ntk_mean_trace or {}).items():
+            parts.append(f"ntk_mean_{name}={float(value):.6e}")
         for key, value in (row.test_metrics or {}).items():
             if value is not None:
                 parts.append(f"test_{key.replace('_loss', '')}={float(value):.6e}")
@@ -370,6 +376,12 @@ class PinnLogger:
         for name, value in (row.weighting_probe_grad_std or {}).items():
             payload[f"weighting/probe_{name}_std"] = float(value)
             payload[f"weighting/probe/std/{name}"] = float(value)
+        for name, value in (row.weighting_probe_ntk_mean_trace or {}).items():
+            payload[f"weighting/probe_{name}_ntk_mean_trace"] = float(value)
+            payload[f"weighting/probe/ntk_mean_trace/{name}"] = float(value)
+        for name, value in (row.weighting_probe_ntk_batch_sizes or {}).items():
+            payload[f"weighting/probe_{name}_ntk_batch_size"] = int(value)
+            payload[f"weighting/probe/ntk_batch_size/{name}"] = int(value)
         for name, value in (row.val_component_losses or {}).items():
             if value is not None:
                 payload[f"val/{name}_loss"] = float(value)

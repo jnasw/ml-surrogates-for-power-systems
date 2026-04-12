@@ -11,7 +11,7 @@ from src.pinn.losses import LOSS_COMPONENTS, LossWeights
 from src.train.runtime import cfg_get
 
 
-SUPPORTED_WEIGHTING_SCHEMES: tuple[str, ...] = ("static", "ma", "id", "dn", "relobralo")
+SUPPORTED_WEIGHTING_SCHEMES: tuple[str, ...] = ("static", "ma", "id", "dn", "relobralo", "ntk_random_batch")
 DEFAULT_DYNAMIC_COMPONENTS: tuple[str, ...] = ("data", "dt", "ic")
 DEFAULT_WEIGHTING_ANCHOR = "physics"
 DEFAULT_RELOBRALO_COMPONENTS: tuple[str, ...] = LOSS_COMPONENTS
@@ -27,6 +27,8 @@ class WeightUpdateStats:
     anchor_component: str | None
     epoch: int
     global_epoch: int
+    ntk_mean_trace: dict[str, float] | None = None
+    ntk_batch_sizes: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,22 @@ class ProbeSubsetConfig:
 
 
 @dataclass(frozen=True)
+class NTKBatchConfig:
+    data: int
+    dt: int
+    physics: int
+    ic: int
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "data": int(self.data),
+            "dt": int(self.dt),
+            "physics": int(self.physics),
+            "ic": int(self.ic),
+        }
+
+
+@dataclass(frozen=True)
 class WeightingConfig:
     scheme: str
     anchor: str | None
@@ -57,6 +75,11 @@ class WeightingConfig:
     update_interval_epochs: int
     dynamic_components: tuple[str, ...]
     probe: ProbeSubsetConfig
+    ntk_batch_sizes: NTKBatchConfig
+    ntk_eps: float
+    ntk_seed: int
+    ntk_refresh_each_update: bool
+    ntk_use_ema: bool
     relobralo_temperature: float
     relobralo_alpha: float
     relobralo_rho: float
@@ -72,7 +95,7 @@ class WeightingConfig:
 
     @property
     def uses_uniform_initialization(self) -> bool:
-        return self.scheme == "relobralo"
+        return self.scheme in {"relobralo", "ntk_random_batch"}
 
 
 def _weights_from_mapping(values: dict[str, float]) -> LossWeights:
@@ -95,7 +118,7 @@ def weighting_config_from_config(config: Any) -> WeightingConfig:
     if scheme in {"ma", "id", "dn", "static"}:
         if anchor != DEFAULT_WEIGHTING_ANCHOR:
             raise ValueError("pinn.weighting.anchor must be 'physics' in v1.")
-    elif scheme == "relobralo":
+    elif scheme in {"relobralo", "ntk_random_batch"}:
         # ReLoBRaLo reweights all objectives, so the paper-style physics anchor is
         # not used even if it stays present in config for backward compatibility.
         anchor = None
@@ -110,7 +133,7 @@ def weighting_config_from_config(config: Any) -> WeightingConfig:
 
     raw_dynamic_components = cfg_get(config, "pinn.weighting.dynamic_components", list(DEFAULT_DYNAMIC_COMPONENTS))
     dynamic_components = tuple(str(name).strip().lower() for name in raw_dynamic_components)
-    if scheme == "relobralo" and set(dynamic_components) == set(DEFAULT_DYNAMIC_COMPONENTS):
+    if scheme in {"relobralo", "ntk_random_batch"} and set(dynamic_components) == set(DEFAULT_DYNAMIC_COMPONENTS):
         dynamic_components = DEFAULT_RELOBRALO_COMPONENTS
     if not dynamic_components:
         raise ValueError("pinn.weighting.dynamic_components must not be empty.")
@@ -121,8 +144,8 @@ def weighting_config_from_config(config: Any) -> WeightingConfig:
             raise ValueError(f"Unsupported dynamic component '{name}'.")
         if anchor is not None and name == anchor:
             raise ValueError("pinn.weighting.dynamic_components must not include the anchor component.")
-    if scheme == "relobralo" and set(dynamic_components) != set(LOSS_COMPONENTS):
-        raise ValueError("pinn.weighting.dynamic_components must include all loss components for relobralo.")
+    if scheme in {"relobralo", "ntk_random_batch"} and set(dynamic_components) != set(LOSS_COMPONENTS):
+        raise ValueError("pinn.weighting.dynamic_components must include all loss components for relobralo and ntk_random_batch.")
 
     probe_seed = int(cfg_get(config, "pinn.weighting.probe.seed", 0))
     probe_data_rows = int(cfg_get(config, "pinn.weighting.probe.data_rows", 256))
@@ -135,6 +158,22 @@ def weighting_config_from_config(config: Any) -> WeightingConfig:
         ):
         if value <= 0:
             raise ValueError(f"{field_name} must be > 0.")
+
+    ntk_batch_sizes = NTKBatchConfig(
+        data=int(cfg_get(config, "pinn.weighting.ntk.batch_size.data", probe_data_rows)),
+        dt=int(cfg_get(config, "pinn.weighting.ntk.batch_size.dt", probe_data_rows)),
+        physics=int(cfg_get(config, "pinn.weighting.ntk.batch_size.physics", probe_physics_rows)),
+        ic=int(cfg_get(config, "pinn.weighting.ntk.batch_size.ic", probe_init_rows)),
+    )
+    for name, value in ntk_batch_sizes.as_dict().items():
+        if value <= 0:
+            raise ValueError(f"pinn.weighting.ntk.batch_size.{name} must be > 0.")
+    ntk_eps = float(cfg_get(config, "pinn.weighting.ntk.eps", 1.0e-12))
+    if ntk_eps <= 0.0:
+        raise ValueError("pinn.weighting.ntk.eps must be > 0.")
+    ntk_seed = int(cfg_get(config, "pinn.weighting.ntk.seed", probe_seed))
+    ntk_refresh_each_update = bool(cfg_get(config, "pinn.weighting.probe.refresh_each_update", False))
+    ntk_use_ema = bool(cfg_get(config, "pinn.weighting.ntk.use_ema", False))
 
     relobralo_temperature = float(cfg_get(config, "pinn.weighting.relobralo.temperature", 1.0))
     if relobralo_temperature <= 0.0:
@@ -159,6 +198,11 @@ def weighting_config_from_config(config: Any) -> WeightingConfig:
             init_rows=probe_init_rows,
             seed=probe_seed,
         ),
+        ntk_batch_sizes=ntk_batch_sizes,
+        ntk_eps=ntk_eps,
+        ntk_seed=ntk_seed,
+        ntk_refresh_each_update=ntk_refresh_each_update,
+        ntk_use_ema=ntk_use_ema,
         relobralo_temperature=relobralo_temperature,
         relobralo_alpha=relobralo_alpha,
         relobralo_rho=relobralo_rho,
@@ -210,11 +254,14 @@ class BaseWeightingPolicy:
         if not self.config.is_dynamic:
             return state
         raw_candidate_weights = self._raw_candidate_weights(state=state, stats=stats)
-        ema_weights = {}
-        for name in self.config.dynamic_components:
-            prev = float(state.ema_weights[name])
-            raw = float(raw_candidate_weights[name])
-            ema_weights[name] = float(self.config.ema_beta) * prev + (1.0 - float(self.config.ema_beta)) * raw
+        if self.config.scheme == "ntk_random_batch" and not bool(self.config.ntk_use_ema):
+            ema_weights = {name: float(raw_candidate_weights[name]) for name in self.config.dynamic_components}
+        else:
+            ema_weights = {}
+            for name in self.config.dynamic_components:
+                prev = float(state.ema_weights[name])
+                raw = float(raw_candidate_weights[name])
+                ema_weights[name] = float(self.config.ema_beta) * prev + (1.0 - float(self.config.ema_beta)) * raw
 
         next_map = state.active_weights.as_dict()
         if self.config.anchor is not None:
@@ -379,6 +426,23 @@ def _relobralo_next_baseline_losses(
     return dict(state.baseline_losses)
 
 
+@dataclass(frozen=True)
+class NTKRandomBatchWeightingPolicy(BaseWeightingPolicy):
+    def _raw_candidate_weights(self, state: WeightingState, stats: WeightUpdateStats) -> dict[str, float]:
+        if stats.ntk_mean_trace is None:
+            raise ValueError("NTK random-batch weighting requires ntk_mean_trace statistics.")
+        eps = max(float(self.config.ntk_eps), 1.0e-18)
+        active_traces = {
+            name: max(float(stats.ntk_mean_trace[name]), eps)
+            for name in self.config.dynamic_components
+        }
+        trace_sum = sum(active_traces.values())
+        return {
+            name: trace_sum / value
+            for name, value in active_traces.items()
+        }
+
+
 def build_weighting_policy(weighting_config: WeightingConfig) -> LossWeightingPolicy:
     if weighting_config.scheme == "static":
         return StaticWeightingPolicy(config=weighting_config)
@@ -390,4 +454,6 @@ def build_weighting_policy(weighting_config: WeightingConfig) -> LossWeightingPo
         return DNPINNWeightingPolicy(config=weighting_config)
     if weighting_config.scheme == "relobralo":
         return ReLoBRaLoWeightingPolicy(config=weighting_config)
+    if weighting_config.scheme == "ntk_random_batch":
+        return NTKRandomBatchWeightingPolicy(config=weighting_config)
     raise ValueError(f"Unsupported weighting scheme: {weighting_config.scheme}")

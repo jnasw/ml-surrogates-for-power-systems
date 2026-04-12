@@ -15,7 +15,11 @@ from omegaconf import OmegaConf
 
 from src.data.loaders.trajectory_dataset import TrajectoryDataset
 from src.pinn.data import PinnDatasetBundle
-from src.pinn.evaluator import evaluate_pinn_loss_breakdown, move_pinn_training_data_to_device
+from src.pinn.evaluator import (
+    evaluate_pinn_loss_breakdown,
+    evaluate_pinn_weighting_terms,
+    move_pinn_training_data_to_device,
+)
 from src.pinn.logging import EpochMetrics, PinnLogger
 from src.pinn.losses import LOSS_COMPONENTS, LossWeights, PinnLossBreakdown
 from src.pinn.multistage import (
@@ -514,22 +518,23 @@ def _build_weight_update_probe_batch(
     *,
     dataset: PinnDatasetBundle,
     weighting_config: WeightingConfig,
+    seed_offset: int = 0,
 ) -> PinnBatch:
     x_data, y_data = _take_fixed_tensor_rows(
         dataset.train_x,
         target_rows=weighting_config.probe.data_rows,
-        seed=weighting_config.probe.seed,
+        seed=weighting_config.probe.seed + seed_offset,
         y=dataset.train_y,
     )
     x_col = _take_fixed_tensor_rows(
         dataset.train_col_x,
         target_rows=weighting_config.probe.physics_rows,
-        seed=weighting_config.probe.seed + 1,
+        seed=weighting_config.probe.seed + seed_offset + 1,
     )
     x_init, y_init = _take_fixed_tensor_rows(
         dataset.train_init_x,
         target_rows=weighting_config.probe.init_rows,
-        seed=weighting_config.probe.seed + 2,
+        seed=weighting_config.probe.seed + seed_offset + 2,
         y=dataset.train_init_y,
     )
     return PinnBatch(
@@ -815,6 +820,48 @@ def _flattened_grads(loss: torch.Tensor, model: nn.Module, retain_graph: bool) -
     return torch.cat(flat_parts, dim=0)
 
 
+def _compute_output_jacobian(output: torch.Tensor, model: nn.Module) -> torch.Tensor:
+    output_flat = output.reshape(-1)
+    if int(output_flat.numel()) == 0:
+        return torch.zeros((0, 0), dtype=output.dtype, device=output.device)
+    params = [param for param in model.parameters() if param.requires_grad]
+    eye = torch.eye(int(output_flat.numel()), dtype=output.dtype, device=output.device)
+    grads = torch.autograd.grad(
+        output_flat,
+        params,
+        grad_outputs=eye,
+        is_grads_batched=True,
+        retain_graph=True,
+        allow_unused=True,
+    )
+    jacobian_parts = []
+    for param, grad in zip(params, grads):
+        if grad is None:
+            jacobian_parts.append(torch.zeros((int(output_flat.numel()), param.numel()), dtype=output.dtype, device=output.device))
+            continue
+        jacobian_parts.append(grad.reshape(int(output_flat.numel()), -1))
+    if not jacobian_parts:
+        return torch.zeros((int(output_flat.numel()), 0), dtype=output.dtype, device=output.device)
+    return torch.cat(jacobian_parts, dim=1)
+
+
+def _sample_ntk_term_rows(term: torch.Tensor, *, target_rows: int, seed: int) -> torch.Tensor:
+    total_rows = int(term.shape[0])
+    if target_rows >= total_rows:
+        return term
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(int(seed))
+    indices = torch.randperm(total_rows, generator=generator, device="cpu")[:target_rows].to(device=term.device)
+    return term.index_select(0, indices)
+
+
+def _compute_ntk_mean_trace(output: torch.Tensor, model: nn.Module) -> float:
+    num_points = max(int(output.shape[0]), 1)
+    jacobian = _compute_output_jacobian(output, model)
+    trace = torch.einsum("na,na->", jacobian, jacobian)
+    return float((trace / float(num_points)).detach().cpu().item())
+
+
 def _compute_gradient_telemetry(
     *,
     model: nn.Module,
@@ -878,6 +925,42 @@ def _compute_weight_update_stats(
         anchor_component=anchor_component,
         epoch=int(epoch),
         global_epoch=int(global_epoch),
+    )
+
+
+def _compute_ntk_weight_update_stats(
+    *,
+    model: nn.Module,
+    losses: PinnLossBreakdown,
+    weighting_terms: dict[str, torch.Tensor],
+    weighting_config: WeightingConfig,
+    epoch: int,
+    global_epoch: int,
+) -> WeightUpdateStats:
+    zero_stats = {name: 0.0 for name in LOSS_COMPONENTS}
+    ntk_batch_sizes = weighting_config.ntk_batch_sizes.as_dict()
+    ntk_mean_trace: dict[str, float] = {}
+    for offset, name in enumerate(weighting_config.dynamic_components):
+        sampled_term = _sample_ntk_term_rows(
+            weighting_terms[name],
+            target_rows=int(ntk_batch_sizes[name]),
+            seed=int(weighting_config.ntk_seed) + int(global_epoch) * 97 + offset,
+        )
+        ntk_mean_trace[name] = _compute_ntk_mean_trace(sampled_term, model)
+    return WeightUpdateStats(
+        grad_l2_norms=dict(zero_stats),
+        grad_mean_abs=dict(zero_stats),
+        grad_max_abs=dict(zero_stats),
+        grad_std=dict(zero_stats),
+        component_losses={
+            name: float(losses.component(name).detach().cpu().item())
+            for name in losses.components
+        },
+        anchor_component=None,
+        epoch=int(epoch),
+        global_epoch=int(global_epoch),
+        ntk_mean_trace=ntk_mean_trace,
+        ntk_batch_sizes={name: int(ntk_batch_sizes[name]) for name in weighting_config.dynamic_components},
     )
 
 
@@ -1808,6 +1891,48 @@ def train_pinn(
                         epoch=epoch,
                         global_epoch=global_epoch,
                     )
+                elif weighting_config.scheme == "ntk_random_batch":
+                    probe_batch = (
+                        _build_weight_update_probe_batch(
+                            dataset=dataset,
+                            weighting_config=weighting_config,
+                            seed_offset=int(global_epoch) * 17,
+                        )
+                        if weighting_config.ntk_refresh_each_update
+                        else weight_probe_batch
+                    )
+                    probe_losses = evaluate_pinn_loss_breakdown(
+                        model=model,
+                        criterion=criterion,
+                        ode_model=ode_model,
+                        formulation=formulation,
+                        weights=active_weights,
+                        x_data=probe_batch.x_data,
+                        y_data=probe_batch.y_data,
+                        x_col=probe_batch.x_col,
+                        x_init=probe_batch.x_init,
+                        y_init=probe_batch.y_init,
+                        create_graph=True,
+                    )
+                    weighting_terms = evaluate_pinn_weighting_terms(
+                        model=model,
+                        ode_model=ode_model,
+                        formulation=formulation,
+                        x_data=probe_batch.x_data,
+                        y_data=probe_batch.y_data,
+                        x_col=probe_batch.x_col,
+                        x_init=probe_batch.x_init,
+                        y_init=probe_batch.y_init,
+                        create_graph=True,
+                    )
+                    weight_update_stats = _compute_ntk_weight_update_stats(
+                        model=model,
+                        losses=probe_losses,
+                        weighting_terms=weighting_terms.components,
+                        weighting_config=weighting_config,
+                        epoch=epoch,
+                        global_epoch=global_epoch,
+                    )
                 else:
                     probe_losses = evaluate_pinn_loss_breakdown(
                         model=model,
@@ -1877,6 +2002,8 @@ def train_pinn(
                 weighting_probe_grad_mean_abs=None if weight_update_stats is None else dict(weight_update_stats.grad_mean_abs),
                 weighting_probe_grad_max_abs=None if weight_update_stats is None else dict(weight_update_stats.grad_max_abs),
                 weighting_probe_grad_std=None if weight_update_stats is None else dict(weight_update_stats.grad_std),
+                weighting_probe_ntk_mean_trace=None if weight_update_stats is None else None if weight_update_stats.ntk_mean_trace is None else dict(weight_update_stats.ntk_mean_trace),
+                weighting_probe_ntk_batch_sizes=None if weight_update_stats is None else None if weight_update_stats.ntk_batch_sizes is None else dict(weight_update_stats.ntk_batch_sizes),
                 weighting_anchor=weighting_config.anchor,
                 epoch_wall_seconds=epoch_wall_seconds,
                 cumulative_wall_seconds=cumulative_wall_seconds,
