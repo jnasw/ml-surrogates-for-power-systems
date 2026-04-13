@@ -35,8 +35,14 @@ pinn:
     mode: preprocessed # preprocessed | generated
     strategy: static # static | random_r | rad | rar_d | rar_g
     active_points: 4096
+    candidate_points: 16384
     sampler: lhs # random | lhs | sobol
     seed: ${model.seed}
+    refresh_period_epochs: 10
+    score_norm: l2 # l1 | l2 | linf
+    rad:
+      k: 1.0
+      c: 1.0
     sampling:
       enabled: false
       rows_per_epoch: null

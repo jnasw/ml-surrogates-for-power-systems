@@ -8,26 +8,74 @@ import torch
 
 from src.data.generate.bounds import load_ic_bounds
 from src.pinn.collocation.domain import CollocationDomain, sample_collocation_points
-from src.pinn.collocation.strategies import CollocationStrategy, StaticCollocationStrategy
+from src.pinn.collocation.strategies import (
+    CollocationStrategy,
+    ResidualAdaptiveDistributionStrategy,
+    StaticCollocationStrategy,
+    UniformResampleCollocationStrategy,
+)
 from src.train.runtime import cfg_get
 
 
 def build_collocation_strategy(*, initial_points: torch.Tensor, config: Any) -> CollocationStrategy:
     mode = str(cfg_get(config, "pinn.collocation.mode", "preprocessed")).strip().lower()
     strategy_name = str(cfg_get(config, "pinn.collocation.strategy", "static")).strip().lower()
+    seed = int(cfg_get(config, "pinn.collocation.seed", cfg_get(config, "model.seed", 0)))
+    sampler = str(cfg_get(config, "pinn.collocation.sampler", "lhs"))
+    domain = _build_collocation_domain(config=config, fallback_points=initial_points)
+    active_points = _resolve_active_points(config=config, fallback_points=initial_points)
 
     if mode == "generated":
-        initial_points = _build_generated_initial_points(config=config, fallback_points=initial_points)
+        initial_points = sample_collocation_points(
+            domain=domain,
+            n=active_points,
+            method=sampler,
+            seed=seed,
+            dtype=initial_points.dtype,
+            device=initial_points.device,
+        )
     elif mode != "preprocessed":
         raise ValueError("pinn.collocation.mode must be one of: preprocessed, generated")
-    if strategy_name != "static":
-        raise NotImplementedError(
-            "Only pinn.collocation.strategy='static' is implemented in Phase 2."
+
+    if strategy_name == "static":
+        return StaticCollocationStrategy(initial_points=initial_points, config=config)
+    initial_points = _normalize_initial_points(
+        initial_points=initial_points,
+        active_points=active_points,
+        seed=seed,
+    )
+    if strategy_name == "random_r":
+        return UniformResampleCollocationStrategy(
+            initial_points=initial_points,
+            config=config,
+            domain=domain,
+            sampler=sampler,
+            seed=seed,
+            active_points=active_points,
         )
-    return StaticCollocationStrategy(initial_points=initial_points, config=config)
+    if strategy_name == "rad":
+        candidate_points = int(
+            cfg_get(config, "pinn.collocation.candidate_points", max(active_points * 4, active_points))
+        )
+        return ResidualAdaptiveDistributionStrategy(
+            initial_points=initial_points,
+            config=config,
+            domain=domain,
+            sampler=sampler,
+            seed=seed,
+            active_points=active_points,
+            candidate_points=candidate_points,
+            rad_k=float(cfg_get(config, "pinn.collocation.rad.k", 1.0)),
+            rad_c=float(cfg_get(config, "pinn.collocation.rad.c", 1.0)),
+            score_norm=str(cfg_get(config, "pinn.collocation.score_norm", "l2")),
+        )
+    raise NotImplementedError(
+        "Supported pinn.collocation.strategy values are: static, random_r, rad. "
+        "Append-based strategies will be added in a later phase."
+    )
 
 
-def _build_generated_initial_points(*, config: Any, fallback_points: torch.Tensor) -> torch.Tensor:
+def _resolve_active_points(*, config: Any, fallback_points: torch.Tensor) -> int:
     if fallback_points.ndim != 2:
         raise ValueError("fallback_points must be a rank-2 tensor.")
 
@@ -44,20 +92,30 @@ def _build_generated_initial_points(*, config: Any, fallback_points: torch.Tenso
         active_points = int(active_points_cfg)
     if active_points <= 0:
         raise ValueError("pinn.collocation.active_points must be > 0.")
+    return active_points
 
+
+def _build_collocation_domain(*, config: Any, fallback_points: torch.Tensor) -> CollocationDomain:
     feature_bounds = torch.as_tensor(load_ic_bounds(config, use_nn_file=True), dtype=torch.float32)
     input_dim = int(fallback_points.shape[1]) if int(fallback_points.shape[1]) > 0 else int(feature_bounds.shape[0]) + 1
-    domain = CollocationDomain(
+    return CollocationDomain(
         time_min=0.0,
         time_max=float(cfg_get(config, "time", 1.0)),
         input_dim=input_dim,
         feature_bounds=feature_bounds,
     )
-    return sample_collocation_points(
-        domain=domain,
-        n=active_points,
-        method=str(cfg_get(config, "pinn.collocation.sampler", "lhs")),
-        seed=int(cfg_get(config, "pinn.collocation.seed", cfg_get(config, "model.seed", 0))),
-        dtype=fallback_points.dtype,
-        device=fallback_points.device,
-    )
+
+
+def _normalize_initial_points(*, initial_points: torch.Tensor, active_points: int, seed: int) -> torch.Tensor:
+    rows = int(initial_points.shape[0])
+    if rows == active_points:
+        return initial_points
+    if rows < active_points:
+        raise ValueError(
+            "Initial collocation set is smaller than pinn.collocation.active_points. "
+            "Use generated mode or lower active_points."
+        )
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(int(seed))
+    indices = torch.randperm(rows, generator=generator, device="cpu")[:active_points].to(initial_points.device)
+    return initial_points.index_select(0, indices)
