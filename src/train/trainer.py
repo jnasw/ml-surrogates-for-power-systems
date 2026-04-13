@@ -1273,6 +1273,18 @@ def _train_multistage_pinn(
 
     dataset = move_pinn_training_data_to_device(dataset, device=device, dtype=dtype)
     collocation_strategy = build_collocation_strategy(initial_points=dataset.train_col_x, config=config)
+    dataset = PinnDatasetBundle(
+        train_x=dataset.train_x,
+        train_y=dataset.train_y,
+        train_col_x=collocation_strategy.current_points(),
+        train_init_x=dataset.train_init_x,
+        train_init_y=dataset.train_init_y,
+        val_x=dataset.val_x,
+        val_y=dataset.val_y,
+        val_col_x=dataset.val_col_x,
+        test_x=dataset.test_x,
+        test_y=dataset.test_y,
+    )
     analysis_x_col = _multistage_analysis_collocation(dataset, config)
     max_stages = len(explicit_stage_optimizer_phases) if explicit_stage_optimizer_phases is not None else _multistage_max_stages(config)
     stop_threshold = _multistage_stop_threshold(config)
@@ -1711,6 +1723,18 @@ def train_pinn(
 
     dataset = move_pinn_training_data_to_device(dataset, device=device, dtype=dtype)
     collocation_strategy = build_collocation_strategy(initial_points=dataset.train_col_x, config=config)
+    dataset = PinnDatasetBundle(
+        train_x=dataset.train_x,
+        train_y=dataset.train_y,
+        train_col_x=collocation_strategy.current_points(),
+        train_init_x=dataset.train_init_x,
+        train_init_y=dataset.train_init_y,
+        val_x=dataset.val_x,
+        val_y=dataset.val_y,
+        val_col_x=dataset.val_col_x,
+        test_x=dataset.test_x,
+        test_y=dataset.test_y,
+    )
     weight_probe_batch = _build_weight_update_probe_batch(
         dataset=dataset,
         weighting_config=weighting_config,

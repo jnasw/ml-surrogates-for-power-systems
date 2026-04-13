@@ -21,6 +21,7 @@ def main(config) -> None:
     dataset = load_pinn_dataset_from_preprocessed_root(
         dataset_root=dataset_root,
         dtype=str(config.pinn.dtype),
+        allow_missing_collocation=str(getattr(config.pinn.collocation, "mode", "preprocessed")).strip().lower() == "generated",
     )
     print(
         "[pinn] Dataset loaded | "

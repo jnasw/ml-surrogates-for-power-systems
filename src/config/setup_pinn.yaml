@@ -9,6 +9,7 @@ PINN_flag: true
 model:
   model_flag: "SM4"
   machine_num: 1
+  init_condition_bounds: 1
   seed: 37
 
 dataset:
@@ -33,6 +34,9 @@ pinn:
   collocation:
     mode: preprocessed # preprocessed | generated
     strategy: static # static | random_r | rad | rar_d | rar_g
+    active_points: 4096
+    sampler: lhs # random | lhs | sobol
+    seed: ${model.seed}
     sampling:
       enabled: false
       rows_per_epoch: null
@@ -232,4 +236,5 @@ pinn:
 
 dirs:
   params_dir: ${hydra:runtime.cwd}/src/config/params
+  init_conditions_dir: ${hydra:runtime.cwd}/src/config/ic
   dataset_dir: ${hydra:runtime.cwd}/data

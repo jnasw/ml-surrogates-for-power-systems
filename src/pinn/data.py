@@ -125,7 +125,11 @@ class PinnDatasetBundle:
         return TensorRowDataset(self.test_x, self.test_y)
 
 
-def load_pinn_dataset_from_preprocessed_root(dataset_root: str, dtype: str = "float32") -> PinnDatasetBundle:
+def load_pinn_dataset_from_preprocessed_root(
+    dataset_root: str,
+    dtype: str = "float32",
+    allow_missing_collocation: bool = False,
+) -> PinnDatasetBundle:
     if not os.path.exists(dataset_root):
         raise FileNotFoundError(f"Dataset folder not found: {dataset_root}")
 
@@ -143,10 +147,12 @@ def load_pinn_dataset_from_preprocessed_root(dataset_root: str, dtype: str = "fl
 
     if train_x is None or train_y is None:
         raise ValueError(f"No supervised training HDF5 files found in {train_dir}")
-    if train_col_x is None:
+    if train_col_x is None and not allow_missing_collocation:
         raise ValueError(f"No collocation HDF5 files found in {train_dir}")
     if train_init_x is None or train_init_y is None:
         raise ValueError(f"No initial-condition HDF5 files found in {train_dir}")
+    if train_col_x is None:
+        train_col_x = torch.empty((0, train_x.shape[1]), dtype=torch_dtype)
 
     val_x = _load_h5_tensor_rows(_iter_split_files(val_dir, H5_DATA_SUFFIX), H5_X_KEYS[VAL_SPLIT], torch_dtype)
     val_y = _load_h5_tensor_rows(_iter_split_files(val_dir, H5_DATA_SUFFIX), H5_Y_KEYS[VAL_SPLIT], torch_dtype)
@@ -173,6 +179,11 @@ def load_pinn_dataset_from_preprocessed(
     model_flag: str,
     dataset_number: int,
     dtype: str = "float32",
+    allow_missing_collocation: bool = False,
 ) -> PinnDatasetBundle:
     dataset_root = os.path.join(dataset_dir, model_flag, f"dataset_v{dataset_number}")
-    return load_pinn_dataset_from_preprocessed_root(dataset_root=dataset_root, dtype=dtype)
+    return load_pinn_dataset_from_preprocessed_root(
+        dataset_root=dataset_root,
+        dtype=dtype,
+        allow_missing_collocation=allow_missing_collocation,
+    )
