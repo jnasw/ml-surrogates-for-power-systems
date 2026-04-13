@@ -93,6 +93,49 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
             "rar_d_c": 0.0,
         },
     },
+    "multipool_benchmark": {
+        "budget": "b256",
+        "preset": "default",
+        "epochs": 100,
+        "batch_size": 256,
+        "device": "cuda",
+        "gradient_telemetry": False,
+        "variants": ["static_generated", "rad", "rar_d"],
+        "stage1_overrides": [],
+        "stage2_overrides": [
+            "time=0.05",
+            "num_of_points=20",
+            "model.ic_generation_method=joint_lhs",
+            "model.ic_num_samples=64",
+        ],
+        "collocation": {
+            "active_points": 4096,
+            "candidate_points": 16384,
+            "initial_points": 2048,
+            "append_points": 64,
+            "refresh_period_epochs": 10,
+            "sampler": "lhs",
+            "score_norm": "l2",
+            "rad_k": 1.0,
+            "rad_c": 1.0,
+            "rar_d_k": 2.0,
+            "rar_d_c": 0.0,
+            "multi_pool": {
+                "enabled": True,
+                "total_active_points": 4096,
+                "allocation_enabled": True,
+                "allocation_method": "loss_ratio",
+                "allocation_update_interval_epochs": 1,
+                "allocation_smoothing": 0.8,
+                "residual_initial_fraction": 0.7,
+                "residual_min_fraction": 0.4,
+                "residual_max_fraction": 0.9,
+                "ic_initial_fraction": 0.3,
+                "ic_min_fraction": 0.1,
+                "ic_max_fraction": 0.6,
+            },
+        },
+    },
 }
 
 
@@ -161,7 +204,7 @@ def _parse_variants(raw: str | None, *, profile_variants: list[str]) -> list[str
 def _profile_config(profile: str) -> dict[str, Any]:
     profile_name = profile.strip().lower()
     if profile_name not in PROFILE_CONFIGS:
-        raise ValueError("profile must be one of: smoke, benchmark")
+        raise ValueError("profile must be one of: smoke, benchmark, multipool_benchmark")
     return dict(PROFILE_CONFIGS[profile_name])
 
 
@@ -353,6 +396,7 @@ def _variant_overrides(
     ]
     if collocation_cfg.get("initial_points") not in (None, "null"):
         common.append(f"pinn.collocation.initial_points={int(collocation_cfg['initial_points'])}")
+    common.extend(_multipool_overrides(collocation_cfg))
 
     if variant == "static_preprocessed":
         return [
@@ -395,6 +439,27 @@ def _variant_overrides(
             "pinn.collocation.strategy=rar_g",
         ]
     raise ValueError(f"Unsupported variant: {variant}")
+
+
+def _multipool_overrides(collocation_cfg: dict[str, Any]) -> list[str]:
+    multipool_cfg = dict(collocation_cfg.get("multi_pool") or {})
+    if not multipool_cfg:
+        return []
+    overrides = [
+        f"pinn.collocation.multi_pool.enabled={'true' if bool(multipool_cfg.get('enabled', False)) else 'false'}",
+        f"pinn.collocation.multi_pool.total_active_points={int(multipool_cfg.get('total_active_points', collocation_cfg['active_points']))}",
+        f"pinn.collocation.multi_pool.allocation.enabled={'true' if bool(multipool_cfg.get('allocation_enabled', False)) else 'false'}",
+        f"pinn.collocation.multi_pool.allocation.method={str(multipool_cfg.get('allocation_method', 'loss_ratio'))}",
+        f"pinn.collocation.multi_pool.allocation.update_interval_epochs={int(multipool_cfg.get('allocation_update_interval_epochs', 1))}",
+        f"pinn.collocation.multi_pool.allocation.smoothing={float(multipool_cfg.get('allocation_smoothing', 0.8))}",
+        f"pinn.collocation.multi_pool.pools.residual.initial_fraction={float(multipool_cfg.get('residual_initial_fraction', 0.7))}",
+        f"pinn.collocation.multi_pool.pools.residual.min_fraction={float(multipool_cfg.get('residual_min_fraction', 0.4))}",
+        f"pinn.collocation.multi_pool.pools.residual.max_fraction={float(multipool_cfg.get('residual_max_fraction', 0.9))}",
+        f"pinn.collocation.multi_pool.pools.ic_constraint.initial_fraction={float(multipool_cfg.get('ic_initial_fraction', 0.3))}",
+        f"pinn.collocation.multi_pool.pools.ic_constraint.min_fraction={float(multipool_cfg.get('ic_min_fraction', 0.1))}",
+        f"pinn.collocation.multi_pool.pools.ic_constraint.max_fraction={float(multipool_cfg.get('ic_max_fraction', 0.6))}",
+    ]
+    return overrides
 
 
 def _build_pinn_command(
@@ -490,6 +555,12 @@ def _load_run_metrics_summary(run_dir: Path) -> dict[str, Any] | None:
         "epoch_wall_seconds": _float_or_none("epoch_wall_seconds"),
         "cumulative_wall_seconds": _float_or_none("cumulative_wall_seconds"),
         "num_collocation_rows": _int_or_none("num_collocation_rows"),
+        "optimizer_multipool_enabled": last.get("optimizer_multipool_enabled"),
+        "optimizer_multipool_allocation_step": _int_or_none("optimizer_multipool_allocation_step"),
+        "optimizer_multipool_residual_target_rows": _int_or_none("optimizer_multipool_residual_target_rows"),
+        "optimizer_multipool_residual_epoch_rows": _int_or_none("optimizer_multipool_residual_epoch_rows"),
+        "optimizer_multipool_ic_target_rows": _int_or_none("optimizer_multipool_ic_target_rows"),
+        "optimizer_multipool_ic_epoch_rows": _int_or_none("optimizer_multipool_ic_epoch_rows"),
     }
 
 
@@ -507,6 +578,12 @@ def _write_summary_csv(*, output_root: Path, manifest: dict[str, Any]) -> Path:
         "val_physics_loss",
         "cumulative_wall_seconds",
         "num_collocation_rows",
+        "multipool_enabled",
+        "multipool_allocation_step",
+        "multipool_residual_target_rows",
+        "multipool_residual_epoch_rows",
+        "multipool_ic_target_rows",
+        "multipool_ic_epoch_rows",
     ]
     with summary_path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -526,6 +603,12 @@ def _write_summary_csv(*, output_root: Path, manifest: dict[str, Any]) -> Path:
                     "val_physics_loss": metrics.get("val_physics_loss"),
                     "cumulative_wall_seconds": metrics.get("cumulative_wall_seconds"),
                     "num_collocation_rows": metrics.get("num_collocation_rows"),
+                    "multipool_enabled": metrics.get("optimizer_multipool_enabled"),
+                    "multipool_allocation_step": metrics.get("optimizer_multipool_allocation_step"),
+                    "multipool_residual_target_rows": metrics.get("optimizer_multipool_residual_target_rows"),
+                    "multipool_residual_epoch_rows": metrics.get("optimizer_multipool_residual_epoch_rows"),
+                    "multipool_ic_target_rows": metrics.get("optimizer_multipool_ic_target_rows"),
+                    "multipool_ic_epoch_rows": metrics.get("optimizer_multipool_ic_epoch_rows"),
                 }
             )
     return summary_path
@@ -534,7 +617,7 @@ def _write_summary_csv(*, output_root: Path, manifest: dict[str, Any]) -> Path:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python-bin", default=sys.executable, help="Python executable for pipeline and training.")
-    parser.add_argument("--profile", default="smoke", choices=["smoke", "benchmark"], help="Run a reduced local smoke matrix or a larger benchmark matrix.")
+    parser.add_argument("--profile", default="smoke", choices=["smoke", "benchmark", "multipool_benchmark"], help="Run a reduced local smoke matrix, a larger benchmark matrix, or a multipool benchmark matrix.")
     parser.add_argument("--experiment-tag", default=None, help="Output/W&B tag suffix. Default: timestamp.")
     parser.add_argument("--output-root", default=None, help="Explicit output root. Default: outputs/pinn/collocation_comparison/<tag>.")
     parser.add_argument("--model-flag", default="SM4", help="Model flag.")
@@ -563,6 +646,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rad-c", type=float, default=None, help="RAD additive floor c.")
     parser.add_argument("--rar-d-k", type=float, default=None, help="RAR-D exponent k.")
     parser.add_argument("--rar-d-c", type=float, default=None, help="RAR-D additive floor c.")
+    parser.add_argument("--multipool", action=argparse.BooleanOptionalAction, default=None, help="Enable residual+IC multi-pool collocation.")
+    parser.add_argument("--multipool-allocation", action=argparse.BooleanOptionalAction, default=None, help="Enable dynamic multi-pool budget allocation.")
+    parser.add_argument("--multipool-total-active-points", type=int, default=None, help="Total budget shared across the residual and IC pools.")
+    parser.add_argument("--multipool-allocation-method", default=None, help="Dynamic allocation method. Currently supports: loss_ratio.")
+    parser.add_argument("--multipool-update-interval-epochs", type=int, default=None, help="Epoch interval between multi-pool allocation updates.")
+    parser.add_argument("--multipool-smoothing", type=float, default=None, help="EMA smoothing factor for dynamic multi-pool allocation.")
+    parser.add_argument("--residual-initial-fraction", type=float, default=None, help="Initial residual-pool budget fraction.")
+    parser.add_argument("--residual-min-fraction", type=float, default=None, help="Minimum residual-pool budget fraction.")
+    parser.add_argument("--residual-max-fraction", type=float, default=None, help="Maximum residual-pool budget fraction.")
+    parser.add_argument("--ic-initial-fraction", type=float, default=None, help="Initial IC-pool budget fraction.")
+    parser.add_argument("--ic-min-fraction", type=float, default=None, help="Minimum IC-pool budget fraction.")
+    parser.add_argument("--ic-max-fraction", type=float, default=None, help="Maximum IC-pool budget fraction.")
     parser.add_argument("--wandb-use", action=argparse.BooleanOptionalAction, default=False, help="Enable W&B logging for the sweep.")
     parser.add_argument("--wandb-project", default="sm-surrogates-pinn-collocation-comparison", help="Dedicated W&B project for this comparison.")
     parser.add_argument("--wandb-entity", default=None, help="Optional W&B entity.")
@@ -619,6 +714,33 @@ def main() -> None:
         base_collocation["rar_d_k"] = float(args.rar_d_k)
     if args.rar_d_c is not None:
         base_collocation["rar_d_c"] = float(args.rar_d_c)
+    multipool_cfg = dict(base_collocation.get("multi_pool") or {})
+    if args.multipool is not None:
+        multipool_cfg["enabled"] = bool(args.multipool)
+    if args.multipool_allocation is not None:
+        multipool_cfg["allocation_enabled"] = bool(args.multipool_allocation)
+    if args.multipool_total_active_points is not None:
+        multipool_cfg["total_active_points"] = int(args.multipool_total_active_points)
+    if args.multipool_allocation_method is not None:
+        multipool_cfg["allocation_method"] = str(args.multipool_allocation_method)
+    if args.multipool_update_interval_epochs is not None:
+        multipool_cfg["allocation_update_interval_epochs"] = int(args.multipool_update_interval_epochs)
+    if args.multipool_smoothing is not None:
+        multipool_cfg["allocation_smoothing"] = float(args.multipool_smoothing)
+    if args.residual_initial_fraction is not None:
+        multipool_cfg["residual_initial_fraction"] = float(args.residual_initial_fraction)
+    if args.residual_min_fraction is not None:
+        multipool_cfg["residual_min_fraction"] = float(args.residual_min_fraction)
+    if args.residual_max_fraction is not None:
+        multipool_cfg["residual_max_fraction"] = float(args.residual_max_fraction)
+    if args.ic_initial_fraction is not None:
+        multipool_cfg["ic_initial_fraction"] = float(args.ic_initial_fraction)
+    if args.ic_min_fraction is not None:
+        multipool_cfg["ic_min_fraction"] = float(args.ic_min_fraction)
+    if args.ic_max_fraction is not None:
+        multipool_cfg["ic_max_fraction"] = float(args.ic_max_fraction)
+    if multipool_cfg:
+        base_collocation["multi_pool"] = multipool_cfg
 
     stamp = args.experiment_tag or _tag_stamp()
     output_root = (
