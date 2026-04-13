@@ -1,4 +1,4 @@
-"""Factory for collocation strategies."""
+"""Factory for collocation strategies and multi-pool managers."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import torch
 
 from src.data.generate.bounds import load_ic_bounds
 from src.pinn.collocation.domain import CollocationDomain, sample_collocation_points
+from src.pinn.collocation.manager import MultiPoolCollocationManager
 from src.pinn.collocation.strategies import (
     CollocationStrategy,
     ResidualAdaptiveRefinementDistributionStrategy,
@@ -19,7 +20,13 @@ from src.pinn.collocation.strategies import (
 from src.train.runtime import cfg_get
 
 
-def build_collocation_strategy(*, initial_points: torch.Tensor, config: Any) -> CollocationStrategy:
+def build_collocation_manager(
+    *,
+    initial_points: torch.Tensor,
+    init_x: torch.Tensor,
+    init_y: torch.Tensor,
+    config: Any,
+) -> MultiPoolCollocationManager:
     mode = str(cfg_get(config, "pinn.collocation.mode", "preprocessed")).strip().lower()
     strategy_name = str(cfg_get(config, "pinn.collocation.strategy", "static")).strip().lower()
     seed = int(cfg_get(config, "pinn.collocation.seed", cfg_get(config, "model.seed", 0)))
@@ -51,14 +58,22 @@ def build_collocation_strategy(*, initial_points: torch.Tensor, config: Any) -> 
             active_points=initial_strategy_points,
             seed=seed,
         )
-        return StaticCollocationStrategy(initial_points=initial_points, config=config)
+        residual_strategy = StaticCollocationStrategy(initial_points=initial_points, config=config)
+        return _build_manager(
+            residual_strategy=residual_strategy,
+            init_x=init_x,
+            init_y=init_y,
+            config=config,
+            seed=seed,
+            total_rows=active_points,
+        )
     initial_points = _normalize_initial_points(
         initial_points=initial_points,
         active_points=initial_strategy_points,
         seed=seed,
     )
     if strategy_name == "random_r":
-        return UniformResampleCollocationStrategy(
+        residual_strategy = UniformResampleCollocationStrategy(
             initial_points=initial_points,
             config=config,
             domain=domain,
@@ -66,11 +81,19 @@ def build_collocation_strategy(*, initial_points: torch.Tensor, config: Any) -> 
             seed=seed,
             active_points=active_points,
         )
+        return _build_manager(
+            residual_strategy=residual_strategy,
+            init_x=init_x,
+            init_y=init_y,
+            config=config,
+            seed=seed,
+            total_rows=active_points,
+        )
     if strategy_name == "rad":
         candidate_points = int(
             cfg_get(config, "pinn.collocation.candidate_points", max(active_points * 4, active_points))
         )
-        return ResidualAdaptiveDistributionStrategy(
+        residual_strategy = ResidualAdaptiveDistributionStrategy(
             initial_points=initial_points,
             config=config,
             domain=domain,
@@ -82,11 +105,19 @@ def build_collocation_strategy(*, initial_points: torch.Tensor, config: Any) -> 
             rad_c=float(cfg_get(config, "pinn.collocation.rad.c", 1.0)),
             score_norm=str(cfg_get(config, "pinn.collocation.score_norm", "l2")),
         )
+        return _build_manager(
+            residual_strategy=residual_strategy,
+            init_x=init_x,
+            init_y=init_y,
+            config=config,
+            seed=seed,
+            total_rows=active_points,
+        )
     if strategy_name == "rar_d":
         candidate_points = int(
             cfg_get(config, "pinn.collocation.candidate_points", max(active_points * 4, active_points))
         )
-        return ResidualAdaptiveRefinementDistributionStrategy(
+        residual_strategy = ResidualAdaptiveRefinementDistributionStrategy(
             initial_points=initial_points,
             config=config,
             domain=domain,
@@ -99,11 +130,19 @@ def build_collocation_strategy(*, initial_points: torch.Tensor, config: Any) -> 
             rad_c=float(cfg_get(config, "pinn.collocation.rad.c", 0.0)),
             score_norm=str(cfg_get(config, "pinn.collocation.score_norm", "l2")),
         )
+        return _build_manager(
+            residual_strategy=residual_strategy,
+            init_x=init_x,
+            init_y=init_y,
+            config=config,
+            seed=seed,
+            total_rows=active_points,
+        )
     if strategy_name == "rar_g":
         candidate_points = int(
             cfg_get(config, "pinn.collocation.candidate_points", max(active_points * 4, active_points))
         )
-        return ResidualAdaptiveRefinementGreedyStrategy(
+        residual_strategy = ResidualAdaptiveRefinementGreedyStrategy(
             initial_points=initial_points,
             config=config,
             domain=domain,
@@ -114,8 +153,48 @@ def build_collocation_strategy(*, initial_points: torch.Tensor, config: Any) -> 
             append_points=int(cfg_get(config, "pinn.collocation.append_points", 64)),
             score_norm=str(cfg_get(config, "pinn.collocation.score_norm", "l2")),
         )
+        return _build_manager(
+            residual_strategy=residual_strategy,
+            init_x=init_x,
+            init_y=init_y,
+            config=config,
+            seed=seed,
+            total_rows=active_points,
+        )
     raise NotImplementedError(
         "Supported pinn.collocation.strategy values are: static, random_r, rad, rar_d, rar_g."
+    )
+
+
+def build_collocation_strategy(*, initial_points: torch.Tensor, config: Any) -> CollocationStrategy:
+    """Backward-compatible residual-only strategy constructor."""
+    manager = build_collocation_manager(
+        initial_points=initial_points,
+        init_x=initial_points,
+        init_y=initial_points,
+        config=config,
+    )
+    return manager._residual_strategy  # pragma: no cover
+
+
+def _build_manager(
+    *,
+    residual_strategy: CollocationStrategy,
+    init_x: torch.Tensor,
+    init_y: torch.Tensor,
+    config: Any,
+    seed: int,
+    total_rows: int,
+) -> MultiPoolCollocationManager:
+    total_target_rows = int(cfg_get(config, "pinn.collocation.multi_pool.total_active_points", total_rows))
+    return MultiPoolCollocationManager(
+        residual_strategy=residual_strategy,
+        init_x=init_x,
+        init_y=init_y,
+        config=config,
+        seed=seed,
+        total_target_rows=total_target_rows,
+        enabled=bool(cfg_get(config, "pinn.collocation.multi_pool.enabled", False)),
     )
 
 

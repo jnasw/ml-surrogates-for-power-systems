@@ -42,7 +42,7 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
         "batch_size": 128,
         "device": "cpu",
         "gradient_telemetry": False,
-        "variants": ["static_preprocessed", "static_generated", "random_r", "rad"],
+        "variants": ["static_preprocessed", "static_generated", "random_r", "rad", "rar_d", "rar_g"],
         "stage1_overrides": [],
         "stage2_overrides": [
             "time=0.05",

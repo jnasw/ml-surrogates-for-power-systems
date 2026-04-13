@@ -49,6 +49,23 @@ pinn:
       enabled: false
       rows_per_epoch: null
       fraction_per_epoch: null
+    multi_pool:
+      enabled: false
+      total_active_points: ${pinn.collocation.active_points}
+      allocation:
+        enabled: false
+        method: loss_ratio
+        update_interval_epochs: 1
+        smoothing: 0.8
+      pools:
+        residual:
+          initial_fraction: 0.7
+          min_fraction: 0.4
+          max_fraction: 0.9
+        ic_constraint:
+          initial_fraction: 0.3
+          min_fraction: 0.1
+          max_fraction: 0.6
   collocation_sampling:
     enabled: ${pinn.collocation.sampling.enabled}
     rows_per_epoch: ${pinn.collocation.sampling.rows_per_epoch}

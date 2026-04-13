@@ -16,7 +16,7 @@ from omegaconf import OmegaConf
 from src.data.loaders.trajectory_dataset import TrajectoryDataset
 from src.pinn.collocation import (
     CollocationStrategyContext,
-    build_collocation_strategy,
+    build_collocation_manager,
 )
 from src.pinn.data import PinnDatasetBundle
 from src.pinn.evaluator import (
@@ -1272,13 +1272,19 @@ def _train_multistage_pinn(
     criterion = nn.MSELoss()
 
     dataset = move_pinn_training_data_to_device(dataset, device=device, dtype=dtype)
-    collocation_strategy = build_collocation_strategy(initial_points=dataset.train_col_x, config=config)
+    collocation_manager = build_collocation_manager(
+        initial_points=dataset.train_col_x,
+        init_x=dataset.train_init_x,
+        init_y=dataset.train_init_y,
+        config=config,
+    )
+    initial_pool_batch = collocation_manager.initial_epoch_batch()
     dataset = PinnDatasetBundle(
         train_x=dataset.train_x,
         train_y=dataset.train_y,
-        train_col_x=collocation_strategy.current_points(),
-        train_init_x=dataset.train_init_x,
-        train_init_y=dataset.train_init_y,
+        train_col_x=initial_pool_batch.x_col,
+        train_init_x=initial_pool_batch.x_init,
+        train_init_y=initial_pool_batch.y_init,
         val_x=dataset.val_x,
         val_y=dataset.val_y,
         val_col_x=dataset.val_col_x,
@@ -1440,7 +1446,7 @@ def _train_multistage_pinn(
                     epoch_train_x, epoch_train_y = _sample_supervised_rows(dataset.train_x, dataset.train_y, config)
                 else:
                     epoch_train_x, epoch_train_y = dataset.train_x, dataset.train_y
-                epoch_train_col_x = collocation_strategy.prepare_epoch_points(
+                epoch_pool_batch = collocation_manager.prepare_epoch_batch(
                     context=CollocationStrategyContext(
                         global_epoch=global_epoch + 1,
                         phase_name=phase.name,
@@ -1450,6 +1456,9 @@ def _train_multistage_pinn(
                         formulation=formulation,
                     )
                 )
+                epoch_train_col_x = epoch_pool_batch.x_col
+                epoch_train_init_x = epoch_pool_batch.x_init
+                epoch_train_init_y = epoch_pool_batch.y_init
                 num_batches = 0
                 num_train_steps = 0
                 num_supervised_rows = 0
@@ -1467,8 +1476,8 @@ def _train_multistage_pinn(
                         x_data=epoch_train_x,
                         y_data=epoch_train_y,
                         x_col=epoch_train_col_x,
-                        x_init=dataset.train_init_x,
-                        y_init=dataset.train_init_y,
+                        x_init=epoch_train_init_x,
+                        y_init=epoch_train_init_y,
                         capture_gradient_telemetry=gradient_telemetry_enabled,
                         objective_scale=stage_loss_ref,
                     )
@@ -1477,7 +1486,7 @@ def _train_multistage_pinn(
                     num_train_steps = 1
                     num_supervised_rows = int(epoch_train_x.shape[0])
                     num_collocation_rows = int(epoch_train_col_x.shape[0])
-                    num_init_rows = int(dataset.train_init_x.shape[0])
+                    num_init_rows = int(epoch_train_init_x.shape[0])
                     if gradient_telemetry is not None:
                         epoch_gradients.append(gradient_telemetry)
                 else:
@@ -1486,8 +1495,8 @@ def _train_multistage_pinn(
                             train_x=epoch_train_x,
                             train_y=epoch_train_y,
                             train_col_x=epoch_train_col_x,
-                            train_init_x=dataset.train_init_x,
-                            train_init_y=dataset.train_init_y,
+                            train_init_x=epoch_train_init_x,
+                            train_init_y=epoch_train_init_y,
                         ),
                         batch_size=phase_batch_size,
                         shuffle=phase.shuffle,
@@ -1565,7 +1574,7 @@ def _train_multistage_pinn(
                         criterion=criterion,
                         formulation=formulation,
                     )
-                    init_val = _evaluate_data_loss(model=ensemble, x=dataset.train_init_x, y=dataset.train_init_y, criterion=criterion)
+                    init_val = _evaluate_data_loss(model=ensemble, x=epoch_train_init_x, y=epoch_train_init_y, criterion=criterion)
                     val_component_losses["ic"] = init_val
                     val_total_loss = _compute_weighted_total_loss(val_component_losses, active_weights)
                     test_metrics = {"data_loss": _evaluate_data_loss(model=ensemble, x=dataset.test_x, y=dataset.test_y, criterion=criterion)}
@@ -1623,7 +1632,18 @@ def _train_multistage_pinn(
                     peak_gpu_memory_reserved_bytes=peak_gpu_memory_reserved_bytes,
                     optimizer_diagnostics=optimizer_diagnostics,
                 )
+                mean_epoch_breakdown = PinnLossBreakdown(
+                    total=epoch_losses[0].total.detach().new_tensor(train_total),
+                    components={
+                        name: epoch_losses[0].components[name].detach().new_tensor(train_component_losses[name])
+                        for name in epoch_losses[0].components
+                    },
+                )
                 rows.append(row)
+                collocation_manager.observe_epoch_losses(
+                    global_epoch=global_epoch,
+                    losses=mean_epoch_breakdown,
+                )
 
                 if logger is not None:
                     logger.write_metrics(rows)
@@ -1722,13 +1742,19 @@ def train_pinn(
     ).to(device=device, dtype=dtype)
 
     dataset = move_pinn_training_data_to_device(dataset, device=device, dtype=dtype)
-    collocation_strategy = build_collocation_strategy(initial_points=dataset.train_col_x, config=config)
+    collocation_manager = build_collocation_manager(
+        initial_points=dataset.train_col_x,
+        init_x=dataset.train_init_x,
+        init_y=dataset.train_init_y,
+        config=config,
+    )
+    initial_pool_batch = collocation_manager.initial_epoch_batch()
     dataset = PinnDatasetBundle(
         train_x=dataset.train_x,
         train_y=dataset.train_y,
-        train_col_x=collocation_strategy.current_points(),
-        train_init_x=dataset.train_init_x,
-        train_init_y=dataset.train_init_y,
+        train_col_x=initial_pool_batch.x_col,
+        train_init_x=initial_pool_batch.x_init,
+        train_init_y=initial_pool_batch.y_init,
         val_x=dataset.val_x,
         val_y=dataset.val_y,
         val_col_x=dataset.val_col_x,
@@ -1809,7 +1835,7 @@ def train_pinn(
                 epoch_train_x, epoch_train_y = _sample_supervised_rows(dataset.train_x, dataset.train_y, config)
             else:
                 epoch_train_x, epoch_train_y = dataset.train_x, dataset.train_y
-            epoch_train_col_x = collocation_strategy.prepare_epoch_points(
+            epoch_pool_batch = collocation_manager.prepare_epoch_batch(
                 context=CollocationStrategyContext(
                     global_epoch=global_epoch + 1,
                     phase_name=phase.name,
@@ -1819,6 +1845,9 @@ def train_pinn(
                     formulation=formulation,
                 )
             )
+            epoch_train_col_x = epoch_pool_batch.x_col
+            epoch_train_init_x = epoch_pool_batch.x_init
+            epoch_train_init_y = epoch_pool_batch.y_init
             num_batches = 0
             num_train_steps = 0
             num_supervised_rows = 0
@@ -1836,8 +1865,8 @@ def train_pinn(
                     x_data=epoch_train_x,
                     y_data=epoch_train_y,
                     x_col=epoch_train_col_x,
-                    x_init=dataset.train_init_x,
-                    y_init=dataset.train_init_y,
+                    x_init=epoch_train_init_x,
+                    y_init=epoch_train_init_y,
                     capture_gradient_telemetry=capture_gradient_telemetry,
                 )
                 epoch_losses.append(breakdown)
@@ -1845,7 +1874,7 @@ def train_pinn(
                 num_train_steps = 1
                 num_supervised_rows = int(epoch_train_x.shape[0])
                 num_collocation_rows = int(epoch_train_col_x.shape[0])
-                num_init_rows = int(dataset.train_init_x.shape[0])
+                num_init_rows = int(epoch_train_init_x.shape[0])
                 if gradient_telemetry is not None:
                     epoch_gradients.append(gradient_telemetry)
             else:
@@ -1854,8 +1883,8 @@ def train_pinn(
                         train_x=epoch_train_x,
                         train_y=epoch_train_y,
                         train_col_x=epoch_train_col_x,
-                        train_init_x=dataset.train_init_x,
-                        train_init_y=dataset.train_init_y,
+                        train_init_x=epoch_train_init_x,
+                        train_init_y=epoch_train_init_y,
                     ),
                     batch_size=phase_batch_size,
                     shuffle=phase.shuffle,
@@ -2062,7 +2091,18 @@ def train_pinn(
                     ),
                 },
             )
+            mean_epoch_breakdown = PinnLossBreakdown(
+                total=epoch_losses[0].total.detach().new_tensor(train_total),
+                components={
+                    name: epoch_losses[0].components[name].detach().new_tensor(train_component_losses[name])
+                    for name in epoch_losses[0].components
+                },
+            )
             rows.append(row)
+            collocation_manager.observe_epoch_losses(
+                global_epoch=global_epoch,
+                losses=mean_epoch_breakdown,
+            )
 
             if logger is not None:
                 logger.write_metrics(rows)
