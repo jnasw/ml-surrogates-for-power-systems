@@ -174,6 +174,156 @@ class ResidualAdaptiveDistributionStrategy(StaticCollocationStrategy):
         self._state.metadata["last_score_max"] = float(scores.max().item())
 
 
+class _AppendCollocationStrategy(StaticCollocationStrategy):
+    """Base class for append-based collocation refinement strategies."""
+
+    def __init__(
+        self,
+        *,
+        initial_points: torch.Tensor,
+        config: Any,
+        domain: CollocationDomain,
+        sampler: str,
+        seed: int,
+        target_points: int,
+        candidate_points: int,
+        append_points: int,
+        score_norm: str,
+    ) -> None:
+        super().__init__(initial_points=initial_points, config=config)
+        self._domain = domain
+        self._sampler = str(sampler)
+        self._seed = int(seed)
+        self._target_points = int(target_points)
+        self._candidate_points = int(candidate_points)
+        self._append_points = int(append_points)
+        self._score_norm = str(score_norm)
+
+    def maybe_refresh(self, *, context: CollocationStrategyContext) -> None:
+        if not _should_refresh(config=self._config, context=context):
+            return
+        if context.model is None or context.ode_model is None:
+            raise ValueError("Append-based adaptive sampling requires model and ode_model in the context.")
+
+        current_rows = int(self.current_points().shape[0])
+        if current_rows >= self._target_points:
+            return
+        add_rows = min(self._append_points, self._target_points - current_rows)
+        if add_rows <= 0:
+            return
+        if self._candidate_points < add_rows:
+            raise ValueError("pinn.collocation.candidate_points must be >= points appended per refresh.")
+
+        candidates = sample_collocation_points(
+            domain=self._domain,
+            n=self._candidate_points,
+            method=self._sampler,
+            seed=self._seed + self._state.refresh_count + int(context.global_epoch),
+            dtype=self.current_points().dtype,
+            device=self.current_points().device,
+        )
+        scores = score_collocation_points(
+            model=context.model,
+            x=candidates,
+            ode_model=context.ode_model,
+            formulation=context.formulation,
+            norm=self._score_norm,
+        ).detach()
+
+        new_points = self._select_points(
+            candidates=candidates,
+            scores=scores,
+            add_rows=add_rows,
+            context=context,
+        )
+        self._state.active_points = torch.cat((self.current_points(), new_points), dim=0)
+        self._state.refresh_count += 1
+        self._state.last_refresh_epoch = int(context.global_epoch)
+        self._state.metadata["last_score_mean"] = float(scores.mean().item())
+        self._state.metadata["last_score_max"] = float(scores.max().item())
+        self._state.metadata["active_point_count"] = int(self._state.active_points.shape[0])
+
+    @abstractmethod
+    def _select_points(
+        self,
+        *,
+        candidates: torch.Tensor,
+        scores: torch.Tensor,
+        add_rows: int,
+        context: CollocationStrategyContext,
+    ) -> torch.Tensor:
+        """Select new points from a scored candidate pool."""
+
+
+class ResidualAdaptiveRefinementDistributionStrategy(_AppendCollocationStrategy):
+    """RAR-D: append points sampled from the residual-based distribution."""
+
+    def __init__(
+        self,
+        *,
+        initial_points: torch.Tensor,
+        config: Any,
+        domain: CollocationDomain,
+        sampler: str,
+        seed: int,
+        target_points: int,
+        candidate_points: int,
+        append_points: int,
+        rad_k: float,
+        rad_c: float,
+        score_norm: str,
+    ) -> None:
+        super().__init__(
+            initial_points=initial_points,
+            config=config,
+            domain=domain,
+            sampler=sampler,
+            seed=seed,
+            target_points=target_points,
+            candidate_points=candidate_points,
+            append_points=append_points,
+            score_norm=score_norm,
+        )
+        self._rad_k = float(rad_k)
+        self._rad_c = float(rad_c)
+
+    def _select_points(
+        self,
+        *,
+        candidates: torch.Tensor,
+        scores: torch.Tensor,
+        add_rows: int,
+        context: CollocationStrategyContext,
+    ) -> torch.Tensor:
+        probabilities = _rad_probabilities(scores=scores, k=self._rad_k, c=self._rad_c)
+        rng = np.random.default_rng(self._seed + self._state.refresh_count + int(context.global_epoch))
+        selected_ids = rng.choice(
+            self._candidate_points,
+            size=add_rows,
+            replace=False,
+            p=probabilities,
+        )
+        indices = torch.as_tensor(selected_ids, dtype=torch.long, device=candidates.device)
+        self._state.metadata["last_strategy"] = "rar_d"
+        return candidates.index_select(0, indices)
+
+
+class ResidualAdaptiveRefinementGreedyStrategy(_AppendCollocationStrategy):
+    """RAR-G: append the top-k residual points from the candidate pool."""
+
+    def _select_points(
+        self,
+        *,
+        candidates: torch.Tensor,
+        scores: torch.Tensor,
+        add_rows: int,
+        context: CollocationStrategyContext,
+    ) -> torch.Tensor:
+        indices = torch.topk(scores, k=add_rows, largest=True).indices.to(device=candidates.device)
+        self._state.metadata["last_strategy"] = "rar_g"
+        return candidates.index_select(0, indices)
+
+
 def _maybe_subsample_epoch_points(*, x_col: torch.Tensor, config: Any, phase_allows_sampling: bool) -> torch.Tensor:
     if not phase_allows_sampling:
         return x_col

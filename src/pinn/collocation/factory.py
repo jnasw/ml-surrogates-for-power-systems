@@ -10,6 +10,8 @@ from src.data.generate.bounds import load_ic_bounds
 from src.pinn.collocation.domain import CollocationDomain, sample_collocation_points
 from src.pinn.collocation.strategies import (
     CollocationStrategy,
+    ResidualAdaptiveRefinementDistributionStrategy,
+    ResidualAdaptiveRefinementGreedyStrategy,
     ResidualAdaptiveDistributionStrategy,
     StaticCollocationStrategy,
     UniformResampleCollocationStrategy,
@@ -24,11 +26,17 @@ def build_collocation_strategy(*, initial_points: torch.Tensor, config: Any) -> 
     sampler = str(cfg_get(config, "pinn.collocation.sampler", "lhs"))
     domain = _build_collocation_domain(config=config, fallback_points=initial_points)
     active_points = _resolve_active_points(config=config, fallback_points=initial_points)
+    initial_strategy_points = _resolve_initial_strategy_points(
+        config=config,
+        fallback_points=initial_points,
+        target_points=active_points,
+        strategy_name=strategy_name,
+    )
 
     if mode == "generated":
         initial_points = sample_collocation_points(
             domain=domain,
-            n=active_points,
+            n=initial_strategy_points,
             method=sampler,
             seed=seed,
             dtype=initial_points.dtype,
@@ -41,7 +49,7 @@ def build_collocation_strategy(*, initial_points: torch.Tensor, config: Any) -> 
         return StaticCollocationStrategy(initial_points=initial_points, config=config)
     initial_points = _normalize_initial_points(
         initial_points=initial_points,
-        active_points=active_points,
+        active_points=initial_strategy_points,
         seed=seed,
     )
     if strategy_name == "random_r":
@@ -69,9 +77,40 @@ def build_collocation_strategy(*, initial_points: torch.Tensor, config: Any) -> 
             rad_c=float(cfg_get(config, "pinn.collocation.rad.c", 1.0)),
             score_norm=str(cfg_get(config, "pinn.collocation.score_norm", "l2")),
         )
+    if strategy_name == "rar_d":
+        candidate_points = int(
+            cfg_get(config, "pinn.collocation.candidate_points", max(active_points * 4, active_points))
+        )
+        return ResidualAdaptiveRefinementDistributionStrategy(
+            initial_points=initial_points,
+            config=config,
+            domain=domain,
+            sampler=sampler,
+            seed=seed,
+            target_points=active_points,
+            candidate_points=candidate_points,
+            append_points=int(cfg_get(config, "pinn.collocation.append_points", 64)),
+            rad_k=float(cfg_get(config, "pinn.collocation.rad.k", 2.0)),
+            rad_c=float(cfg_get(config, "pinn.collocation.rad.c", 0.0)),
+            score_norm=str(cfg_get(config, "pinn.collocation.score_norm", "l2")),
+        )
+    if strategy_name == "rar_g":
+        candidate_points = int(
+            cfg_get(config, "pinn.collocation.candidate_points", max(active_points * 4, active_points))
+        )
+        return ResidualAdaptiveRefinementGreedyStrategy(
+            initial_points=initial_points,
+            config=config,
+            domain=domain,
+            sampler=sampler,
+            seed=seed,
+            target_points=active_points,
+            candidate_points=candidate_points,
+            append_points=int(cfg_get(config, "pinn.collocation.append_points", 64)),
+            score_norm=str(cfg_get(config, "pinn.collocation.score_norm", "l2")),
+        )
     raise NotImplementedError(
-        "Supported pinn.collocation.strategy values are: static, random_r, rad. "
-        "Append-based strategies will be added in a later phase."
+        "Supported pinn.collocation.strategy values are: static, random_r, rad, rar_d, rar_g."
     )
 
 
@@ -104,6 +143,29 @@ def _build_collocation_domain(*, config: Any, fallback_points: torch.Tensor) -> 
         input_dim=input_dim,
         feature_bounds=feature_bounds,
     )
+
+
+def _resolve_initial_strategy_points(
+    *,
+    config: Any,
+    fallback_points: torch.Tensor,
+    target_points: int,
+    strategy_name: str,
+) -> int:
+    cfg_value = cfg_get(config, "pinn.collocation.initial_points", None)
+    if cfg_value not in (None, "null"):
+        initial_points = int(cfg_value)
+    elif strategy_name in {"rar_d", "rar_g"}:
+        initial_points = max(1, target_points // 2)
+    else:
+        fallback_rows = int(fallback_points.shape[0])
+        initial_points = target_points if fallback_rows <= 0 else min(target_points, fallback_rows)
+
+    if initial_points <= 0:
+        raise ValueError("pinn.collocation.initial_points must be > 0 when provided.")
+    if initial_points > target_points:
+        raise ValueError("pinn.collocation.initial_points must be <= pinn.collocation.active_points.")
+    return initial_points
 
 
 def _normalize_initial_points(*, initial_points: torch.Tensor, active_points: int, seed: int) -> torch.Tensor:

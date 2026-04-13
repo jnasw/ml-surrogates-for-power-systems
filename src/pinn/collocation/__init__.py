@@ -6,6 +6,8 @@ from src.pinn.collocation.state import CollocationState
 from src.pinn.collocation.strategies import (
     CollocationStrategy,
     CollocationStrategyContext,
+    ResidualAdaptiveRefinementDistributionStrategy,
+    ResidualAdaptiveRefinementGreedyStrategy,
     ResidualAdaptiveDistributionStrategy,
     StaticCollocationStrategy,
     UniformResampleCollocationStrategy,
@@ -15,6 +17,8 @@ __all__ = [
     "CollocationState",
     "CollocationStrategy",
     "CollocationStrategyContext",
+    "ResidualAdaptiveRefinementDistributionStrategy",
+    "ResidualAdaptiveRefinementGreedyStrategy",
     "ResidualAdaptiveDistributionStrategy",
     "StaticCollocationStrategy",
     "UniformResampleCollocationStrategy",
