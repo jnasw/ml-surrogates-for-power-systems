@@ -30,10 +30,17 @@ pinn:
     enabled: false
   cost_tracking:
     enabled: true
+  collocation:
+    mode: preprocessed # preprocessed | generated
+    strategy: static # static | random_r | rad | rar_d | rar_g
+    sampling:
+      enabled: false
+      rows_per_epoch: null
+      fraction_per_epoch: null
   collocation_sampling:
-    enabled: false
-    rows_per_epoch: null
-    fraction_per_epoch: null
+    enabled: ${pinn.collocation.sampling.enabled}
+    rows_per_epoch: ${pinn.collocation.sampling.rows_per_epoch}
+    fraction_per_epoch: ${pinn.collocation.sampling.fraction_per_epoch}
   supervised_sampling:
     enabled: false
     rows_per_epoch: null

@@ -14,6 +14,10 @@ from torch.utils.data import DataLoader, TensorDataset
 from omegaconf import OmegaConf
 
 from src.data.loaders.trajectory_dataset import TrajectoryDataset
+from src.pinn.collocation import (
+    CollocationStrategyContext,
+    build_collocation_strategy,
+)
 from src.pinn.data import PinnDatasetBundle
 from src.pinn.evaluator import (
     evaluate_pinn_loss_breakdown,
@@ -429,17 +433,6 @@ def _scheduled_loss_weights(
         if int(next_global_epoch) <= cursor:
             return stage.weights
     return schedule[-1].weights
-
-
-def _sample_collocation_rows(x_col: torch.Tensor, config: Any) -> torch.Tensor:
-    if not bool(cfg_get(config, "pinn.collocation_sampling.enabled", False)):
-        return x_col
-    return _sample_tensor_rows(
-        x=x_col,
-        rows_per_epoch_cfg=cfg_get(config, "pinn.collocation_sampling.rows_per_epoch", None),
-        fraction_per_epoch_cfg=cfg_get(config, "pinn.collocation_sampling.fraction_per_epoch", None),
-        cfg_prefix="pinn.collocation_sampling",
-    )
 
 
 def _sample_tensor_rows(
@@ -1279,6 +1272,7 @@ def _train_multistage_pinn(
     criterion = nn.MSELoss()
 
     dataset = move_pinn_training_data_to_device(dataset, device=device, dtype=dtype)
+    collocation_strategy = build_collocation_strategy(initial_points=dataset.train_col_x, config=config)
     analysis_x_col = _multistage_analysis_collocation(dataset, config)
     max_stages = len(explicit_stage_optimizer_phases) if explicit_stage_optimizer_phases is not None else _multistage_max_stages(config)
     stop_threshold = _multistage_stop_threshold(config)
@@ -1432,10 +1426,18 @@ def _train_multistage_pinn(
                 active_weights = base_weights
                 if phase_allows_sampling:
                     epoch_train_x, epoch_train_y = _sample_supervised_rows(dataset.train_x, dataset.train_y, config)
-                    epoch_train_col_x = _sample_collocation_rows(dataset.train_col_x, config)
                 else:
                     epoch_train_x, epoch_train_y = dataset.train_x, dataset.train_y
-                    epoch_train_col_x = dataset.train_col_x
+                epoch_train_col_x = collocation_strategy.prepare_epoch_points(
+                    context=CollocationStrategyContext(
+                        global_epoch=global_epoch + 1,
+                        phase_name=phase.name,
+                        phase_allows_sampling=phase_allows_sampling,
+                        model=ensemble,
+                        ode_model=ode_model,
+                        formulation=formulation,
+                    )
+                )
                 num_batches = 0
                 num_train_steps = 0
                 num_supervised_rows = 0
@@ -1708,6 +1710,7 @@ def train_pinn(
     ).to(device=device, dtype=dtype)
 
     dataset = move_pinn_training_data_to_device(dataset, device=device, dtype=dtype)
+    collocation_strategy = build_collocation_strategy(initial_points=dataset.train_col_x, config=config)
     weight_probe_batch = _build_weight_update_probe_batch(
         dataset=dataset,
         weighting_config=weighting_config,
@@ -1780,10 +1783,18 @@ def train_pinn(
             active_weights = scheduled_base_weights if weighting_config.scheme == "static" else weighting_policy.current_weights(weighting_state)
             if phase_allows_sampling:
                 epoch_train_x, epoch_train_y = _sample_supervised_rows(dataset.train_x, dataset.train_y, config)
-                epoch_train_col_x = _sample_collocation_rows(dataset.train_col_x, config)
             else:
                 epoch_train_x, epoch_train_y = dataset.train_x, dataset.train_y
-                epoch_train_col_x = dataset.train_col_x
+            epoch_train_col_x = collocation_strategy.prepare_epoch_points(
+                context=CollocationStrategyContext(
+                    global_epoch=global_epoch + 1,
+                    phase_name=phase.name,
+                    phase_allows_sampling=phase_allows_sampling,
+                    model=model,
+                    ode_model=ode_model,
+                    formulation=formulation,
+                )
+            )
             num_batches = 0
             num_train_steps = 0
             num_supervised_rows = 0
