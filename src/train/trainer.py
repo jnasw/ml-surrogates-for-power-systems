@@ -263,6 +263,31 @@ def _peak_memory_if_cuda(device: torch.device, *, enabled: bool) -> tuple[int | 
     return int(torch.cuda.max_memory_allocated(device)), int(torch.cuda.max_memory_reserved(device))
 
 
+def _collocation_pool_diagnostics(manager: Any) -> dict[str, float | int | str | bool | None]:
+    state = getattr(manager, "state", None)
+    if state is None:
+        return {}
+    residual_pool = state.pools.get("residual")
+    ic_pool = state.pools.get("ic_constraint")
+    diagnostics: dict[str, float | int | str | bool | None] = {
+        "multipool_enabled": True,
+        "multipool_total_target_rows": int(state.total_target_rows),
+        "multipool_allocation_step": int(state.allocation_step),
+    }
+    if residual_pool is not None:
+        diagnostics["multipool_residual_target_rows"] = int(residual_pool.target_rows)
+        diagnostics["multipool_residual_epoch_rows"] = int(residual_pool.metadata.get("epoch_rows", residual_pool.points_x.shape[0]))
+        diagnostics["multipool_residual_pool_rows"] = int(residual_pool.points_x.shape[0])
+    if ic_pool is not None:
+        diagnostics["multipool_ic_target_rows"] = int(ic_pool.target_rows)
+        diagnostics["multipool_ic_epoch_rows"] = int(ic_pool.metadata.get("epoch_rows", ic_pool.points_x.shape[0]))
+        diagnostics["multipool_ic_pool_rows"] = int(ic_pool.points_x.shape[0])
+    for key, value in (state.metadata or {}).items():
+        if isinstance(value, (bool, int, float, str)) or value is None:
+            diagnostics[f"multipool_{key}"] = value
+    return diagnostics
+
+
 @dataclass(frozen=True)
 class PinnBatch:
     x_data: torch.Tensor
@@ -1592,6 +1617,7 @@ def _train_multistage_pinn(
                     "multistage_stage_epsilon": float(effective_stage_epsilon),
                     "multistage_stage_loss_ref": float(stage_loss_ref),
                 }
+                optimizer_diagnostics.update(_collocation_pool_diagnostics(collocation_manager))
                 if stage_start_diagnostics is not None and stage_idx > 0:
                     optimizer_diagnostics["multistage_stage_start_residual_rms"] = float(stage_start_diagnostics.residual_rms)
                     optimizer_diagnostics["multistage_stage_zero_crossings"] = int(stage_start_diagnostics.residual_zero_crossings)
@@ -2084,6 +2110,7 @@ def train_pinn(
                     "sampling_enabled": phase_allows_sampling,
                     "line_search": optimizer_spec.line_search_name,
                     "dynamic_weight_updates_enabled": phase_supports_dynamic_weight_updates,
+                    **_collocation_pool_diagnostics(collocation_manager),
                     **(
                         optimizer_spec.optimizer.get_last_diagnostics()
                         if hasattr(optimizer_spec.optimizer, "get_last_diagnostics")
