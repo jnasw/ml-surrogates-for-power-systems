@@ -46,6 +46,11 @@ def build_collocation_strategy(*, initial_points: torch.Tensor, config: Any) -> 
         raise ValueError("pinn.collocation.mode must be one of: preprocessed, generated")
 
     if strategy_name == "static":
+        initial_points = _normalize_initial_points(
+            initial_points=initial_points,
+            active_points=initial_strategy_points,
+            seed=seed,
+        )
         return StaticCollocationStrategy(initial_points=initial_points, config=config)
     initial_points = _normalize_initial_points(
         initial_points=initial_points,
