@@ -50,6 +50,10 @@ class CollocationStrategy(ABC):
         """Optional local weights aligned with ``current_points``."""
         return None
 
+    def export_adaptive_state(self) -> dict[str, Any] | None:
+        """Optional serializable adaptive state for checkpoint payloads."""
+        return None
+
     def prepare_epoch_points(self, *, context: CollocationStrategyContext) -> torch.Tensor:
         self.maybe_refresh(context=context)
         return self._points_for_epoch(context=context)
@@ -328,6 +332,19 @@ class VariationalResidualAdaptiveSamplingStrategy(StaticCollocationStrategy):
         self._state.metadata["vrba_weighting_frozen"] = bool(weighting_frozen)
         self._state.metadata["vrba_phase_is_full_batch"] = bool(phase_is_full_batch)
         return self._effective_sampling_enabled, self._effective_weighting_enabled
+
+    def export_adaptive_state(self) -> dict[str, Any] | None:
+        return {
+            "strategy": "vrba_sample",
+            "pool_rows": int(self._pool_points.shape[0]),
+            "active_points": int(self._active_points),
+            "active_indices": self._active_indices.detach().cpu().clone(),
+            "lambda": self._lambda.detach().cpu().clone(),
+            "active_lambda": self._active_lambda.detach().cpu().clone(),
+            "refresh_count": int(self._state.refresh_count),
+            "last_refresh_epoch": self._state.last_refresh_epoch,
+            "metadata": dict(self._state.metadata or {}),
+        }
 
 
 class _AppendCollocationStrategy(StaticCollocationStrategy):

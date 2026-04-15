@@ -333,7 +333,11 @@ def _collocation_vrba_summary(manager: Any) -> dict[str, Any]:
         }
     metadata = dict(getattr(state, "metadata", {}) or {})
     strategy_name = metadata.get("residual_last_strategy")
-    enabled = str(strategy_name).strip().lower() == "vrba_sample"
+    enabled = bool(
+        str(strategy_name).strip().lower() == "vrba_sample"
+        or bool(metadata.get("ic_constraint_vrba_weighting_configured", False))
+        or bool(metadata.get("dt_vrba_weighting_configured", False))
+    )
     target_sets: list[str] = []
     if enabled:
         target_sets.append("physics")
@@ -358,9 +362,32 @@ def _collocation_vrba_summary(manager: Any) -> dict[str, Any]:
                 or bool(metadata.get("dt_vrba_weighting_enabled", False))
             )
         ),
-        "potential": None if not enabled else metadata.get("residual_vrba_potential"),
+        "potential": None if not enabled else (
+            metadata.get("residual_vrba_potential")
+            or metadata.get("ic_constraint_vrba_potential")
+            or metadata.get("dt_vrba_potential")
+        ),
         "target_sets": None if not target_sets else tuple(target_sets),
         "update_count": None if not enabled else metadata.get("residual_vrba_update_count"),
+    }
+
+
+def _collocation_vrba_details(manager: Any) -> dict[str, Any]:
+    state = getattr(manager, "state", None)
+    metadata = dict(getattr(state, "metadata", {}) or {}) if state is not None else {}
+    return {
+        "sampling_frozen": bool(metadata.get("residual_vrba_sampling_frozen", False)),
+        "weighting_frozen": bool(
+            bool(metadata.get("residual_vrba_weighting_frozen", False))
+            or bool(metadata.get("ic_constraint_vrba_weighting_frozen", False))
+            or bool(metadata.get("dt_vrba_weighting_frozen", False))
+        ),
+        "physics_lambda_mean": metadata.get("residual_vrba_lambda_mean"),
+        "physics_lambda_max": metadata.get("residual_vrba_lambda_max"),
+        "ic_lambda_mean": metadata.get("ic_constraint_vrba_lambda_mean"),
+        "ic_lambda_max": metadata.get("ic_constraint_vrba_lambda_max"),
+        "dt_lambda_mean": metadata.get("dt_vrba_lambda_mean"),
+        "dt_lambda_max": metadata.get("dt_vrba_lambda_max"),
     }
 
 
@@ -423,6 +450,7 @@ def _update_dt_vrba_weights(
     updated_metadata["dt_vrba_weighting_enabled"] = bool(weighting_enabled)
     updated_metadata["dt_vrba_weighting_frozen"] = bool(configured and not weighting_enabled)
     updated_metadata["dt_vrba_phase_is_full_batch"] = bool(context.phase_is_full_batch)
+    updated_metadata["dt_vrba_potential"] = str(getattr(vrba_config, "potential", "quadratic"))
     if not configured:
         return None, updated_metadata
     if weights is None:
@@ -1057,7 +1085,16 @@ def _build_checkpoint_payload(
     tag: str,
     vrba_config: Any | None = None,
     vrba_state: Any | None = None,
+    collocation_manager: Any | None = None,
+    train_dt_weights: torch.Tensor | None = None,
 ) -> dict[str, Any]:
+    track_vrba_runtime = bool(vrba_config is not None and getattr(vrba_config, "track_in_checkpoints", True))
+    vrba_runtime_state = None
+    if track_vrba_runtime:
+        vrba_runtime_state = _serialize_vrba_runtime_state(
+            collocation_manager=collocation_manager,
+            train_dt_weights=train_dt_weights,
+        )
     return {
         "state_dict": pinn_model.model.state_dict(),
         "input_dim": pinn_model.input_dim,
@@ -1077,12 +1114,28 @@ def _build_checkpoint_payload(
         "vrba": {
             "config": None if vrba_config is None else serialize_vrba_config(vrba_config),
             "state": None if vrba_state is None else serialize_vrba_state(vrba_state),
+            "runtime_state": vrba_runtime_state,
         },
     }
 
 
 def _checkpointing_enabled(config: Any, key: str, default: bool) -> bool:
     return bool(cfg_get(config, f"pinn.checkpointing.{key}", default))
+
+
+def _serialize_vrba_runtime_state(
+    *,
+    collocation_manager: Any | None,
+    train_dt_weights: torch.Tensor | None,
+) -> dict[str, Any] | None:
+    if collocation_manager is None and train_dt_weights is None:
+        return None
+    runtime_state: dict[str, Any] = {}
+    if collocation_manager is not None and hasattr(collocation_manager, "export_adaptive_state"):
+        runtime_state["collocation"] = collocation_manager.export_adaptive_state()
+    if train_dt_weights is not None:
+        runtime_state["dt_weights"] = train_dt_weights.detach().cpu().clone()
+    return runtime_state
 
 
 def _resolve_checkpoint_milestones(config: Any, total_epochs: int) -> dict[int, str]:
@@ -1829,6 +1882,8 @@ def _train_multistage_pinn(
                     tag="init",
                     vrba_config=vrba_config,
                     vrba_state=vrba_state,
+                    collocation_manager=collocation_manager,
+                    train_dt_weights=dataset.train_dt_weights,
                 ),
                 tag="init",
             )
@@ -2147,6 +2202,7 @@ def _train_multistage_pinn(
                     optimizer_diagnostics.update(optimizer_spec.optimizer.get_last_diagnostics())
 
                 vrba_summary = _collocation_vrba_summary(collocation_manager)
+                vrba_details = _collocation_vrba_details(collocation_manager)
                 row = EpochMetrics(
                     epoch=epoch,
                     global_epoch=global_epoch,
@@ -2175,6 +2231,14 @@ def _train_multistage_pinn(
                     vrba_potential=vrba_summary["potential"],
                     vrba_target_sets=vrba_summary["target_sets"],
                     vrba_update_count=None if vrba_summary["update_count"] is None else int(vrba_summary["update_count"]),
+                    vrba_sampling_frozen=bool(vrba_details["sampling_frozen"]),
+                    vrba_weighting_frozen=bool(vrba_details["weighting_frozen"]),
+                    vrba_physics_lambda_mean=vrba_details["physics_lambda_mean"],
+                    vrba_physics_lambda_max=vrba_details["physics_lambda_max"],
+                    vrba_ic_lambda_mean=vrba_details["ic_lambda_mean"],
+                    vrba_ic_lambda_max=vrba_details["ic_lambda_max"],
+                    vrba_dt_lambda_mean=vrba_details["dt_lambda_mean"],
+                    vrba_dt_lambda_max=vrba_details["dt_lambda_max"],
                     epoch_wall_seconds=epoch_wall_seconds,
                     cumulative_wall_seconds=cumulative_wall_seconds,
                     num_batches=num_batches if cost_tracking_enabled else None,
@@ -2213,6 +2277,8 @@ def _train_multistage_pinn(
                                 tag=milestone_tag,
                                 vrba_config=vrba_config,
                                 vrba_state=vrba_state,
+                                collocation_manager=collocation_manager,
+                                train_dt_weights=dataset.train_dt_weights,
                             ),
                             tag=milestone_tag,
                         )
@@ -2225,6 +2291,8 @@ def _train_multistage_pinn(
                                 tag="last",
                                 vrba_config=vrba_config,
                                 vrba_state=vrba_state,
+                                collocation_manager=collocation_manager,
+                                train_dt_weights=dataset.train_dt_weights,
                             ),
                             tag="last",
                         )
@@ -2240,6 +2308,8 @@ def _train_multistage_pinn(
                                 tag="best",
                                 vrba_config=vrba_config,
                                 vrba_state=vrba_state,
+                                collocation_manager=collocation_manager,
+                                train_dt_weights=dataset.train_dt_weights,
                             ),
                             tag="best",
                         )
@@ -2387,6 +2457,8 @@ def train_pinn(
                 tag="init",
                 vrba_config=vrba_config,
                 vrba_state=vrba_state,
+                collocation_manager=collocation_manager,
+                train_dt_weights=dataset.train_dt_weights,
             ),
             tag="init",
         )
@@ -2727,6 +2799,7 @@ def train_pinn(
                     "data_loss": _evaluate_data_loss(model=model, x=dataset.test_x, y=dataset.test_y, criterion=criterion)
                 }
             vrba_summary = _collocation_vrba_summary(collocation_manager)
+            vrba_details = _collocation_vrba_details(collocation_manager)
             row = EpochMetrics(
                 epoch=epoch,
                 global_epoch=global_epoch,
@@ -2757,6 +2830,14 @@ def train_pinn(
                 vrba_potential=vrba_summary["potential"],
                 vrba_target_sets=vrba_summary["target_sets"],
                 vrba_update_count=None if vrba_summary["update_count"] is None else int(vrba_summary["update_count"]),
+                vrba_sampling_frozen=bool(vrba_details["sampling_frozen"]),
+                vrba_weighting_frozen=bool(vrba_details["weighting_frozen"]),
+                vrba_physics_lambda_mean=vrba_details["physics_lambda_mean"],
+                vrba_physics_lambda_max=vrba_details["physics_lambda_max"],
+                vrba_ic_lambda_mean=vrba_details["ic_lambda_mean"],
+                vrba_ic_lambda_max=vrba_details["ic_lambda_max"],
+                vrba_dt_lambda_mean=vrba_details["dt_lambda_mean"],
+                vrba_dt_lambda_max=vrba_details["dt_lambda_max"],
                 epoch_wall_seconds=epoch_wall_seconds,
                 cumulative_wall_seconds=cumulative_wall_seconds,
                 num_batches=num_batches if cost_tracking_enabled else None,
@@ -2808,6 +2889,8 @@ def train_pinn(
                                 tag=milestone_tag,
                                 vrba_config=vrba_config,
                                 vrba_state=vrba_state,
+                                collocation_manager=collocation_manager,
+                                train_dt_weights=dataset.train_dt_weights,
                             ),
                         tag=milestone_tag,
                     )
@@ -2820,6 +2903,8 @@ def train_pinn(
                                 tag="last",
                                 vrba_config=vrba_config,
                                 vrba_state=vrba_state,
+                                collocation_manager=collocation_manager,
+                                train_dt_weights=dataset.train_dt_weights,
                             ),
                         tag="last",
                     )
@@ -2835,6 +2920,8 @@ def train_pinn(
                                 tag="best",
                                 vrba_config=vrba_config,
                                 vrba_state=vrba_state,
+                                collocation_manager=collocation_manager,
+                                train_dt_weights=dataset.train_dt_weights,
                             ),
                         tag="best",
                     )

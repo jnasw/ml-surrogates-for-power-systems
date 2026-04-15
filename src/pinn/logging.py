@@ -46,6 +46,14 @@ class EpochMetrics:
     vrba_potential: str | None = None
     vrba_target_sets: tuple[str, ...] | None = None
     vrba_update_count: int | None = None
+    vrba_sampling_frozen: bool | None = None
+    vrba_weighting_frozen: bool | None = None
+    vrba_physics_lambda_mean: float | None = None
+    vrba_physics_lambda_max: float | None = None
+    vrba_ic_lambda_mean: float | None = None
+    vrba_ic_lambda_max: float | None = None
+    vrba_dt_lambda_mean: float | None = None
+    vrba_dt_lambda_max: float | None = None
     epoch_wall_seconds: float | None = None
     cumulative_wall_seconds: float | None = None
     num_batches: int | None = None
@@ -154,6 +162,14 @@ class EpochMetrics:
             flat["vrba_potential"] = self.vrba_potential
             flat["vrba_target_sets"] = None if self.vrba_target_sets is None else ",".join(self.vrba_target_sets)
             flat["vrba_update_count"] = self.vrba_update_count
+            flat["vrba_sampling_frozen"] = self.vrba_sampling_frozen
+            flat["vrba_weighting_frozen"] = self.vrba_weighting_frozen
+            flat["vrba_physics_lambda_mean"] = self.vrba_physics_lambda_mean
+            flat["vrba_physics_lambda_max"] = self.vrba_physics_lambda_max
+            flat["vrba_ic_lambda_mean"] = self.vrba_ic_lambda_mean
+            flat["vrba_ic_lambda_max"] = self.vrba_ic_lambda_max
+            flat["vrba_dt_lambda_mean"] = self.vrba_dt_lambda_mean
+            flat["vrba_dt_lambda_max"] = self.vrba_dt_lambda_max
         flat["stage_name"] = str(self.phase_name)
         for name, value in self.train_component_losses.items():
             flat[f"train_{name}_loss"] = value

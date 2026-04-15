@@ -200,7 +200,10 @@ class MultiPoolCollocationManager:
         for key in ("vrba_weighting_configured", "vrba_weighting_enabled", "vrba_weighting_frozen", "vrba_phase_is_full_batch", "vrba_potential", "vrba_update_count"):
             self._state.metadata[f"ic_constraint_{key}"] = ic_pool.metadata[key]
         if not weighting_enabled:
-            ic_pool.points_weight = None
+            if ic_pool.points_weight is not None:
+                self._state.metadata["ic_constraint_vrba_lambda_mean"] = float(ic_pool.points_weight.mean().item())
+                self._state.metadata["ic_constraint_vrba_lambda_max"] = float(ic_pool.points_weight.max().item())
+                self._state.metadata["ic_constraint_vrba_lambda_min"] = float(ic_pool.points_weight.min().item())
             return
         if not _should_update_local_weights(config=self._config, context=context):
             if ic_pool.points_weight is not None:
@@ -245,6 +248,19 @@ class MultiPoolCollocationManager:
         ic_pool.metadata["vrba_eta_star"] = float(eta_star)
         for key in ("vrba_update_count", "vrba_lambda_mean", "vrba_lambda_max", "vrba_lambda_min", "vrba_gamma", "vrba_eta_star"):
             self._state.metadata[f"ic_constraint_{key}"] = ic_pool.metadata[key]
+
+    def export_adaptive_state(self) -> dict[str, Any]:
+        residual_export = self._residual_strategy.export_adaptive_state()
+        ic_pool = self._state.pools.get("ic_constraint")
+        return {
+            "manager_metadata": dict(self._state.metadata or {}),
+            "residual": residual_export,
+            "ic_constraint": {
+                "target_rows": None if ic_pool is None else int(ic_pool.target_rows),
+                "metadata": {} if ic_pool is None else dict(ic_pool.metadata or {}),
+                "points_weight": None if ic_pool is None or ic_pool.points_weight is None else ic_pool.points_weight.detach().cpu().clone(),
+            },
+        }
 
 
 def _sample_tensor_rows(*, x: torch.Tensor, target_rows: int, seed: int) -> torch.Tensor:
