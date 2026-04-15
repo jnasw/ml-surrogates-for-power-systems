@@ -155,6 +155,23 @@ pinn:
       init_rows: 256
       seed: 0
       refresh_each_update: false
+  vrba:
+    # Stage 0/1 scaffold only:
+    # This block is intentionally dormant unless future code paths explicitly
+    # consume it. Defaults preserve current behavior.
+    enabled: false
+    adaptive_sampling: false
+    adaptive_weighting: false
+    target_sets: [physics] # future options: data, dt, physics, ic
+    potential: quadratic # quadratic | exponential
+    eta: 0.1
+    lambda_max0: 15.0
+    lambda_cap: 25.0
+    phi: 1.0
+    update_interval_epochs: 1
+    freeze_sampling_during_full_batch: true
+    freeze_weighting_during_full_batch: true
+    track_in_checkpoints: true
   multistage:
     max_stages: 2
     stage_optimizer_phases: null

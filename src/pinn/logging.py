@@ -40,6 +40,12 @@ class EpochMetrics:
     weighting_probe_ntk_mean_trace: dict[str, float] | None = None
     weighting_probe_ntk_batch_sizes: dict[str, int] | None = None
     weighting_anchor: str | None = None
+    vrba_enabled: bool = False
+    vrba_sampling_enabled: bool = False
+    vrba_weighting_enabled: bool = False
+    vrba_potential: str | None = None
+    vrba_target_sets: tuple[str, ...] | None = None
+    vrba_update_count: int | None = None
     epoch_wall_seconds: float | None = None
     cumulative_wall_seconds: float | None = None
     num_batches: int | None = None
@@ -141,6 +147,13 @@ class EpochMetrics:
             "peak_gpu_memory_allocated_bytes": self.peak_gpu_memory_allocated_bytes,
             "peak_gpu_memory_reserved_bytes": self.peak_gpu_memory_reserved_bytes,
         }
+        if self.vrba_enabled or self.vrba_potential is not None or self.vrba_update_count is not None:
+            flat["vrba_enabled"] = bool(self.vrba_enabled)
+            flat["vrba_sampling_enabled"] = bool(self.vrba_sampling_enabled)
+            flat["vrba_weighting_enabled"] = bool(self.vrba_weighting_enabled)
+            flat["vrba_potential"] = self.vrba_potential
+            flat["vrba_target_sets"] = None if self.vrba_target_sets is None else ",".join(self.vrba_target_sets)
+            flat["vrba_update_count"] = self.vrba_update_count
         flat["stage_name"] = str(self.phase_name)
         for name, value in self.train_component_losses.items():
             flat[f"train_{name}_loss"] = value
@@ -270,6 +283,13 @@ class PinnLogger:
         if row.weighting_anchor is not None:
             parts.append(f"weight_anchor={row.weighting_anchor}")
         parts.append(f"weight_updated={bool(row.weighting_updated)}")
+        if row.vrba_enabled:
+            parts.append(f"vrba_sampling={bool(row.vrba_sampling_enabled)}")
+            parts.append(f"vrba_weighting={bool(row.vrba_weighting_enabled)}")
+            if row.vrba_potential is not None:
+                parts.append(f"vrba_potential={row.vrba_potential}")
+            if row.vrba_update_count is not None:
+                parts.append(f"vrba_updates={int(row.vrba_update_count)}")
         if row.train_total_grad_norm is not None:
             parts.append(f"grad_total={float(row.train_total_grad_norm):.6e}")
         if row.epoch_wall_seconds is not None:
@@ -324,6 +344,16 @@ class PinnLogger:
             payload["weighting/scheme"] = str(row.weighting_scheme)
         if row.weighting_anchor is not None:
             payload["weighting/anchor"] = str(row.weighting_anchor)
+        if row.vrba_enabled:
+            payload["vrba/enabled"] = True
+            payload["vrba/adaptive_sampling"] = bool(row.vrba_sampling_enabled)
+            payload["vrba/adaptive_weighting"] = bool(row.vrba_weighting_enabled)
+            if row.vrba_potential is not None:
+                payload["vrba/potential"] = str(row.vrba_potential)
+            if row.vrba_target_sets is not None:
+                payload["vrba/target_sets"] = list(row.vrba_target_sets)
+            if row.vrba_update_count is not None:
+                payload["vrba/update_count"] = int(row.vrba_update_count)
         for name, value in row.train_component_losses.items():
             payload[f"train/{name}_loss"] = float(value)
             payload[f"train/loss/{name}"] = float(value)

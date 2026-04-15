@@ -42,6 +42,12 @@ from src.pinn.runtime import (
     resolve_torch_dtype,
     torch_dtype_name,
 )
+from src.pinn.vrba import (
+    initialize_vrba_state,
+    serialize_vrba_config,
+    serialize_vrba_state,
+    vrba_config_from_config,
+)
 from src.pinn.weighting import (
     WeightUpdateStats,
     WeightingConfig,
@@ -788,6 +794,8 @@ def _build_checkpoint_payload(
     metrics: EpochMetrics | None,
     config: Any,
     tag: str,
+    vrba_config: Any | None = None,
+    vrba_state: Any | None = None,
 ) -> dict[str, Any]:
     return {
         "state_dict": pinn_model.model.state_dict(),
@@ -805,6 +813,10 @@ def _build_checkpoint_payload(
         "checkpoint_tag": tag,
         "metrics": metrics,
         "config": OmegaConf.to_container(config, resolve=True),
+        "vrba": {
+            "config": None if vrba_config is None else serialize_vrba_config(vrba_config),
+            "state": None if vrba_state is None else serialize_vrba_state(vrba_state),
+        },
     }
 
 
@@ -1425,6 +1437,7 @@ def _train_multistage_pinn(
     base_optimizer_phases = _multistage_base_optimizer_phases(config)
     residual_optimizer_phases = _multistage_residual_optimizer_phases(config)
     base_weights = _loss_weights_from_config(config)
+    vrba_config = vrba_config_from_config(config)
     gradient_telemetry_enabled = bool(cfg_get(config, "pinn.gradient_telemetry.enabled", False))
     cost_tracking_enabled = _cost_tracking_enabled(config)
     criterion = nn.MSELoss()
@@ -1450,6 +1463,15 @@ def _train_multistage_pinn(
         val_col_x=dataset.val_col_x,
         test_x=dataset.test_x,
         test_y=dataset.test_y,
+    )
+    vrba_state = initialize_vrba_state(
+        vrba_config,
+        initial_point_counts={
+            "data": int(dataset.train_x.shape[0]),
+            "dt": int(dataset.train_x.shape[0]),
+            "physics": int(dataset.train_col_x.shape[0]),
+            "ic": int(dataset.train_init_x.shape[0]),
+        },
     )
     analysis_x_col = _multistage_analysis_collocation(dataset, config)
     max_stages = len(explicit_stage_optimizer_phases) if explicit_stage_optimizer_phases is not None else _multistage_max_stages(config)
@@ -1526,6 +1548,8 @@ def _train_multistage_pinn(
                     metrics=None,
                     config=config,
                     tag="init",
+                    vrba_config=vrba_config,
+                    vrba_state=vrba_state,
                 ),
                 tag="init",
             )
@@ -1808,6 +1832,12 @@ def _train_multistage_pinn(
                     weighting_probe_grad_max_abs=None,
                     weighting_probe_grad_std=None,
                     weighting_anchor="physics",
+                    vrba_enabled=bool(vrba_config.enabled),
+                    vrba_sampling_enabled=bool(vrba_config.adaptive_sampling),
+                    vrba_weighting_enabled=bool(vrba_config.adaptive_weighting),
+                    vrba_potential=None if not vrba_config.enabled else str(vrba_config.potential),
+                    vrba_target_sets=None if not vrba_config.enabled else tuple(vrba_config.target_sets),
+                    vrba_update_count=None if not vrba_config.enabled else int(vrba_state.global_update_count),
                     epoch_wall_seconds=epoch_wall_seconds,
                     cumulative_wall_seconds=cumulative_wall_seconds,
                     num_batches=num_batches if cost_tracking_enabled else None,
@@ -1844,6 +1874,8 @@ def _train_multistage_pinn(
                                 metrics=row,
                                 config=config,
                                 tag=milestone_tag,
+                                vrba_config=vrba_config,
+                                vrba_state=vrba_state,
                             ),
                             tag=milestone_tag,
                         )
@@ -1854,6 +1886,8 @@ def _train_multistage_pinn(
                                 metrics=row,
                                 config=config,
                                 tag="last",
+                                vrba_config=vrba_config,
+                                vrba_state=vrba_state,
                             ),
                             tag="last",
                         )
@@ -1867,6 +1901,8 @@ def _train_multistage_pinn(
                                 metrics=row,
                                 config=config,
                                 tag="best",
+                                vrba_config=vrba_config,
+                                vrba_state=vrba_state,
                             ),
                             tag="best",
                         )
@@ -1930,6 +1966,7 @@ def train_pinn(
     base_weights = _loss_weights_from_config(config)
     loss_weight_schedule = _loss_weight_schedule_from_config(config)
     weighting_config = weighting_config_from_config(config)
+    vrba_config = vrba_config_from_config(config)
     if loss_weight_schedule is not None and weighting_config.scheme != "static":
         raise ValueError("pinn.loss_weight_schedule currently supports static weighting only. Set pinn.weighting.scheme=static.")
     weighting_policy = build_weighting_policy(weighting_config)
@@ -1968,6 +2005,15 @@ def train_pinn(
         test_x=dataset.test_x,
         test_y=dataset.test_y,
     )
+    vrba_state = initialize_vrba_state(
+        vrba_config,
+        initial_point_counts={
+            "data": int(dataset.train_x.shape[0]),
+            "dt": int(dataset.train_x.shape[0]),
+            "physics": int(dataset.train_col_x.shape[0]),
+            "ic": int(dataset.train_init_x.shape[0]),
+        },
+    )
     weight_probe_batch = _build_weight_update_probe_batch(
         dataset=dataset,
         weighting_config=weighting_config,
@@ -1998,6 +2044,8 @@ def train_pinn(
                 metrics=None,
                 config=config,
                 tag="init",
+                vrba_config=vrba_config,
+                vrba_state=vrba_state,
             ),
             tag="init",
         )
@@ -2301,6 +2349,12 @@ def train_pinn(
                 weighting_probe_ntk_mean_trace=None if weight_update_stats is None else None if weight_update_stats.ntk_mean_trace is None else dict(weight_update_stats.ntk_mean_trace),
                 weighting_probe_ntk_batch_sizes=None if weight_update_stats is None else None if weight_update_stats.ntk_batch_sizes is None else dict(weight_update_stats.ntk_batch_sizes),
                 weighting_anchor=weighting_config.anchor,
+                vrba_enabled=bool(vrba_config.enabled),
+                vrba_sampling_enabled=bool(vrba_config.adaptive_sampling),
+                vrba_weighting_enabled=bool(vrba_config.adaptive_weighting),
+                vrba_potential=None if not vrba_config.enabled else str(vrba_config.potential),
+                vrba_target_sets=None if not vrba_config.enabled else tuple(vrba_config.target_sets),
+                vrba_update_count=None if not vrba_config.enabled else int(vrba_state.global_update_count),
                 epoch_wall_seconds=epoch_wall_seconds,
                 cumulative_wall_seconds=cumulative_wall_seconds,
                 num_batches=num_batches if cost_tracking_enabled else None,
@@ -2345,22 +2399,26 @@ def train_pinn(
                 milestone_tag = checkpoint_milestones.get(global_epoch)
                 if milestone_tag is not None:
                     logger.save_checkpoint(
-                        _build_checkpoint_payload(
-                            pinn_model=pinn_model,
-                            metrics=row,
-                            config=config,
-                            tag=milestone_tag,
-                        ),
+                            _build_checkpoint_payload(
+                                pinn_model=pinn_model,
+                                metrics=row,
+                                config=config,
+                                tag=milestone_tag,
+                                vrba_config=vrba_config,
+                                vrba_state=vrba_state,
+                            ),
                         tag=milestone_tag,
                     )
                 if _checkpointing_enabled(config, "save_last", True):
                     logger.save_checkpoint(
-                        _build_checkpoint_payload(
-                            pinn_model=pinn_model,
-                            metrics=row,
-                            config=config,
-                            tag="last",
-                        ),
+                            _build_checkpoint_payload(
+                                pinn_model=pinn_model,
+                                metrics=row,
+                                config=config,
+                                tag="last",
+                                vrba_config=vrba_config,
+                                vrba_state=vrba_state,
+                            ),
                         tag="last",
                     )
             selection_metric = row.val_total_loss if row.val_total_loss is not None else row.train_total_loss
@@ -2368,12 +2426,14 @@ def train_pinn(
                 best_metric = selection_metric
                 if logger is not None and _checkpointing_enabled(config, "save_best", True):
                     logger.save_checkpoint(
-                        _build_checkpoint_payload(
-                            pinn_model=pinn_model,
-                            metrics=row,
-                            config=config,
-                            tag="best",
-                        ),
+                            _build_checkpoint_payload(
+                                pinn_model=pinn_model,
+                                metrics=row,
+                                config=config,
+                                tag="best",
+                                vrba_config=vrba_config,
+                                vrba_state=vrba_state,
+                            ),
                         tag="best",
                     )
         if _collocation_phase_boundary_enabled(config):
