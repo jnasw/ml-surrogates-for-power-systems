@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
 import torch
 
 from src.data.generate.bounds import load_ic_bounds
@@ -119,8 +120,11 @@ def build_collocation_manager(
         vrba_config = vrba_config_from_config(config)
         if not vrba_config.enabled:
             raise ValueError("pinn.collocation.strategy=vrba_sample requires pinn.vrba.enabled=true.")
-        if not vrba_config.adaptive_sampling:
-            raise ValueError("pinn.collocation.strategy=vrba_sample requires pinn.vrba.adaptive_sampling=true.")
+        if not (vrba_config.adaptive_sampling or vrba_config.adaptive_weighting):
+            raise ValueError(
+                "pinn.collocation.strategy=vrba_sample requires at least one of "
+                "pinn.vrba.adaptive_sampling=true or pinn.vrba.adaptive_weighting=true."
+            )
         pool_points = int(cfg_get(config, "pinn.collocation.vrba.pool_points", cfg_get(config, "pinn.collocation.candidate_points", max(active_points * 4, active_points))))
         if pool_points < active_points:
             raise ValueError("pinn.collocation.vrba.pool_points must be >= pinn.collocation.active_points.")
@@ -139,10 +143,12 @@ def build_collocation_manager(
                 active_points=min(pool_points, int(initial_points.shape[0])),
                 seed=seed,
             )
-        initial_active = _normalize_initial_points(
-            initial_points=persistent_pool,
-            active_points=active_points,
-            seed=seed + 1,
+        initial_rng = np.random.default_rng(seed + 1)
+        selected_ids = initial_rng.choice(int(persistent_pool.shape[0]), size=active_points, replace=False)
+        initial_indices = torch.as_tensor(selected_ids, dtype=torch.long, device=persistent_pool.device)
+        initial_active = persistent_pool.index_select(
+            0,
+            initial_indices.to(device=persistent_pool.device, dtype=torch.long),
         )
         residual_strategy = VariationalResidualAdaptiveSamplingStrategy(
             initial_points=initial_active,
@@ -152,6 +158,7 @@ def build_collocation_manager(
             active_points=active_points,
             score_norm=str(cfg_get(config, "pinn.collocation.score_norm", "l2")),
             vrba_config=vrba_config,
+            initial_indices=initial_indices,
         )
         return _build_manager(
             residual_strategy=residual_strategy,

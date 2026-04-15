@@ -194,16 +194,32 @@ class VariationalResidualAdaptiveSamplingStrategy(StaticCollocationStrategy):
         active_points: int,
         score_norm: str,
         vrba_config: VrbAConfig,
+        initial_indices: torch.Tensor | None = None,
     ) -> None:
-        super().__init__(initial_points=initial_points, config=config)
+        pool_rows = int(pool_points.shape[0])
+        if pool_rows < int(active_points):
+            raise ValueError("vRBA sampling requires pool_points >= active_points.")
+        if initial_indices is None:
+            initial_indices = torch.arange(int(active_points), dtype=torch.long, device=pool_points.device)
+        if initial_indices.ndim != 1:
+            raise ValueError("initial_indices must be a rank-1 tensor.")
+        if int(initial_indices.shape[0]) != int(active_points):
+            raise ValueError("initial_indices must have length active_points.")
+        if int(torch.unique(initial_indices).shape[0]) != int(active_points):
+            raise ValueError("initial_indices must contain unique pool indices.")
+        if int(initial_indices.min().item()) < 0 or int(initial_indices.max().item()) >= pool_rows:
+            raise ValueError("initial_indices must lie within the persistent pool.")
+        normalized_initial_points = pool_points.index_select(0, initial_indices.to(device=pool_points.device, dtype=torch.long))
+        super().__init__(initial_points=normalized_initial_points, config=config)
         self._pool_points = pool_points
         self._seed = int(seed)
         self._active_points = int(active_points)
         self._score_norm = str(score_norm)
         self._vrba_config = vrba_config
+        self._active_indices = initial_indices.to(device=pool_points.device, dtype=torch.long)
         lambda_init = 0.1 * float(vrba_config.lambda_max0)
         self._lambda = torch.full(
-            (int(pool_points.shape[0]),),
+            (pool_rows,),
             fill_value=lambda_init,
             dtype=torch.float64,
             device=pool_points.device,
@@ -213,10 +229,13 @@ class VariationalResidualAdaptiveSamplingStrategy(StaticCollocationStrategy):
         self._state.metadata["vrba_active_rows"] = int(active_points)
         self._state.metadata["vrba_potential"] = str(vrba_config.potential)
         self._state.metadata["vrba_update_count"] = 0
+        self._state.metadata["vrba_sampling_enabled"] = bool(vrba_config.adaptive_sampling)
         self._state.metadata["vrba_weighting_enabled"] = bool(vrba_config.adaptive_weighting)
-        self._active_lambda = self._lambda[: self._active_points].clone()
+        self._active_lambda = self._lambda.index_select(0, self._active_indices)
 
     def current_weights(self) -> torch.Tensor | None:
+        if not bool(self._vrba_config.adaptive_weighting):
+            return None
         return self._active_lambda.to(device=self.current_points().device, dtype=self.current_points().dtype)
 
     def maybe_refresh(self, *, context: CollocationStrategyContext) -> None:
@@ -225,8 +244,6 @@ class VariationalResidualAdaptiveSamplingStrategy(StaticCollocationStrategy):
         if context.model is None or context.ode_model is None:
             raise ValueError("vRBA sampling requires model and ode_model in the collocation strategy context.")
         pool_rows = int(self._pool_points.shape[0])
-        if pool_rows < self._active_points:
-            raise ValueError("vRBA sampling requires pool_points >= active_points.")
 
         scores = score_collocation_points(
             model=context.model,
@@ -255,16 +272,18 @@ class VariationalResidualAdaptiveSamplingStrategy(StaticCollocationStrategy):
         self._lambda = gamma * self._lambda + eta_star * mixed_target
         normalized = _normalize_probabilities(self._lambda)
 
-        rng = np.random.default_rng(self._seed + self._state.refresh_count + int(context.global_epoch))
-        selected_ids = rng.choice(
-            pool_rows,
-            size=self._active_points,
-            replace=False,
-            p=normalized,
-        )
-        indices = torch.as_tensor(selected_ids, dtype=torch.long, device=self._pool_points.device)
-        self._state.active_points = self._pool_points.index_select(0, indices)
-        self._active_lambda = self._lambda.index_select(0, indices)
+        if bool(self._vrba_config.adaptive_sampling):
+            rng = np.random.default_rng(self._seed + self._state.refresh_count + int(context.global_epoch))
+            selected_ids = rng.choice(
+                pool_rows,
+                size=self._active_points,
+                replace=False,
+                p=normalized,
+            )
+            self._active_indices = torch.as_tensor(selected_ids, dtype=torch.long, device=self._pool_points.device)
+
+        self._state.active_points = self._pool_points.index_select(0, self._active_indices)
+        self._active_lambda = self._lambda.index_select(0, self._active_indices)
         self._state.refresh_count += 1
         self._state.last_refresh_epoch = int(context.global_epoch)
         self._state.metadata["last_strategy"] = "vrba_sample"

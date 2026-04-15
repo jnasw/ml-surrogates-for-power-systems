@@ -70,6 +70,7 @@ class MultiPoolCollocationManager:
             total_target_rows=int(total_target_rows),
         )
         self._last_observed_epoch = 0
+        self._sync_residual_metadata()
 
     @property
     def state(self) -> MultiPoolCollocationState:

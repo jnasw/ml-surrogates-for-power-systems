@@ -331,7 +331,7 @@ def _collocation_vrba_summary(manager: Any) -> dict[str, Any]:
     enabled = str(strategy_name).strip().lower() == "vrba_sample"
     return {
         "enabled": bool(enabled),
-        "sampling_enabled": bool(enabled),
+        "sampling_enabled": bool(enabled and bool(metadata.get("residual_vrba_sampling_enabled", False))),
         "weighting_enabled": bool(enabled and bool(metadata.get("residual_vrba_weighting_enabled", False))),
         "potential": None if not enabled else metadata.get("residual_vrba_potential"),
         "target_sets": None if not enabled else ("physics",),

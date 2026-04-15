@@ -33,6 +33,8 @@ SUPPORTED_VARIANTS = (
     "rad",
     "vrba_sample_quad",
     "vrba_sample_exp",
+    "vrba_weight_quad",
+    "vrba_full_quad",
     "rar_d",
     "rar_g",
 )
@@ -684,6 +686,26 @@ def _variant_overrides(
             "pinn.vrba.adaptive_sampling=true",
             "pinn.vrba.adaptive_weighting=false",
             "pinn.vrba.potential=exponential",
+        ]
+    if variant == "vrba_weight_quad":
+        return [
+            *common,
+            "pinn.collocation.mode=generated",
+            "pinn.collocation.strategy=vrba_sample",
+            "pinn.vrba.enabled=true",
+            "pinn.vrba.adaptive_sampling=false",
+            "pinn.vrba.adaptive_weighting=true",
+            "pinn.vrba.potential=quadratic",
+        ]
+    if variant == "vrba_full_quad":
+        return [
+            *common,
+            "pinn.collocation.mode=generated",
+            "pinn.collocation.strategy=vrba_sample",
+            "pinn.vrba.enabled=true",
+            "pinn.vrba.adaptive_sampling=true",
+            "pinn.vrba.adaptive_weighting=true",
+            "pinn.vrba.potential=quadratic",
         ]
     if variant == "rar_d":
         return [
