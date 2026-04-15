@@ -145,6 +145,52 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "phase_boundary_benchmark": {
+        "budget": "b256",
+        "preset": "default",
+        "epochs": 300,
+        "batch_size": 1024,
+        "device": "cuda",
+        "gradient_telemetry": False,
+        "variants": ["random_r", "rad", "rar_d", "rar_g"],
+        "stage1_overrides": [],
+        "stage2_overrides": [
+            "time=0.05",
+            "num_of_points=80",
+            "model.ic_generation_method=joint_lhs",
+            "model.ic_num_samples=64",
+        ],
+        "collocation": {
+            "active_points": 4096,
+            "candidate_points": 16384,
+            "initial_points": 2048,
+            "append_points": 64,
+            "refresh_period_epochs": 350,
+            "refresh_mode": "phase_boundary",
+            "refresh_on_phase_start": ["adam_02", "adam_03", "adam_04", "adam_05", "ssbroyden_tail"],
+            "refresh_on_phase_end": [],
+            "sampler": "random",
+            "score_norm": "l2",
+            "rad_k": 1.0,
+            "rad_c": 1.0,
+            "rar_d_k": 2.0,
+            "rar_d_c": 0.0,
+        },
+        "optimizer_phases_override": (
+            "pinn.optimizer_phases=["
+            "{name:adam_01,optimizer:Adam,lr:0.001,epochs:300,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:lbfgs_01,optimizer:LBFGS,lr:1.0,epochs:50,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null},"
+            "{name:adam_02,optimizer:Adam,lr:0.001,epochs:300,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:lbfgs_02,optimizer:LBFGS,lr:1.0,epochs:50,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null},"
+            "{name:adam_03,optimizer:Adam,lr:0.001,epochs:300,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:lbfgs_03,optimizer:LBFGS,lr:1.0,epochs:50,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null},"
+            "{name:adam_04,optimizer:Adam,lr:0.001,epochs:300,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:lbfgs_04,optimizer:LBFGS,lr:1.0,epochs:50,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null},"
+            "{name:adam_05,optimizer:Adam,lr:0.001,epochs:300,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:ssbroyden_tail,optimizer:SSBroyden,lr:1.0,epochs:500,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null}"
+            "]"
+        ),
+    },
 }
 
 
@@ -213,7 +259,7 @@ def _parse_variants(raw: str | None, *, profile_variants: list[str]) -> list[str
 def _profile_config(profile: str) -> dict[str, Any]:
     profile_name = profile.strip().lower()
     if profile_name not in PROFILE_CONFIGS:
-        raise ValueError("profile must be one of: smoke, benchmark, multipool_benchmark")
+        raise ValueError(f"profile must be one of: {', '.join(PROFILE_CONFIGS.keys())}")
     return dict(PROFILE_CONFIGS[profile_name])
 
 
@@ -501,12 +547,6 @@ def _build_pinn_command(
     wandb_entity: str | None,
     wandb_tags: list[str],
 ) -> list[str]:
-    optimizer_phase_override = (
-        str(optimizer_phases_override)
-        if optimizer_phases_override not in (None, "")
-        else _adam_phase_override(epochs=epochs, lr=adam_lr, batch_size=batch_size)
-    )
-
     command = [
         python_bin,
         "20_run_pinn.py",
@@ -525,9 +565,10 @@ def _build_pinn_command(
         f"pinn.gradient_telemetry.enabled={'true' if gradient_telemetry else 'false'}",
         f"logging.log_every_epoch={int(log_every_epoch)}",
         f"wandb.use={'true' if wandb_use else 'false'}",
-        optimizer_phase_override,
         *_variant_overrides(variant=variant, collocation_cfg=collocation_cfg),
     ]
+    if optimizer_phases_override not in (None, ""):
+        command.append(str(optimizer_phases_override))
     if wandb_use:
         command.extend(
             [
@@ -636,7 +677,7 @@ def _write_summary_csv(*, output_root: Path, manifest: dict[str, Any]) -> Path:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python-bin", default=sys.executable, help="Python executable for pipeline and training.")
-    parser.add_argument("--profile", default="smoke", choices=["smoke", "benchmark", "multipool_benchmark"], help="Run a reduced local smoke matrix, a larger benchmark matrix, or a multipool benchmark matrix.")
+    parser.add_argument("--profile", default="smoke", choices=sorted(PROFILE_CONFIGS.keys()), help="Run a predefined collocation comparison profile.")
     parser.add_argument("--experiment-tag", default=None, help="Output/W&B tag suffix. Default: timestamp.")
     parser.add_argument("--output-root", default=None, help="Explicit output root. Default: outputs/pinn/collocation_comparison/<tag>.")
     parser.add_argument("--model-flag", default="SM4", help="Model flag.")
@@ -731,6 +772,11 @@ def main() -> None:
     resolved_device = str(profile_config["device"] if args.device is None else args.device)
     resolved_gradient_telemetry = (
         bool(profile_config["gradient_telemetry"]) if args.gradient_telemetry is None else bool(args.gradient_telemetry)
+    )
+    resolved_optimizer_phases_override = (
+        args.optimizer_phases_override
+        if args.optimizer_phases_override is not None
+        else profile_config.get("optimizer_phases_override")
     )
     resolved_stage1_overrides = [*list(profile_config["stage1_overrides"]), *list(args.stage1_override)]
     resolved_stage2_overrides = [*list(profile_config["stage2_overrides"]), *list(args.stage2_override)]
@@ -881,7 +927,7 @@ def main() -> None:
             epochs=resolved_epochs,
             batch_size=resolved_batch_size,
             adam_lr=args.adam_lr,
-            optimizer_phases_override=args.optimizer_phases_override,
+            optimizer_phases_override=resolved_optimizer_phases_override,
             log_every_epoch=args.log_every_epoch,
             gradient_telemetry=resolved_gradient_telemetry,
             variant=variant,
