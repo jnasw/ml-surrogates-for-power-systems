@@ -145,14 +145,14 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
             },
         },
     },
-    "phase_boundary_benchmark": {
+    "phase_boundary_reference": {
         "budget": "b256",
         "preset": "default",
         "epochs": 300,
         "batch_size": 1024,
         "device": "cuda",
         "gradient_telemetry": False,
-        "variants": ["random_r", "rad", "rar_d", "rar_g"],
+        "variants": ["static_generated", "random_r", "rad", "rar_d", "rar_g"],
         "stage1_overrides": [],
         "stage2_overrides": [
             "time=0.05",
@@ -188,6 +188,57 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
             "{name:lbfgs_04,optimizer:LBFGS,lr:1.0,epochs:50,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null},"
             "{name:adam_05,optimizer:Adam,lr:0.001,epochs:300,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
             "{name:ssbroyden_tail,optimizer:SSBroyden,lr:1.0,epochs:500,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null}"
+            "]"
+        ),
+    },
+    "phase_boundary_benchmark": {
+        "budget": "b256",
+        "preset": "default",
+        "epochs": 300,
+        "batch_size": 1024,
+        "device": "cuda",
+        "gradient_telemetry": False,
+        "variants": ["static_generated", "random_r", "rad", "rar_d", "rar_g"],
+        "stage1_overrides": [],
+        "stage2_overrides": [
+            "time=0.05",
+            "num_of_points=80",
+            "model.ic_generation_method=joint_lhs",
+            "model.ic_num_samples=64",
+        ],
+        "collocation": {
+            "active_points": 4096,
+            "candidate_points": 16384,
+            "initial_points": 2048,
+            "append_points": 64,
+            "refresh_period_epochs": 350,
+            "refresh_mode": "phase_boundary",
+            "refresh_on_phase_start": ["warmup_02", "warmup_03", "warmup_04", "warmup_05", "warmup_tail"],
+            "refresh_on_phase_end": [],
+            "sampler": "random",
+            "score_norm": "l2",
+            "rad_k": 1.0,
+            "rad_c": 1.0,
+            "rar_d_k": 2.0,
+            "rar_d_c": 0.0,
+        },
+        "optimizer_phases_override": (
+            "pinn.optimizer_phases=["
+            "{name:adam_01,optimizer:Adam,lr:0.001,epochs:300,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:lbfgs_01,optimizer:LBFGS,lr:1.0,epochs:50,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null},"
+            "{name:warmup_02,optimizer:Adam,lr:0.0001,epochs:30,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:adam_02,optimizer:Adam,lr:0.0003,epochs:270,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:lbfgs_02,optimizer:LBFGS,lr:1.0,epochs:50,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null},"
+            "{name:warmup_03,optimizer:Adam,lr:0.0001,epochs:30,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:adam_03,optimizer:Adam,lr:0.0003,epochs:270,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:lbfgs_03,optimizer:LBFGS,lr:1.0,epochs:50,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null},"
+            "{name:warmup_04,optimizer:Adam,lr:0.0001,epochs:30,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:adam_04,optimizer:Adam,lr:0.0002,epochs:270,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:lbfgs_04,optimizer:LBFGS,lr:1.0,epochs:50,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null},"
+            "{name:warmup_05,optimizer:Adam,lr:0.0001,epochs:30,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:adam_05,optimizer:Adam,lr:0.0002,epochs:270,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:warmup_tail,optimizer:Adam,lr:0.0001,epochs:30,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:ssbroyden_tail,optimizer:SSBroyden,lr:1.0,epochs:470,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null}"
             "]"
         ),
     },
@@ -413,26 +464,6 @@ def _dataset_root_from_manifest(dataset_run_root: Path, *, dry_run: bool, model_
     if not dataset_root:
         raise RuntimeError(f"Dataset manifest does not contain a dataset root: {manifest_path}")
     return Path(str(dataset_root))
-
-
-def _adam_phase_override(*, epochs: int, lr: float, batch_size: int) -> str:
-    return (
-        "pinn.optimizer_phases=["
-        "{"
-        "name:adam,"
-        "optimizer:Adam,"
-        f"lr:{lr},"
-        f"epochs:{int(epochs)},"
-        f"batch_size:{int(batch_size)},"
-        "shuffle:true,"
-        "full_batch:false,"
-        "allow_sampling:true,"
-        "optimizer_kwargs:{},"
-        "line_search:null,"
-        "convergence:null"
-        "}"
-        "]"
-    )
 
 
 def _variant_overrides(
@@ -700,7 +731,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Raw Hydra override for pinn.optimizer_phases. "
-            "When omitted, the pipeline keeps its default single-Adam phase override."
+            "When omitted, the pipeline uses the selected profile's configured optimizer phases or the base PINN config."
         ),
     )
     parser.add_argument("--active-points", type=int, default=None, help="Target/final collocation budget.")
