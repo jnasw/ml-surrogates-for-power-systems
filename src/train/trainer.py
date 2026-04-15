@@ -343,8 +343,11 @@ def _active_collocation_weights_or_none(
     *,
     vrba_config: Any,
     x_col_weights: torch.Tensor | None,
+    weighting_enabled: bool | None = None,
 ) -> torch.Tensor | None:
-    if not bool(getattr(vrba_config, "adaptive_weighting", False)):
+    if weighting_enabled is False:
+        return None
+    if weighting_enabled is None and not bool(getattr(vrba_config, "adaptive_weighting", False)):
         return None
     if x_col_weights is None:
         raise ValueError(
@@ -1679,6 +1682,7 @@ def _train_multistage_pinn(
                         global_epoch=global_epoch,
                         phase_name=phase.name,
                         phase_allows_sampling=phase_allows_sampling,
+                        phase_is_full_batch=phase_full_batch,
                         phase_epoch=0,
                         refresh_event="phase_start",
                         model=ensemble,
@@ -1712,6 +1716,7 @@ def _train_multistage_pinn(
                         global_epoch=global_epoch + 1,
                         phase_name=phase.name,
                         phase_allows_sampling=phase_allows_sampling,
+                        phase_is_full_batch=phase_full_batch,
                         phase_epoch=epoch,
                         refresh_event=None,
                         model=ensemble,
@@ -1724,6 +1729,7 @@ def _train_multistage_pinn(
                 active_collocation_weights = _active_collocation_weights_or_none(
                     vrba_config=vrba_config,
                     x_col_weights=epoch_train_col_weights,
+                    weighting_enabled=bool(collocation_manager.state.metadata.get("residual_vrba_weighting_enabled", False)),
                 )
                 epoch_train_init_x = epoch_pool_batch.x_init
                 epoch_train_init_y = epoch_pool_batch.y_init
@@ -1971,15 +1977,16 @@ def _train_multistage_pinn(
                         )
             if _collocation_phase_boundary_enabled(config):
                 collocation_manager.handle_phase_boundary(
-                    context=CollocationStrategyContext(
-                        global_epoch=global_epoch,
-                        phase_name=phase.name,
-                        phase_allows_sampling=phase_allows_sampling,
-                        phase_epoch=phase.epochs,
-                        refresh_event="phase_end",
-                        model=ensemble,
-                        ode_model=ode_model,
-                        formulation=formulation,
+                context=CollocationStrategyContext(
+                    global_epoch=global_epoch,
+                    phase_name=phase.name,
+                    phase_allows_sampling=phase_allows_sampling,
+                    phase_is_full_batch=phase_full_batch,
+                    phase_epoch=phase.epochs,
+                    refresh_event="phase_end",
+                    model=ensemble,
+                    ode_model=ode_model,
+                    formulation=formulation,
                     )
                 )
             _cache_optimizer_state(
@@ -2152,6 +2159,7 @@ def train_pinn(
                     global_epoch=global_epoch,
                     phase_name=phase.name,
                     phase_allows_sampling=phase_allows_sampling,
+                    phase_is_full_batch=phase_full_batch,
                     phase_epoch=0,
                     refresh_event="phase_start",
                     model=model,
@@ -2182,6 +2190,7 @@ def train_pinn(
                     global_epoch=global_epoch + 1,
                     phase_name=phase.name,
                     phase_allows_sampling=phase_allows_sampling,
+                    phase_is_full_batch=phase_full_batch,
                     phase_epoch=epoch,
                     refresh_event=None,
                     model=model,
@@ -2194,6 +2203,7 @@ def train_pinn(
             active_collocation_weights = _active_collocation_weights_or_none(
                 vrba_config=vrba_config,
                 x_col_weights=epoch_train_col_weights,
+                weighting_enabled=bool(collocation_manager.state.metadata.get("residual_vrba_weighting_enabled", False)),
             )
             epoch_train_init_x = epoch_pool_batch.x_init
             epoch_train_init_y = epoch_pool_batch.y_init
@@ -2517,6 +2527,7 @@ def train_pinn(
                     global_epoch=global_epoch,
                     phase_name=phase.name,
                     phase_allows_sampling=phase_allows_sampling,
+                    phase_is_full_batch=phase_full_batch,
                     phase_epoch=phase.epochs,
                     refresh_event="phase_end",
                     model=model,

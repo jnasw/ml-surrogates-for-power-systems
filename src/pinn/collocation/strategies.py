@@ -24,6 +24,7 @@ class CollocationStrategyContext:
     global_epoch: int
     phase_name: str
     phase_allows_sampling: bool
+    phase_is_full_batch: bool
     model: nn.Module | None
     ode_model: Any | None
     formulation: str
@@ -229,17 +230,27 @@ class VariationalResidualAdaptiveSamplingStrategy(StaticCollocationStrategy):
         self._state.metadata["vrba_active_rows"] = int(active_points)
         self._state.metadata["vrba_potential"] = str(vrba_config.potential)
         self._state.metadata["vrba_update_count"] = 0
+        self._state.metadata["vrba_sampling_configured"] = bool(vrba_config.adaptive_sampling)
+        self._state.metadata["vrba_weighting_configured"] = bool(vrba_config.adaptive_weighting)
         self._state.metadata["vrba_sampling_enabled"] = bool(vrba_config.adaptive_sampling)
         self._state.metadata["vrba_weighting_enabled"] = bool(vrba_config.adaptive_weighting)
+        self._state.metadata["vrba_sampling_frozen"] = False
+        self._state.metadata["vrba_weighting_frozen"] = False
+        self._state.metadata["vrba_phase_is_full_batch"] = False
         self._active_lambda = self._lambda.index_select(0, self._active_indices)
+        self._effective_sampling_enabled = bool(vrba_config.adaptive_sampling)
+        self._effective_weighting_enabled = bool(vrba_config.adaptive_weighting)
 
     def current_weights(self) -> torch.Tensor | None:
-        if not bool(self._vrba_config.adaptive_weighting):
+        if not bool(self._effective_weighting_enabled):
             return None
         return self._active_lambda.to(device=self.current_points().device, dtype=self.current_points().dtype)
 
     def maybe_refresh(self, *, context: CollocationStrategyContext) -> None:
+        sampling_enabled, weighting_enabled = self._update_effective_mode_metadata(context=context)
         if not _should_refresh(config=self._config, context=context):
+            return
+        if not (sampling_enabled or weighting_enabled):
             return
         if context.model is None or context.ode_model is None:
             raise ValueError("vRBA sampling requires model and ode_model in the collocation strategy context.")
@@ -272,7 +283,7 @@ class VariationalResidualAdaptiveSamplingStrategy(StaticCollocationStrategy):
         self._lambda = gamma * self._lambda + eta_star * mixed_target
         normalized = _normalize_probabilities(self._lambda)
 
-        if bool(self._vrba_config.adaptive_sampling):
+        if sampling_enabled:
             rng = np.random.default_rng(self._seed + self._state.refresh_count + int(context.global_epoch))
             selected_ids = rng.choice(
                 pool_rows,
@@ -296,6 +307,27 @@ class VariationalResidualAdaptiveSamplingStrategy(StaticCollocationStrategy):
         self._state.metadata["vrba_gamma"] = float(gamma)
         self._state.metadata["vrba_eta_star"] = float(eta_star)
         self._state.metadata["vrba_update_count"] = int(self._state.refresh_count)
+
+    def _update_effective_mode_metadata(self, *, context: CollocationStrategyContext) -> tuple[bool, bool]:
+        phase_is_full_batch = bool(context.phase_is_full_batch)
+        sampling_frozen = bool(
+            phase_is_full_batch
+            and self._vrba_config.adaptive_sampling
+            and self._vrba_config.freeze_sampling_during_full_batch
+        )
+        weighting_frozen = bool(
+            phase_is_full_batch
+            and self._vrba_config.adaptive_weighting
+            and self._vrba_config.freeze_weighting_during_full_batch
+        )
+        self._effective_sampling_enabled = bool(self._vrba_config.adaptive_sampling and not sampling_frozen)
+        self._effective_weighting_enabled = bool(self._vrba_config.adaptive_weighting and not weighting_frozen)
+        self._state.metadata["vrba_sampling_enabled"] = bool(self._effective_sampling_enabled)
+        self._state.metadata["vrba_weighting_enabled"] = bool(self._effective_weighting_enabled)
+        self._state.metadata["vrba_sampling_frozen"] = bool(sampling_frozen)
+        self._state.metadata["vrba_weighting_frozen"] = bool(weighting_frozen)
+        self._state.metadata["vrba_phase_is_full_batch"] = bool(phase_is_full_batch)
+        return self._effective_sampling_enabled, self._effective_weighting_enabled
 
 
 class _AppendCollocationStrategy(StaticCollocationStrategy):
