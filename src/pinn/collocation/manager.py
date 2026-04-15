@@ -87,6 +87,10 @@ class MultiPoolCollocationManager:
         self._state.pools["residual"].points_x = residual_points
         return self._build_epoch_batch(epoch=context.global_epoch)
 
+    def handle_phase_boundary(self, *, context: CollocationStrategyContext) -> None:
+        residual_points = self._residual_strategy.prepare_epoch_points(context=context)
+        self._state.pools["residual"].points_x = residual_points
+
     def observe_epoch_losses(self, *, global_epoch: int, losses: PinnLossBreakdown | None) -> None:
         self._last_observed_epoch = int(global_epoch)
         if not self._enabled or losses is None:

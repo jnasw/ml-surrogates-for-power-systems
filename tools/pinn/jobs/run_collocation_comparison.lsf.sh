@@ -52,11 +52,15 @@ PINN_DTYPE="${PINN_DTYPE:-float64}"
 PINN_BATCH_SIZE="${PINN_BATCH_SIZE:-}"
 PINN_EPOCHS="${PINN_EPOCHS:-}"
 ADAM_LR="${ADAM_LR:-1e-3}"
+OPTIMIZER_PHASES_OVERRIDE="${OPTIMIZER_PHASES_OVERRIDE:-}"
 ACTIVE_POINTS="${ACTIVE_POINTS:-}"
 INITIAL_POINTS="${INITIAL_POINTS:-}"
 CANDIDATE_POINTS="${CANDIDATE_POINTS:-}"
 APPEND_POINTS="${APPEND_POINTS:-}"
 REFRESH_PERIOD_EPOCHS="${REFRESH_PERIOD_EPOCHS:-}"
+REFRESH_MODE="${REFRESH_MODE:-}"
+REFRESH_ON_PHASE_START="${REFRESH_ON_PHASE_START:-}"
+REFRESH_ON_PHASE_END="${REFRESH_ON_PHASE_END:-}"
 SAMPLER="${SAMPLER:-}"
 SCORE_NORM="${SCORE_NORM:-}"
 RAD_K="${RAD_K:-}"
@@ -134,6 +138,9 @@ fi
 if [[ -n "${PINN_EPOCHS}" ]]; then
   CMD+=(--epochs "${PINN_EPOCHS}")
 fi
+if [[ -n "${OPTIMIZER_PHASES_OVERRIDE}" ]]; then
+  CMD+=(--optimizer-phases-override "${OPTIMIZER_PHASES_OVERRIDE}")
+fi
 if [[ -n "${ACTIVE_POINTS}" ]]; then
   CMD+=(--active-points "${ACTIVE_POINTS}")
 fi
@@ -148,6 +155,15 @@ if [[ -n "${APPEND_POINTS}" ]]; then
 fi
 if [[ -n "${REFRESH_PERIOD_EPOCHS}" ]]; then
   CMD+=(--refresh-period-epochs "${REFRESH_PERIOD_EPOCHS}")
+fi
+if [[ -n "${REFRESH_MODE}" ]]; then
+  CMD+=(--refresh-mode "${REFRESH_MODE}")
+fi
+if [[ -n "${REFRESH_ON_PHASE_START}" ]]; then
+  CMD+=(--refresh-on-phase-start "${REFRESH_ON_PHASE_START}")
+fi
+if [[ -n "${REFRESH_ON_PHASE_END}" ]]; then
+  CMD+=(--refresh-on-phase-end "${REFRESH_ON_PHASE_END}")
 fi
 if [[ -n "${SAMPLER}" ]]; then
   CMD+=(--sampler "${SAMPLER}")

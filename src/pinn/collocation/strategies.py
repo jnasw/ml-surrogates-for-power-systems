@@ -26,6 +26,8 @@ class CollocationStrategyContext:
     model: nn.Module | None
     ode_model: Any | None
     formulation: str
+    phase_epoch: int | None = None
+    refresh_event: str | None = None
 
 
 class CollocationStrategy(ABC):
@@ -355,13 +357,45 @@ def _maybe_subsample_epoch_points(*, x_col: torch.Tensor, config: Any, phase_all
 
 
 def _should_refresh(*, config: Any, context: CollocationStrategyContext) -> bool:
-    if not context.phase_allows_sampling:
-        return False
-    period = int(_cfg_get_collocation(config=config, key="refresh_period_epochs", legacy_key="pinn.collocation.refresh_period_epochs", default=0))
-    if period <= 0:
-        return False
-    epoch = int(context.global_epoch)
-    return epoch > 1 and ((epoch - 1) % period == 0)
+    mode = str(
+        _cfg_get_collocation(
+            config=config,
+            key="refresh.mode",
+            legacy_key="pinn.collocation.refresh.mode",
+            default="epoch_periodic",
+        )
+    ).strip().lower()
+    if mode == "epoch_periodic":
+        if not context.phase_allows_sampling:
+            return False
+        period = int(
+            _cfg_get_collocation(
+                config=config,
+                key="refresh_period_epochs",
+                legacy_key="pinn.collocation.refresh_period_epochs",
+                default=0,
+            )
+        )
+        if period <= 0:
+            return False
+        epoch = int(context.global_epoch)
+        return epoch > 1 and ((epoch - 1) % period == 0)
+    if mode == "phase_boundary":
+        event = None if context.refresh_event in (None, "", "null") else str(context.refresh_event).strip().lower()
+        if event not in {"phase_start", "phase_end"}:
+            return False
+        phase_list_key = "refresh.on_phase_start" if event == "phase_start" else "refresh.on_phase_end"
+        phase_names = _cfg_get_collocation(
+            config=config,
+            key=phase_list_key,
+            legacy_key=f"pinn.collocation.{phase_list_key}",
+            default=[],
+        )
+        if phase_names in (None, "null"):
+            return False
+        normalized_names = {str(name).strip().lower() for name in phase_names}
+        return str(context.phase_name).strip().lower() in normalized_names
+    raise ValueError("pinn.collocation.refresh.mode must be one of: epoch_periodic, phase_boundary")
 
 
 def _rad_probabilities(*, scores: torch.Tensor, k: float, c: float) -> np.ndarray:

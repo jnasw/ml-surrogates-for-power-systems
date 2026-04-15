@@ -1105,6 +1105,14 @@ def _phase_supports_dynamic_weight_updates(phase: OptimizerPhase) -> bool:
     return str(phase.optimizer).strip().lower() == "adam"
 
 
+def _collocation_refresh_mode(config: Any) -> str:
+    return str(cfg_get(config, "pinn.collocation.refresh.mode", "epoch_periodic")).strip().lower()
+
+
+def _collocation_phase_boundary_enabled(config: Any) -> bool:
+    return _collocation_refresh_mode(config) == "phase_boundary"
+
+
 def _pinn_mode(config: Any) -> str:
     return str(cfg_get(config, "pinn.mode", "single_stage")).strip().lower()
 
@@ -1451,6 +1459,20 @@ def _train_multistage_pinn(
                     raise ValueError(f"Optimizer '{phase.optimizer}' does not support minibatch execution.")
                 phase_batch_size = phase.batch_size if phase.batch_size is not None else int(cfg_get(config, "pinn.default_batch_size", 1024))
 
+            if _collocation_phase_boundary_enabled(config):
+                collocation_manager.handle_phase_boundary(
+                    context=CollocationStrategyContext(
+                        global_epoch=global_epoch,
+                        phase_name=phase.name,
+                        phase_allows_sampling=phase_allows_sampling,
+                        phase_epoch=0,
+                        refresh_event="phase_start",
+                        model=ensemble,
+                        ode_model=ode_model,
+                        formulation=formulation,
+                    )
+                )
+
             for epoch in range(1, phase.epochs + 1):
                 stage_epoch_cursor += 1
                 epoch_started = time.perf_counter()
@@ -1476,6 +1498,8 @@ def _train_multistage_pinn(
                         global_epoch=global_epoch + 1,
                         phase_name=phase.name,
                         phase_allows_sampling=phase_allows_sampling,
+                        phase_epoch=epoch,
+                        refresh_event=None,
                         model=ensemble,
                         ode_model=ode_model,
                         formulation=formulation,
@@ -1696,7 +1720,6 @@ def _train_multistage_pinn(
                             ),
                             tag="last",
                         )
-
                 selection_metric = row.val_total_loss if row.val_total_loss is not None else row.train_total_loss
                 if best_metric is None or selection_metric < best_metric:
                     best_metric = selection_metric
@@ -1710,6 +1733,19 @@ def _train_multistage_pinn(
                             ),
                             tag="best",
                         )
+            if _collocation_phase_boundary_enabled(config):
+                collocation_manager.handle_phase_boundary(
+                    context=CollocationStrategyContext(
+                        global_epoch=global_epoch,
+                        phase_name=phase.name,
+                        phase_allows_sampling=phase_allows_sampling,
+                        phase_epoch=phase.epochs,
+                        refresh_event="phase_end",
+                        model=ensemble,
+                        ode_model=ode_model,
+                        formulation=formulation,
+                    )
+                )
 
         ensemble.eval()
 
@@ -1844,6 +1880,20 @@ def train_pinn(
             phase_batch_size = phase.batch_size if phase.batch_size is not None else int(cfg_get(config, "pinn.default_batch_size", 1024))
         phase_supports_dynamic_weight_updates = _phase_supports_dynamic_weight_updates(phase)
 
+        if _collocation_phase_boundary_enabled(config):
+            collocation_manager.handle_phase_boundary(
+                context=CollocationStrategyContext(
+                    global_epoch=global_epoch,
+                    phase_name=phase.name,
+                    phase_allows_sampling=phase_allows_sampling,
+                    phase_epoch=0,
+                    refresh_event="phase_start",
+                    model=model,
+                    ode_model=ode_model,
+                    formulation=formulation,
+                )
+            )
+
         for epoch in range(1, phase.epochs + 1):
             epoch_started = time.perf_counter()
             _reset_peak_memory_if_cuda(device, enabled=cost_tracking_enabled)
@@ -1866,6 +1916,8 @@ def train_pinn(
                     global_epoch=global_epoch + 1,
                     phase_name=phase.name,
                     phase_allows_sampling=phase_allows_sampling,
+                    phase_epoch=epoch,
+                    refresh_event=None,
                     model=model,
                     ode_model=ode_model,
                     formulation=formulation,
@@ -2156,7 +2208,6 @@ def train_pinn(
                         ),
                         tag="last",
                     )
-
             selection_metric = row.val_total_loss if row.val_total_loss is not None else row.train_total_loss
             if best_metric is None or selection_metric < best_metric:
                 best_metric = selection_metric
@@ -2170,6 +2221,19 @@ def train_pinn(
                         ),
                         tag="best",
                     )
+        if _collocation_phase_boundary_enabled(config):
+            collocation_manager.handle_phase_boundary(
+                context=CollocationStrategyContext(
+                    global_epoch=global_epoch,
+                    phase_name=phase.name,
+                    phase_allows_sampling=phase_allows_sampling,
+                    phase_epoch=phase.epochs,
+                    refresh_event="phase_end",
+                    model=model,
+                    ode_model=ode_model,
+                    formulation=formulation,
+                )
+            )
 
     model.eval()
     return pinn_model, rows

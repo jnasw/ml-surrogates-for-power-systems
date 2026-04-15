@@ -30,7 +30,7 @@ def build_collocation_manager(
     mode = str(cfg_get(config, "pinn.collocation.mode", "preprocessed")).strip().lower()
     strategy_name = str(cfg_get(config, "pinn.collocation.strategy", "static")).strip().lower()
     seed = int(cfg_get(config, "pinn.collocation.seed", cfg_get(config, "model.seed", 0)))
-    sampler = str(cfg_get(config, "pinn.collocation.sampler", "lhs"))
+    sampler = str(cfg_get(config, "pinn.collocation.sampler", "random"))
     domain = _build_collocation_domain(config=config, fallback_points=initial_points)
     active_points = _resolve_active_points(config=config, fallback_points=initial_points)
     initial_strategy_points = _resolve_initial_strategy_points(

@@ -38,9 +38,13 @@ pinn:
     initial_points: null
     candidate_points: 16384
     append_points: 64
-    sampler: lhs # random | lhs | sobol
+    sampler: random # random | lhs | sobol
     seed: ${model.seed}
     refresh_period_epochs: 10
+    refresh:
+      mode: epoch_periodic # epoch_periodic | phase_boundary
+      on_phase_start: []
+      on_phase_end: []
     score_norm: l2 # l1 | l2 | linf
     rad:
       k: 1.0

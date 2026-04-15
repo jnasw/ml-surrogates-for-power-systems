@@ -56,7 +56,10 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
             "initial_points": 256,
             "append_points": 16,
             "refresh_period_epochs": 5,
-            "sampler": "lhs",
+            "refresh_mode": "epoch_periodic",
+            "refresh_on_phase_start": [],
+            "refresh_on_phase_end": [],
+            "sampler": "random",
             "score_norm": "l2",
             "rad_k": 1.0,
             "rad_c": 1.0,
@@ -85,7 +88,10 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
             "initial_points": 2048,
             "append_points": 64,
             "refresh_period_epochs": 10,
-            "sampler": "lhs",
+            "refresh_mode": "epoch_periodic",
+            "refresh_on_phase_start": [],
+            "refresh_on_phase_end": [],
+            "sampler": "random",
             "score_norm": "l2",
             "rad_k": 1.0,
             "rad_c": 1.0,
@@ -114,7 +120,10 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
             "initial_points": 2048,
             "append_points": 64,
             "refresh_period_epochs": 10,
-            "sampler": "lhs",
+            "refresh_mode": "epoch_periodic",
+            "refresh_on_phase_start": [],
+            "refresh_on_phase_end": [],
+            "sampler": "random",
             "score_norm": "l2",
             "rad_k": 1.0,
             "rad_c": 1.0,
@@ -391,6 +400,9 @@ def _variant_overrides(
         f"pinn.collocation.candidate_points={int(collocation_cfg['candidate_points'])}",
         f"pinn.collocation.append_points={int(collocation_cfg['append_points'])}",
         f"pinn.collocation.refresh_period_epochs={int(collocation_cfg['refresh_period_epochs'])}",
+        f"pinn.collocation.refresh.mode={str(collocation_cfg.get('refresh_mode', 'epoch_periodic'))}",
+        f"pinn.collocation.refresh.on_phase_start={_format_hydra_list([str(x) for x in collocation_cfg.get('refresh_on_phase_start', [])])}",
+        f"pinn.collocation.refresh.on_phase_end={_format_hydra_list([str(x) for x in collocation_cfg.get('refresh_on_phase_end', [])])}",
         f"pinn.collocation.sampler={str(collocation_cfg['sampler'])}",
         f"pinn.collocation.score_norm={str(collocation_cfg['score_norm'])}",
     ]
@@ -477,6 +489,7 @@ def _build_pinn_command(
     epochs: int,
     batch_size: int,
     adam_lr: float,
+    optimizer_phases_override: str | None,
     log_every_epoch: int,
     gradient_telemetry: bool,
     variant: str,
@@ -488,6 +501,12 @@ def _build_pinn_command(
     wandb_entity: str | None,
     wandb_tags: list[str],
 ) -> list[str]:
+    optimizer_phase_override = (
+        str(optimizer_phases_override)
+        if optimizer_phases_override not in (None, "")
+        else _adam_phase_override(epochs=epochs, lr=adam_lr, batch_size=batch_size)
+    )
+
     command = [
         python_bin,
         "20_run_pinn.py",
@@ -506,7 +525,7 @@ def _build_pinn_command(
         f"pinn.gradient_telemetry.enabled={'true' if gradient_telemetry else 'false'}",
         f"logging.log_every_epoch={int(log_every_epoch)}",
         f"wandb.use={'true' if wandb_use else 'false'}",
-        _adam_phase_override(epochs=epochs, lr=adam_lr, batch_size=batch_size),
+        optimizer_phase_override,
         *_variant_overrides(variant=variant, collocation_cfg=collocation_cfg),
     ]
     if wandb_use:
@@ -635,11 +654,35 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epochs", type=int, default=None, help="Adam epochs. Defaults from --profile.")
     parser.add_argument("--batch-size", type=int, default=None, help="Adam batch size. Defaults from --profile.")
     parser.add_argument("--adam-lr", type=float, default=1e-3, help="Adam learning rate.")
+    parser.add_argument(
+        "--optimizer-phases-override",
+        default=None,
+        help=(
+            "Raw Hydra override for pinn.optimizer_phases. "
+            "When omitted, the pipeline keeps its default single-Adam phase override."
+        ),
+    )
     parser.add_argument("--active-points", type=int, default=None, help="Target/final collocation budget.")
     parser.add_argument("--initial-points", type=int, default=None, help="Initial collocation budget for append-based strategies.")
     parser.add_argument("--candidate-points", type=int, default=None, help="Candidate pool size for adaptive strategies.")
     parser.add_argument("--append-points", type=int, default=None, help="Points added at each append-based refresh.")
     parser.add_argument("--refresh-period-epochs", type=int, default=None, help="Refresh cadence for adaptive strategies.")
+    parser.add_argument(
+        "--refresh-mode",
+        default=None,
+        choices=["epoch_periodic", "phase_boundary"],
+        help="Collocation refresh policy.",
+    )
+    parser.add_argument(
+        "--refresh-on-phase-start",
+        default=None,
+        help="Comma-separated phase names that trigger a collocation refresh at phase start.",
+    )
+    parser.add_argument(
+        "--refresh-on-phase-end",
+        default=None,
+        help="Comma-separated phase names that trigger a collocation refresh at phase end.",
+    )
     parser.add_argument("--sampler", default=None, choices=["random", "lhs", "sobol"], help="Train-time collocation sampler.")
     parser.add_argument("--score-norm", default=None, choices=["l1", "l2", "linf"], help="Residual norm for adaptive scoring.")
     parser.add_argument("--rad-k", type=float, default=None, help="RAD exponent k.")
@@ -702,6 +745,12 @@ def main() -> None:
         base_collocation["append_points"] = int(args.append_points)
     if args.refresh_period_epochs is not None:
         base_collocation["refresh_period_epochs"] = int(args.refresh_period_epochs)
+    if args.refresh_mode is not None:
+        base_collocation["refresh_mode"] = str(args.refresh_mode)
+    if args.refresh_on_phase_start is not None:
+        base_collocation["refresh_on_phase_start"] = _parse_csv_list(args.refresh_on_phase_start)
+    if args.refresh_on_phase_end is not None:
+        base_collocation["refresh_on_phase_end"] = _parse_csv_list(args.refresh_on_phase_end)
     if args.sampler is not None:
         base_collocation["sampler"] = str(args.sampler)
     if args.score_norm is not None:
@@ -832,6 +881,7 @@ def main() -> None:
             epochs=resolved_epochs,
             batch_size=resolved_batch_size,
             adam_lr=args.adam_lr,
+            optimizer_phases_override=args.optimizer_phases_override,
             log_every_epoch=args.log_every_epoch,
             gradient_telemetry=resolved_gradient_telemetry,
             variant=variant,
