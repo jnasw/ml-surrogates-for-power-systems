@@ -1824,6 +1824,7 @@ def _train_multistage_pinn(
     train_started = time.perf_counter()
     ensemble: MultistagePinnEnsemble | None = None
     stage_start_diagnostics: StageDiagnostics | None = None
+    train_dt_weights = dataset.train_dt_weights
 
     for stage_idx in range(max_stages):
         if stage_idx == 0:
@@ -1883,7 +1884,7 @@ def _train_multistage_pinn(
                     vrba_config=vrba_config,
                     vrba_state=vrba_state,
                     collocation_manager=collocation_manager,
-                    train_dt_weights=dataset.train_dt_weights,
+                    train_dt_weights=train_dt_weights,
                 ),
                 tag="init",
             )
@@ -1913,7 +1914,7 @@ def _train_multistage_pinn(
                 weights=base_weights,
                 x_data=dataset.train_x,
                 y_data=dataset.train_y,
-                x_data_dt_weights=_active_dt_weights_or_none(vrba_config=vrba_config, x_data_dt_weights=dataset.train_dt_weights),
+                x_data_dt_weights=_active_dt_weights_or_none(vrba_config=vrba_config, x_data_dt_weights=train_dt_weights),
                 x_col=dataset.train_col_x,
                 x_col_weights=_active_collocation_weights_or_none(vrba_config=vrba_config, x_col_weights=dataset.train_col_weights),
                 x_init=dataset.train_init_x,
@@ -2012,8 +2013,8 @@ def _train_multistage_pinn(
                     x_col_weights=epoch_train_col_weights,
                     weighting_enabled=bool(collocation_manager.state.metadata.get("residual_vrba_weighting_enabled", False)),
                 )
-                dataset.train_dt_weights, dt_vrba_metadata = _update_dt_vrba_weights(
-                    weights=dataset.train_dt_weights,
+                train_dt_weights, dt_vrba_metadata = _update_dt_vrba_weights(
+                    weights=train_dt_weights,
                     metadata=dict(collocation_manager.state.metadata or {}),
                     model=ensemble,
                     x_data=epoch_train_x,
@@ -2036,7 +2037,7 @@ def _train_multistage_pinn(
                     config=config,
                 )
                 collocation_manager.state.metadata.update(dt_vrba_metadata)
-                epoch_train_dt_weights = None if dataset.train_dt_weights is None else _sample_rows_with_indices(dataset.train_dt_weights, epoch_train_data_idx)
+                epoch_train_dt_weights = None if train_dt_weights is None else _sample_rows_with_indices(train_dt_weights, epoch_train_data_idx)
                 active_dt_weights = _active_dt_weights_or_none(
                     vrba_config=vrba_config,
                     x_data_dt_weights=epoch_train_dt_weights,
@@ -2278,7 +2279,7 @@ def _train_multistage_pinn(
                                 vrba_config=vrba_config,
                                 vrba_state=vrba_state,
                                 collocation_manager=collocation_manager,
-                                train_dt_weights=dataset.train_dt_weights,
+                                train_dt_weights=train_dt_weights,
                             ),
                             tag=milestone_tag,
                         )
@@ -2292,7 +2293,7 @@ def _train_multistage_pinn(
                                 vrba_config=vrba_config,
                                 vrba_state=vrba_state,
                                 collocation_manager=collocation_manager,
-                                train_dt_weights=dataset.train_dt_weights,
+                                train_dt_weights=train_dt_weights,
                             ),
                             tag="last",
                         )
@@ -2309,7 +2310,7 @@ def _train_multistage_pinn(
                                 vrba_config=vrba_config,
                                 vrba_state=vrba_state,
                                 collocation_manager=collocation_manager,
-                                train_dt_weights=dataset.train_dt_weights,
+                                train_dt_weights=train_dt_weights,
                             ),
                             tag="best",
                         )
@@ -2447,6 +2448,7 @@ def train_pinn(
     train_started = time.perf_counter()
     total_epochs = int(sum(phase.epochs for phase in optimizer_phases))
     checkpoint_milestones = _resolve_checkpoint_milestones(config, total_epochs)
+    train_dt_weights = dataset.train_dt_weights
 
     if logger is not None and _checkpointing_enabled(config, "save_init", True):
         logger.save_checkpoint(
@@ -2458,7 +2460,7 @@ def train_pinn(
                 vrba_config=vrba_config,
                 vrba_state=vrba_state,
                 collocation_manager=collocation_manager,
-                train_dt_weights=dataset.train_dt_weights,
+                train_dt_weights=train_dt_weights,
             ),
             tag="init",
         )
@@ -2548,8 +2550,8 @@ def train_pinn(
                 x_col_weights=epoch_train_col_weights,
                 weighting_enabled=bool(collocation_manager.state.metadata.get("residual_vrba_weighting_enabled", False)),
             )
-            dataset.train_dt_weights, dt_vrba_metadata = _update_dt_vrba_weights(
-                weights=dataset.train_dt_weights,
+            train_dt_weights, dt_vrba_metadata = _update_dt_vrba_weights(
+                weights=train_dt_weights,
                 metadata=dict(collocation_manager.state.metadata or {}),
                 model=model,
                 x_data=epoch_train_x,
@@ -2572,7 +2574,7 @@ def train_pinn(
                 config=config,
             )
             collocation_manager.state.metadata.update(dt_vrba_metadata)
-            epoch_train_dt_weights = None if dataset.train_dt_weights is None else _sample_rows_with_indices(dataset.train_dt_weights, epoch_train_data_idx)
+            epoch_train_dt_weights = None if train_dt_weights is None else _sample_rows_with_indices(train_dt_weights, epoch_train_data_idx)
             active_dt_weights = _active_dt_weights_or_none(
                 vrba_config=vrba_config,
                 x_data_dt_weights=epoch_train_dt_weights,
@@ -2890,7 +2892,7 @@ def train_pinn(
                                 vrba_config=vrba_config,
                                 vrba_state=vrba_state,
                                 collocation_manager=collocation_manager,
-                                train_dt_weights=dataset.train_dt_weights,
+                                train_dt_weights=train_dt_weights,
                             ),
                         tag=milestone_tag,
                     )
@@ -2904,7 +2906,7 @@ def train_pinn(
                                 vrba_config=vrba_config,
                                 vrba_state=vrba_state,
                                 collocation_manager=collocation_manager,
-                                train_dt_weights=dataset.train_dt_weights,
+                                train_dt_weights=train_dt_weights,
                             ),
                         tag="last",
                     )
@@ -2921,7 +2923,7 @@ def train_pinn(
                                 vrba_config=vrba_config,
                                 vrba_state=vrba_state,
                                 collocation_manager=collocation_manager,
-                                train_dt_weights=dataset.train_dt_weights,
+                                train_dt_weights=train_dt_weights,
                             ),
                         tag="best",
                     )

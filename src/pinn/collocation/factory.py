@@ -125,7 +125,17 @@ def build_collocation_manager(
                 "pinn.collocation.strategy=vrba_sample requires at least one of "
                 "pinn.vrba.adaptive_sampling=true or pinn.vrba.adaptive_weighting=true."
             )
-        pool_points = int(cfg_get(config, "pinn.collocation.vrba.pool_points", cfg_get(config, "pinn.collocation.candidate_points", max(active_points * 4, active_points))))
+        raw_pool_points = cfg_get(config, "pinn.collocation.vrba.pool_points", None)
+        if raw_pool_points in (None, "null"):
+            pool_points = int(
+                cfg_get(
+                    config,
+                    "pinn.collocation.candidate_points",
+                    max(active_points * 4, active_points),
+                )
+            )
+        else:
+            pool_points = int(raw_pool_points)
         if pool_points < active_points:
             raise ValueError("pinn.collocation.vrba.pool_points must be >= pinn.collocation.active_points.")
         if mode == "generated":
