@@ -45,6 +45,10 @@ class CollocationStrategy(ABC):
     def current_points(self) -> torch.Tensor:
         return self._state.active_points
 
+    def current_weights(self) -> torch.Tensor | None:
+        """Optional local weights aligned with ``current_points``."""
+        return None
+
     def prepare_epoch_points(self, *, context: CollocationStrategyContext) -> torch.Tensor:
         self.maybe_refresh(context=context)
         return self._points_for_epoch(context=context)
@@ -209,6 +213,11 @@ class VariationalResidualAdaptiveSamplingStrategy(StaticCollocationStrategy):
         self._state.metadata["vrba_active_rows"] = int(active_points)
         self._state.metadata["vrba_potential"] = str(vrba_config.potential)
         self._state.metadata["vrba_update_count"] = 0
+        self._state.metadata["vrba_weighting_enabled"] = bool(vrba_config.adaptive_weighting)
+        self._active_lambda = self._lambda[: self._active_points].clone()
+
+    def current_weights(self) -> torch.Tensor | None:
+        return self._active_lambda.to(device=self.current_points().device, dtype=self.current_points().dtype)
 
     def maybe_refresh(self, *, context: CollocationStrategyContext) -> None:
         if not _should_refresh(config=self._config, context=context):
@@ -255,6 +264,7 @@ class VariationalResidualAdaptiveSamplingStrategy(StaticCollocationStrategy):
         )
         indices = torch.as_tensor(selected_ids, dtype=torch.long, device=self._pool_points.device)
         self._state.active_points = self._pool_points.index_select(0, indices)
+        self._active_lambda = self._lambda.index_select(0, indices)
         self._state.refresh_count += 1
         self._state.last_refresh_epoch = int(context.global_epoch)
         self._state.metadata["last_strategy"] = "vrba_sample"

@@ -332,11 +332,26 @@ def _collocation_vrba_summary(manager: Any) -> dict[str, Any]:
     return {
         "enabled": bool(enabled),
         "sampling_enabled": bool(enabled),
-        "weighting_enabled": False,
+        "weighting_enabled": bool(enabled and bool(metadata.get("residual_vrba_weighting_enabled", False))),
         "potential": None if not enabled else metadata.get("residual_vrba_potential"),
         "target_sets": None if not enabled else ("physics",),
         "update_count": None if not enabled else metadata.get("residual_vrba_update_count"),
     }
+
+
+def _active_collocation_weights_or_none(
+    *,
+    vrba_config: Any,
+    x_col_weights: torch.Tensor | None,
+) -> torch.Tensor | None:
+    if not bool(getattr(vrba_config, "adaptive_weighting", False)):
+        return None
+    if x_col_weights is None:
+        raise ValueError(
+            "pinn.vrba.adaptive_weighting=true requires a collocation strategy that supplies local weights. "
+            "Use pinn.collocation.strategy=vrba_sample with pinn.vrba.enabled=true."
+        )
+    return x_col_weights
 
 
 @dataclass(frozen=True)
@@ -344,6 +359,7 @@ class PinnBatch:
     x_data: torch.Tensor
     y_data: torch.Tensor
     x_col: torch.Tensor
+    x_col_weights: torch.Tensor | None
     x_init: torch.Tensor
     y_init: torch.Tensor
 
@@ -806,10 +822,12 @@ def _iter_minibatch_batches(
             x_data, y_data = _sample_rows_with_indices(dataset.train_x, data_idx, dataset.train_y)
             x_init, y_init = _sample_rows_with_indices(dataset.train_init_x, init_idx, dataset.train_init_y)
             x_col = _sample_rows_with_indices(dataset.train_col_x, col_idx)
+            x_col_weights = None if dataset.train_col_weights is None else _sample_rows_with_indices(dataset.train_col_weights, col_idx)
             yield PinnBatch(
                 x_data=x_data,
                 y_data=y_data,
                 x_col=x_col,
+                x_col_weights=x_col_weights,
                 x_init=x_init,
                 y_init=y_init,
             )
@@ -1049,6 +1067,7 @@ def _measure_pinn_state(
     x_data: torch.Tensor,
     y_data: torch.Tensor,
     x_col: torch.Tensor,
+    x_col_weights: torch.Tensor | None,
     x_init: torch.Tensor,
     y_init: torch.Tensor,
     capture_gradient_telemetry: bool = False,
@@ -1062,6 +1081,7 @@ def _measure_pinn_state(
         x_data=x_data,
         y_data=y_data,
         x_col=x_col,
+        x_col_weights=x_col_weights,
         x_init=x_init,
         y_init=y_init,
         create_graph=capture_gradient_telemetry,
@@ -1087,6 +1107,7 @@ def _train_pinn_step(
     x_data: torch.Tensor,
     y_data: torch.Tensor,
     x_col: torch.Tensor,
+    x_col_weights: torch.Tensor | None,
     x_init: torch.Tensor,
     y_init: torch.Tensor,
     capture_gradient_telemetry: bool = False,
@@ -1109,6 +1130,7 @@ def _train_pinn_step(
             x_data=x_data,
             y_data=y_data,
             x_col=x_col,
+            x_col_weights=x_col_weights,
             x_init=x_init,
             y_init=y_init,
             create_graph=True,
@@ -1130,6 +1152,7 @@ def _train_pinn_step(
             x_data=x_data,
             y_data=y_data,
             x_col=x_col,
+            x_col_weights=x_col_weights,
             x_init=x_init,
             y_init=y_init,
             capture_gradient_telemetry=capture_gradient_telemetry,
@@ -1487,6 +1510,7 @@ def _train_multistage_pinn(
         train_col_x=initial_pool_batch.x_col,
         train_init_x=initial_pool_batch.x_init,
         train_init_y=initial_pool_batch.y_init,
+        train_col_weights=initial_pool_batch.x_col_weights,
         val_x=dataset.val_x,
         val_y=dataset.val_y,
         val_col_x=dataset.val_col_x,
@@ -1609,6 +1633,7 @@ def _train_multistage_pinn(
                 x_data=dataset.train_x,
                 y_data=dataset.train_y,
                 x_col=dataset.train_col_x,
+                x_col_weights=_active_collocation_weights_or_none(vrba_config=vrba_config, x_col_weights=dataset.train_col_weights),
                 x_init=dataset.train_init_x,
                 y_init=dataset.train_init_y,
                 capture_gradient_telemetry=False,
@@ -1695,6 +1720,11 @@ def _train_multistage_pinn(
                     )
                 )
                 epoch_train_col_x = epoch_pool_batch.x_col
+                epoch_train_col_weights = epoch_pool_batch.x_col_weights
+                active_collocation_weights = _active_collocation_weights_or_none(
+                    vrba_config=vrba_config,
+                    x_col_weights=epoch_train_col_weights,
+                )
                 epoch_train_init_x = epoch_pool_batch.x_init
                 epoch_train_init_y = epoch_pool_batch.y_init
                 num_batches = 0
@@ -1714,6 +1744,7 @@ def _train_multistage_pinn(
                         x_data=epoch_train_x,
                         y_data=epoch_train_y,
                         x_col=epoch_train_col_x,
+                        x_col_weights=active_collocation_weights,
                         x_init=epoch_train_init_x,
                         y_init=epoch_train_init_y,
                         capture_gradient_telemetry=gradient_telemetry_enabled,
@@ -1733,6 +1764,7 @@ def _train_multistage_pinn(
                             train_x=epoch_train_x,
                             train_y=epoch_train_y,
                             train_col_x=epoch_train_col_x,
+                            train_col_weights=active_collocation_weights,
                             train_init_x=epoch_train_init_x,
                             train_init_y=epoch_train_init_y,
                         ),
@@ -1756,6 +1788,7 @@ def _train_multistage_pinn(
                             x_data=batch.x_data,
                             y_data=batch.y_data,
                             x_col=batch.x_col,
+                            x_col_weights=batch.x_col_weights,
                             x_init=batch.x_init,
                             y_init=batch.y_init,
                             capture_gradient_telemetry=gradient_telemetry_enabled,
@@ -2029,6 +2062,7 @@ def train_pinn(
         train_col_x=initial_pool_batch.x_col,
         train_init_x=initial_pool_batch.x_init,
         train_init_y=initial_pool_batch.y_init,
+        train_col_weights=initial_pool_batch.x_col_weights,
         val_x=dataset.val_x,
         val_y=dataset.val_y,
         val_col_x=dataset.val_col_x,
@@ -2156,6 +2190,11 @@ def train_pinn(
                 )
             )
             epoch_train_col_x = epoch_pool_batch.x_col
+            epoch_train_col_weights = epoch_pool_batch.x_col_weights
+            active_collocation_weights = _active_collocation_weights_or_none(
+                vrba_config=vrba_config,
+                x_col_weights=epoch_train_col_weights,
+            )
             epoch_train_init_x = epoch_pool_batch.x_init
             epoch_train_init_y = epoch_pool_batch.y_init
             num_batches = 0
@@ -2175,6 +2214,7 @@ def train_pinn(
                     x_data=epoch_train_x,
                     y_data=epoch_train_y,
                     x_col=epoch_train_col_x,
+                    x_col_weights=active_collocation_weights,
                     x_init=epoch_train_init_x,
                     y_init=epoch_train_init_y,
                     capture_gradient_telemetry=capture_gradient_telemetry,
@@ -2193,6 +2233,7 @@ def train_pinn(
                         train_x=epoch_train_x,
                         train_y=epoch_train_y,
                         train_col_x=epoch_train_col_x,
+                        train_col_weights=active_collocation_weights,
                         train_init_x=epoch_train_init_x,
                         train_init_y=epoch_train_init_y,
                     ),
@@ -2216,6 +2257,7 @@ def train_pinn(
                         x_data=batch.x_data,
                         y_data=batch.y_data,
                         x_col=batch.x_col,
+                        x_col_weights=batch.x_col_weights,
                         x_init=batch.x_init,
                         y_init=batch.y_init,
                         capture_gradient_telemetry=capture_gradient_telemetry,
@@ -2284,6 +2326,7 @@ def train_pinn(
                         x_data=probe_batch.x_data,
                         y_data=probe_batch.y_data,
                         x_col=probe_batch.x_col,
+                        x_col_weights=None,
                         x_init=probe_batch.x_init,
                         y_init=probe_batch.y_init,
                         create_graph=True,
@@ -2317,6 +2360,7 @@ def train_pinn(
                         x_data=weight_probe_batch.x_data,
                         y_data=weight_probe_batch.y_data,
                         x_col=weight_probe_batch.x_col,
+                        x_col_weights=None,
                         x_init=weight_probe_batch.x_init,
                         y_init=weight_probe_batch.y_init,
                         create_graph=True,

@@ -17,6 +17,7 @@ from src.pinn.losses import PinnLossBreakdown
 @dataclass(frozen=True)
 class EpochPoolBatch:
     x_col: torch.Tensor
+    x_col_weights: torch.Tensor | None
     x_init: torch.Tensor
     y_init: torch.Tensor
 
@@ -55,6 +56,7 @@ class MultiPoolCollocationManager:
                     name="residual",
                     role="residual",
                     points_x=residual_strategy.current_points(),
+                    points_weight=residual_strategy.current_weights(),
                     target_rows=int(budgets["residual"]),
                 ),
                 "ic_constraint": CollocationPoolState(
@@ -85,12 +87,14 @@ class MultiPoolCollocationManager:
     def prepare_epoch_batch(self, *, context: CollocationStrategyContext) -> EpochPoolBatch:
         residual_points = self._residual_strategy.prepare_epoch_points(context=context)
         self._state.pools["residual"].points_x = residual_points
+        self._state.pools["residual"].points_weight = self._residual_strategy.current_weights()
         self._sync_residual_metadata()
         return self._build_epoch_batch(epoch=context.global_epoch)
 
     def handle_phase_boundary(self, *, context: CollocationStrategyContext) -> None:
         residual_points = self._residual_strategy.prepare_epoch_points(context=context)
         self._state.pools["residual"].points_x = residual_points
+        self._state.pools["residual"].points_weight = self._residual_strategy.current_weights()
         self._sync_residual_metadata()
 
     def observe_epoch_losses(self, *, global_epoch: int, losses: PinnLossBreakdown | None) -> None:
@@ -117,6 +121,12 @@ class MultiPoolCollocationManager:
             target_rows=residual_pool.target_rows,
             seed=self._seed + int(epoch) * 17 + 1,
         )
+        x_col_weights = _sample_optional_tensor_rows(
+            x=residual_pool.points_weight,
+            reference_rows=residual_pool.points_x,
+            target_rows=residual_pool.target_rows,
+            seed=self._seed + int(epoch) * 17 + 1,
+        )
         x_init, y_init = _sample_xy_rows(
             x=ic_pool.points_x,
             y=ic_pool.points_y,
@@ -125,7 +135,7 @@ class MultiPoolCollocationManager:
         )
         residual_pool.metadata["epoch_rows"] = int(x_col.shape[0])
         ic_pool.metadata["epoch_rows"] = int(x_init.shape[0])
-        return EpochPoolBatch(x_col=x_col, x_init=x_init, y_init=y_init)
+        return EpochPoolBatch(x_col=x_col, x_col_weights=x_col_weights, x_init=x_init, y_init=y_init)
 
     def _sync_residual_metadata(self) -> None:
         residual_state = getattr(self._residual_strategy, "state", None)
@@ -140,6 +150,26 @@ class MultiPoolCollocationManager:
 
 def _sample_tensor_rows(*, x: torch.Tensor, target_rows: int, seed: int) -> torch.Tensor:
     total_rows = int(x.shape[0])
+    if target_rows >= total_rows:
+        return x
+    rng = np.random.default_rng(int(seed))
+    indices = rng.choice(total_rows, size=int(target_rows), replace=False)
+    idx = torch.as_tensor(indices, dtype=torch.long, device=x.device)
+    return x.index_select(0, idx)
+
+
+def _sample_optional_tensor_rows(
+    *,
+    x: torch.Tensor | None,
+    reference_rows: torch.Tensor,
+    target_rows: int,
+    seed: int,
+) -> torch.Tensor | None:
+    if x is None:
+        return None
+    total_rows = int(reference_rows.shape[0])
+    if int(x.shape[0]) != total_rows:
+        raise ValueError("Optional sampled tensor must align with reference_rows on axis 0.")
     if target_rows >= total_rows:
         return x
     rng = np.random.default_rng(int(seed))

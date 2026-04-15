@@ -26,6 +26,7 @@ class CollocationPoolState:
     role: str
     points_x: torch.Tensor
     points_y: torch.Tensor | None = None
+    points_weight: torch.Tensor | None = None
     target_rows: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
