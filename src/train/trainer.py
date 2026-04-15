@@ -342,6 +342,11 @@ def _collocation_vrba_summary(manager: Any) -> dict[str, Any]:
         or bool(metadata.get("ic_constraint_vrba_weighting_configured", False))
     ):
         target_sets.append("ic")
+    if enabled and (
+        bool(metadata.get("dt_vrba_weighting_enabled", False))
+        or bool(metadata.get("dt_vrba_weighting_configured", False))
+    ):
+        target_sets.append("dt")
     return {
         "enabled": bool(enabled),
         "sampling_enabled": bool(enabled and bool(metadata.get("residual_vrba_sampling_enabled", False))),
@@ -350,12 +355,132 @@ def _collocation_vrba_summary(manager: Any) -> dict[str, Any]:
             and (
                 bool(metadata.get("residual_vrba_weighting_enabled", False))
                 or bool(metadata.get("ic_constraint_vrba_weighting_enabled", False))
+                or bool(metadata.get("dt_vrba_weighting_enabled", False))
             )
         ),
         "potential": None if not enabled else metadata.get("residual_vrba_potential"),
         "target_sets": None if not target_sets else tuple(target_sets),
         "update_count": None if not enabled else metadata.get("residual_vrba_update_count"),
     }
+
+
+def _dt_vrba_configured(vrba_config: Any) -> bool:
+    target_sets = set(tuple(getattr(vrba_config, "target_sets", ()) or ()))
+    return bool(
+        getattr(vrba_config, "enabled", False)
+        and getattr(vrba_config, "adaptive_weighting", False)
+        and "dt" in target_sets
+    )
+
+
+def _initialize_dt_vrba_weights(*, vrba_config: Any, train_x: torch.Tensor) -> torch.Tensor | None:
+    if not _dt_vrba_configured(vrba_config):
+        return None
+    lambda_init = 0.1 * float(getattr(vrba_config, "lambda_max0", 1.0))
+    return torch.full(
+        (int(train_x.shape[0]),),
+        fill_value=lambda_init,
+        dtype=torch.float64,
+        device=train_x.device,
+    )
+
+
+def _dt_vrba_weighting_enabled_for_phase(*, vrba_config: Any, phase_is_full_batch: bool) -> bool:
+    if not _dt_vrba_configured(vrba_config):
+        return False
+    if bool(phase_is_full_batch) and bool(getattr(vrba_config, "freeze_weighting_during_full_batch", False)):
+        return False
+    return True
+
+
+def _should_update_local_vrba_weights(*, config: Any, context: CollocationStrategyContext) -> bool:
+    from src.pinn.collocation.strategies import _should_refresh
+
+    return _should_refresh(config=config, context=context)
+
+
+def _update_dt_vrba_weights(
+    *,
+    weights: torch.Tensor | None,
+    metadata: dict[str, Any],
+    model: nn.Module,
+    x_data: torch.Tensor,
+    y_data: torch.Tensor,
+    row_indices: torch.Tensor,
+    ode_model: Any,
+    formulation: str,
+    vrba_config: Any,
+    context: CollocationStrategyContext,
+    config: Any,
+) -> tuple[torch.Tensor | None, dict[str, Any]]:
+    configured = _dt_vrba_configured(vrba_config)
+    weighting_enabled = _dt_vrba_weighting_enabled_for_phase(
+        vrba_config=vrba_config,
+        phase_is_full_batch=context.phase_is_full_batch,
+    )
+    updated_metadata = dict(metadata or {})
+    updated_metadata["dt_vrba_weighting_configured"] = bool(configured)
+    updated_metadata["dt_vrba_weighting_enabled"] = bool(weighting_enabled)
+    updated_metadata["dt_vrba_weighting_frozen"] = bool(configured and not weighting_enabled)
+    updated_metadata["dt_vrba_phase_is_full_batch"] = bool(context.phase_is_full_batch)
+    if not configured:
+        return None, updated_metadata
+    if weights is None:
+        weights = _initialize_dt_vrba_weights(vrba_config=vrba_config, train_x=x_data)
+    if not weighting_enabled:
+        return weights, updated_metadata
+    if not _should_update_local_vrba_weights(config=config, context=context):
+        if weights is not None:
+            updated_metadata["dt_vrba_lambda_mean"] = float(weights.mean().item())
+            updated_metadata["dt_vrba_lambda_max"] = float(weights.max().item())
+            updated_metadata["dt_vrba_lambda_min"] = float(weights.min().item())
+        return weights, updated_metadata
+    x_req = x_data.detach().clone().requires_grad_(True)
+    pred = model(x_req)
+    dt_terms = compute_supervised_dt_terms(
+        model=model,
+        x=x_req,
+        y_true=y_data,
+        ode_model=ode_model,
+        formulation=formulation,
+        create_graph=False,
+        prediction=pred,
+    )
+    scores = dt_terms.residual.detach().to(dtype=torch.float64).pow(2).sum(dim=1).sqrt()
+    safe_scores = scores.abs()
+    if str(getattr(vrba_config, "potential", "quadratic")).strip().lower() == "quadratic":
+        target = safe_scores
+        if float(target.sum().item()) <= 0.0:
+            target = torch.ones_like(target)
+        target = target / target.sum()
+    else:
+        score_scale = float(safe_scores.mean().item())
+        step = int(updated_metadata.get("dt_vrba_update_count", 0)) + 1
+        epsilon = max(
+            float(getattr(vrba_config, "temperature_floor", 1.0e-12)),
+            float(getattr(vrba_config, "temperature_scale", 1.0)) * score_scale / max(step, 1),
+        )
+        shifted = safe_scores - safe_scores.max()
+        exp_target = torch.exp(shifted / max(epsilon, 1.0e-12))
+        target = exp_target / exp_target.sum()
+    lambda_max = min(
+        float(getattr(vrba_config, "lambda_cap", getattr(vrba_config, "lambda_max0", 1.0))),
+        float(getattr(vrba_config, "lambda_max0", 1.0))
+        + float(int(updated_metadata.get("dt_vrba_update_count", 0)) + 1) / float(getattr(vrba_config, "update_interval_epochs", 1)),
+    )
+    gamma = max(0.0, min(1.0 - (float(getattr(vrba_config, "eta", 0.1)) / max(lambda_max, 1.0e-12)), 0.999999))
+    uniform = torch.full_like(target, fill_value=1.0 / float(target.shape[0]))
+    mixed_target = float(getattr(vrba_config, "phi", 1.0)) * target + (1.0 - float(getattr(vrba_config, "phi", 1.0))) * uniform
+    eta_star = float(getattr(vrba_config, "eta", 0.1)) / max(float(target.max().item()), 1.0e-12)
+    next_weights = weights.clone()
+    next_weights.index_copy_(0, row_indices, gamma * weights.index_select(0, row_indices) + eta_star * mixed_target)
+    updated_metadata["dt_vrba_update_count"] = int(updated_metadata.get("dt_vrba_update_count", 0)) + 1
+    updated_metadata["dt_vrba_lambda_mean"] = float(next_weights.mean().item())
+    updated_metadata["dt_vrba_lambda_max"] = float(next_weights.max().item())
+    updated_metadata["dt_vrba_lambda_min"] = float(next_weights.min().item())
+    updated_metadata["dt_vrba_gamma"] = float(gamma)
+    updated_metadata["dt_vrba_eta_star"] = float(eta_star)
+    return next_weights, updated_metadata
 
 
 def _active_collocation_weights_or_none(
@@ -393,14 +518,36 @@ def _active_init_weights_or_none(
         raise ValueError(
             "IC vRBA weighting requires a collocation manager that supplies local init weights. "
             "Use pinn.collocation.strategy=vrba_sample with pinn.vrba.enabled=true and include ic in pinn.vrba.target_sets."
-        )
+    )
     return x_init_weights
+
+
+def _active_dt_weights_or_none(
+    *,
+    vrba_config: Any,
+    x_data_dt_weights: torch.Tensor | None,
+    weighting_enabled: bool | None = None,
+) -> torch.Tensor | None:
+    if weighting_enabled is False:
+        return None
+    target_sets = tuple(getattr(vrba_config, "target_sets", ()) or ())
+    if weighting_enabled is None and not (
+        bool(getattr(vrba_config, "adaptive_weighting", False)) and "dt" in set(target_sets)
+    ):
+        return None
+    if x_data_dt_weights is None:
+        raise ValueError(
+            "DT vRBA weighting requires local supervised-row weights. "
+            "Enable pinn.vrba.enabled=true, pinn.vrba.adaptive_weighting=true, and include dt in pinn.vrba.target_sets."
+        )
+    return x_data_dt_weights
 
 
 @dataclass(frozen=True)
 class PinnBatch:
     x_data: torch.Tensor
     y_data: torch.Tensor
+    x_data_dt_weights: torch.Tensor | None
     x_col: torch.Tensor
     x_col_weights: torch.Tensor | None
     x_init: torch.Tensor
@@ -599,9 +746,14 @@ def _sample_tensor_rows(
     return x.index_select(0, indices)
 
 
-def _sample_supervised_rows(x: torch.Tensor, y: torch.Tensor, config: Any) -> tuple[torch.Tensor, torch.Tensor]:
+def _sample_supervised_rows_with_indices(
+    x: torch.Tensor,
+    y: torch.Tensor,
+    config: Any,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if not bool(cfg_get(config, "pinn.supervised_sampling.enabled", False)):
-        return x, y
+        indices = torch.arange(int(x.shape[0]), device=x.device, dtype=torch.long)
+        return x, y, indices
     total_rows = int(x.shape[0])
     rows_per_epoch_cfg = cfg_get(config, "pinn.supervised_sampling.rows_per_epoch", None)
     fraction_per_epoch_cfg = cfg_get(config, "pinn.supervised_sampling.fraction_per_epoch", None)
@@ -616,13 +768,19 @@ def _sample_supervised_rows(x: torch.Tensor, y: torch.Tensor, config: Any) -> tu
         target_rows = max(1, int(round(total_rows * fraction)))
 
     if target_rows is None or target_rows >= total_rows:
-        return x, y
+        indices = torch.arange(total_rows, device=x.device, dtype=torch.long)
+        return x, y, indices
     if target_rows <= 0:
         raise ValueError("pinn.supervised_sampling.rows_per_epoch must be > 0.")
 
     indices_np = np.random.choice(total_rows, size=target_rows, replace=False)
     indices = torch.as_tensor(indices_np, device=x.device, dtype=torch.long)
-    return x.index_select(0, indices), y.index_select(0, indices)
+    return x.index_select(0, indices), y.index_select(0, indices), indices
+
+
+def _sample_supervised_rows(x: torch.Tensor, y: torch.Tensor, config: Any) -> tuple[torch.Tensor, torch.Tensor]:
+    x_rows, y_rows, _ = _sample_supervised_rows_with_indices(x, y, config)
+    return x_rows, y_rows
 
 
 def _take_fixed_tensor_rows(
@@ -649,12 +807,17 @@ def _build_weight_update_probe_batch(
     weighting_config: WeightingConfig,
     seed_offset: int = 0,
 ) -> PinnBatch:
-    x_data, y_data = _take_fixed_tensor_rows(
-        dataset.train_x,
-        target_rows=weighting_config.probe.data_rows,
-        seed=weighting_config.probe.seed + seed_offset,
-        y=dataset.train_y,
-    )
+    data_total_rows = int(dataset.train_x.shape[0])
+    data_target_rows = int(weighting_config.probe.data_rows)
+    if data_target_rows >= data_total_rows:
+        data_indices = torch.arange(data_total_rows, device=dataset.train_x.device, dtype=torch.long)
+    else:
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(int(weighting_config.probe.seed) + int(seed_offset))
+        indices_cpu = torch.randperm(data_total_rows, generator=generator, device="cpu")[:data_target_rows]
+        data_indices = indices_cpu.to(device=dataset.train_x.device)
+    x_data, y_data = _sample_rows_with_indices(dataset.train_x, data_indices, dataset.train_y)
+    x_data_dt_weights = None if dataset.train_dt_weights is None else _sample_rows_with_indices(dataset.train_dt_weights, data_indices)
     x_col = _take_fixed_tensor_rows(
         dataset.train_col_x,
         target_rows=weighting_config.probe.physics_rows,
@@ -669,6 +832,7 @@ def _build_weight_update_probe_batch(
     return PinnBatch(
         x_data=x_data,
         y_data=y_data,
+        x_data_dt_weights=x_data_dt_weights,
         x_col=x_col,
         x_col_weights=None,
         x_init=x_init,
@@ -866,6 +1030,7 @@ def _iter_minibatch_batches(
             col_idx = col_sampler.next_indices(target_device=dataset.train_col_x.device)
             init_idx = init_sampler.next_indices(target_device=dataset.train_init_x.device)
             x_data, y_data = _sample_rows_with_indices(dataset.train_x, data_idx, dataset.train_y)
+            x_data_dt_weights = None if dataset.train_dt_weights is None else _sample_rows_with_indices(dataset.train_dt_weights, data_idx)
             x_init, y_init = _sample_rows_with_indices(dataset.train_init_x, init_idx, dataset.train_init_y)
             x_col = _sample_rows_with_indices(dataset.train_col_x, col_idx)
             x_col_weights = None if dataset.train_col_weights is None else _sample_rows_with_indices(dataset.train_col_weights, col_idx)
@@ -873,6 +1038,7 @@ def _iter_minibatch_batches(
             yield PinnBatch(
                 x_data=x_data,
                 y_data=y_data,
+                x_data_dt_weights=x_data_dt_weights,
                 x_col=x_col,
                 x_col_weights=x_col_weights,
                 x_init=x_init,
@@ -1114,6 +1280,7 @@ def _measure_pinn_state(
     weights: LossWeights,
     x_data: torch.Tensor,
     y_data: torch.Tensor,
+    x_data_dt_weights: torch.Tensor | None,
     x_col: torch.Tensor,
     x_col_weights: torch.Tensor | None,
     x_init: torch.Tensor,
@@ -1129,6 +1296,7 @@ def _measure_pinn_state(
         weights=weights,
         x_data=x_data,
         y_data=y_data,
+        x_data_dt_weights=x_data_dt_weights,
         x_col=x_col,
         x_col_weights=x_col_weights,
         x_init=x_init,
@@ -1156,6 +1324,7 @@ def _train_pinn_step(
     weights: LossWeights,
     x_data: torch.Tensor,
     y_data: torch.Tensor,
+    x_data_dt_weights: torch.Tensor | None,
     x_col: torch.Tensor,
     x_col_weights: torch.Tensor | None,
     x_init: torch.Tensor,
@@ -1180,6 +1349,7 @@ def _train_pinn_step(
             weights=weights,
             x_data=x_data,
             y_data=y_data,
+            x_data_dt_weights=x_data_dt_weights,
             x_col=x_col,
             x_col_weights=x_col_weights,
             x_init=x_init,
@@ -1203,6 +1373,7 @@ def _train_pinn_step(
             weights=weights,
             x_data=x_data,
             y_data=y_data,
+            x_data_dt_weights=x_data_dt_weights,
             x_col=x_col,
             x_col_weights=x_col_weights,
             x_init=x_init,
@@ -1563,6 +1734,7 @@ def _train_multistage_pinn(
         train_col_x=initial_pool_batch.x_col,
         train_init_x=initial_pool_batch.x_init,
         train_init_y=initial_pool_batch.y_init,
+        train_dt_weights=_initialize_dt_vrba_weights(vrba_config=vrba_config, train_x=dataset.train_x),
         train_col_weights=initial_pool_batch.x_col_weights,
         train_init_weights=initial_pool_batch.x_init_weights,
         val_x=dataset.val_x,
@@ -1686,6 +1858,7 @@ def _train_multistage_pinn(
                 weights=base_weights,
                 x_data=dataset.train_x,
                 y_data=dataset.train_y,
+                x_data_dt_weights=_active_dt_weights_or_none(vrba_config=vrba_config, x_data_dt_weights=dataset.train_dt_weights),
                 x_col=dataset.train_col_x,
                 x_col_weights=_active_collocation_weights_or_none(vrba_config=vrba_config, x_col_weights=dataset.train_col_weights),
                 x_init=dataset.train_init_x,
@@ -1760,9 +1933,10 @@ def _train_multistage_pinn(
                 epoch_gradients: list[GradientTelemetry] = []
                 active_weights = base_weights
                 if phase_allows_sampling:
-                    epoch_train_x, epoch_train_y = _sample_supervised_rows(dataset.train_x, dataset.train_y, config)
+                    epoch_train_x, epoch_train_y, epoch_train_data_idx = _sample_supervised_rows_with_indices(dataset.train_x, dataset.train_y, config)
                 else:
                     epoch_train_x, epoch_train_y = dataset.train_x, dataset.train_y
+                    epoch_train_data_idx = torch.arange(int(dataset.train_x.shape[0]), device=dataset.train_x.device, dtype=torch.long)
                 epoch_pool_batch = collocation_manager.prepare_epoch_batch(
                     context=CollocationStrategyContext(
                         global_epoch=global_epoch + 1,
@@ -1782,6 +1956,36 @@ def _train_multistage_pinn(
                     vrba_config=vrba_config,
                     x_col_weights=epoch_train_col_weights,
                     weighting_enabled=bool(collocation_manager.state.metadata.get("residual_vrba_weighting_enabled", False)),
+                )
+                dataset.train_dt_weights, dt_vrba_metadata = _update_dt_vrba_weights(
+                    weights=dataset.train_dt_weights,
+                    metadata=dict(collocation_manager.state.metadata or {}),
+                    model=ensemble,
+                    x_data=epoch_train_x,
+                    y_data=epoch_train_y,
+                    row_indices=epoch_train_data_idx,
+                    ode_model=ode_model,
+                    formulation=formulation,
+                    vrba_config=vrba_config,
+                    context=CollocationStrategyContext(
+                        global_epoch=global_epoch + 1,
+                        phase_name=phase.name,
+                        phase_allows_sampling=phase_allows_sampling,
+                        phase_is_full_batch=phase_full_batch,
+                        phase_epoch=epoch,
+                        refresh_event=None,
+                        model=ensemble,
+                        ode_model=ode_model,
+                        formulation=formulation,
+                    ),
+                    config=config,
+                )
+                collocation_manager.state.metadata.update(dt_vrba_metadata)
+                epoch_train_dt_weights = None if dataset.train_dt_weights is None else _sample_rows_with_indices(dataset.train_dt_weights, epoch_train_data_idx)
+                active_dt_weights = _active_dt_weights_or_none(
+                    vrba_config=vrba_config,
+                    x_data_dt_weights=epoch_train_dt_weights,
+                    weighting_enabled=bool(collocation_manager.state.metadata.get("dt_vrba_weighting_enabled", False)),
                 )
                 epoch_train_init_x = epoch_pool_batch.x_init
                 epoch_train_init_y = epoch_pool_batch.y_init
@@ -1807,6 +2011,7 @@ def _train_multistage_pinn(
                         weights=active_weights,
                         x_data=epoch_train_x,
                         y_data=epoch_train_y,
+                        x_data_dt_weights=active_dt_weights,
                         x_col=epoch_train_col_x,
                         x_col_weights=active_collocation_weights,
                         x_init=epoch_train_init_x,
@@ -1828,6 +2033,7 @@ def _train_multistage_pinn(
                         dataset=PinnDatasetBundle(
                             train_x=epoch_train_x,
                             train_y=epoch_train_y,
+                            train_dt_weights=active_dt_weights,
                             train_col_x=epoch_train_col_x,
                             train_col_weights=active_collocation_weights,
                             train_init_x=epoch_train_init_x,
@@ -1853,6 +2059,7 @@ def _train_multistage_pinn(
                             weights=active_weights,
                             x_data=batch.x_data,
                             y_data=batch.y_data,
+                            x_data_dt_weights=batch.x_data_dt_weights,
                             x_col=batch.x_col,
                             x_col_weights=batch.x_col_weights,
                             x_init=batch.x_init,
@@ -2130,6 +2337,7 @@ def train_pinn(
         train_col_x=initial_pool_batch.x_col,
         train_init_x=initial_pool_batch.x_init,
         train_init_y=initial_pool_batch.y_init,
+        train_dt_weights=_initialize_dt_vrba_weights(vrba_config=vrba_config, train_x=dataset.train_x),
         train_col_weights=initial_pool_batch.x_col_weights,
         train_init_weights=initial_pool_batch.x_init_weights,
         val_x=dataset.val_x,
@@ -2244,9 +2452,10 @@ def train_pinn(
             )
             active_weights = scheduled_base_weights if weighting_config.scheme == "static" else weighting_policy.current_weights(weighting_state)
             if phase_allows_sampling:
-                epoch_train_x, epoch_train_y = _sample_supervised_rows(dataset.train_x, dataset.train_y, config)
+                epoch_train_x, epoch_train_y, epoch_train_data_idx = _sample_supervised_rows_with_indices(dataset.train_x, dataset.train_y, config)
             else:
                 epoch_train_x, epoch_train_y = dataset.train_x, dataset.train_y
+                epoch_train_data_idx = torch.arange(int(dataset.train_x.shape[0]), device=dataset.train_x.device, dtype=torch.long)
             epoch_pool_batch = collocation_manager.prepare_epoch_batch(
                 context=CollocationStrategyContext(
                     global_epoch=global_epoch + 1,
@@ -2266,6 +2475,36 @@ def train_pinn(
                 vrba_config=vrba_config,
                 x_col_weights=epoch_train_col_weights,
                 weighting_enabled=bool(collocation_manager.state.metadata.get("residual_vrba_weighting_enabled", False)),
+            )
+            dataset.train_dt_weights, dt_vrba_metadata = _update_dt_vrba_weights(
+                weights=dataset.train_dt_weights,
+                metadata=dict(collocation_manager.state.metadata or {}),
+                model=model,
+                x_data=epoch_train_x,
+                y_data=epoch_train_y,
+                row_indices=epoch_train_data_idx,
+                ode_model=ode_model,
+                formulation=formulation,
+                vrba_config=vrba_config,
+                context=CollocationStrategyContext(
+                    global_epoch=global_epoch + 1,
+                    phase_name=phase.name,
+                    phase_allows_sampling=phase_allows_sampling,
+                    phase_is_full_batch=phase_full_batch,
+                    phase_epoch=epoch,
+                    refresh_event=None,
+                    model=model,
+                    ode_model=ode_model,
+                    formulation=formulation,
+                ),
+                config=config,
+            )
+            collocation_manager.state.metadata.update(dt_vrba_metadata)
+            epoch_train_dt_weights = None if dataset.train_dt_weights is None else _sample_rows_with_indices(dataset.train_dt_weights, epoch_train_data_idx)
+            active_dt_weights = _active_dt_weights_or_none(
+                vrba_config=vrba_config,
+                x_data_dt_weights=epoch_train_dt_weights,
+                weighting_enabled=bool(collocation_manager.state.metadata.get("dt_vrba_weighting_enabled", False)),
             )
             epoch_train_init_x = epoch_pool_batch.x_init
             epoch_train_init_y = epoch_pool_batch.y_init
@@ -2291,6 +2530,7 @@ def train_pinn(
                     weights=active_weights,
                     x_data=epoch_train_x,
                     y_data=epoch_train_y,
+                    x_data_dt_weights=active_dt_weights,
                     x_col=epoch_train_col_x,
                     x_col_weights=active_collocation_weights,
                     x_init=epoch_train_init_x,
@@ -2311,6 +2551,7 @@ def train_pinn(
                     dataset=PinnDatasetBundle(
                         train_x=epoch_train_x,
                         train_y=epoch_train_y,
+                        train_dt_weights=active_dt_weights,
                         train_col_x=epoch_train_col_x,
                         train_col_weights=active_collocation_weights,
                         train_init_x=epoch_train_init_x,
@@ -2336,6 +2577,7 @@ def train_pinn(
                         weights=active_weights,
                         x_data=batch.x_data,
                         y_data=batch.y_data,
+                        x_data_dt_weights=batch.x_data_dt_weights,
                         x_col=batch.x_col,
                         x_col_weights=batch.x_col_weights,
                         x_init=batch.x_init,
@@ -2406,6 +2648,7 @@ def train_pinn(
                         weights=active_weights,
                         x_data=probe_batch.x_data,
                         y_data=probe_batch.y_data,
+                        x_data_dt_weights=probe_batch.x_data_dt_weights,
                         x_col=probe_batch.x_col,
                         x_col_weights=None,
                         x_init=probe_batch.x_init,
@@ -2441,6 +2684,7 @@ def train_pinn(
                         weights=active_weights,
                         x_data=weight_probe_batch.x_data,
                         y_data=weight_probe_batch.y_data,
+                        x_data_dt_weights=weight_probe_batch.x_data_dt_weights,
                         x_col=weight_probe_batch.x_col,
                         x_col_weights=None,
                         x_init=weight_probe_batch.x_init,

@@ -66,6 +66,7 @@ def compute_pinn_losses(
     supervised_prediction: torch.Tensor,
     supervised_target: torch.Tensor,
     supervised_dt_terms: ResidualTerms,
+    supervised_dt_weights: torch.Tensor | None,
     collocation_terms: ResidualTerms,
     collocation_weights: torch.Tensor | None,
     init_prediction: torch.Tensor,
@@ -73,6 +74,12 @@ def compute_pinn_losses(
     init_weights: torch.Tensor | None,
     weights: LossWeights,
 ) -> PinnLossBreakdown:
+    dt_residual = supervised_dt_terms.residual
+    if supervised_dt_weights is not None:
+        dt_weights = supervised_dt_weights
+        if dt_weights.ndim == 1:
+            dt_weights = dt_weights.unsqueeze(1)
+        dt_residual = dt_weights * dt_residual
     physics_residual = collocation_terms.residual
     if collocation_weights is not None:
         physics_weights = collocation_weights
@@ -87,7 +94,7 @@ def compute_pinn_losses(
         init_residual = ic_weights * init_residual
     components = {
         "data": criterion(supervised_prediction, supervised_target),
-        "dt": criterion(supervised_dt_terms.residual, torch.zeros_like(supervised_dt_terms.residual)),
+        "dt": criterion(dt_residual, torch.zeros_like(dt_residual)),
         "physics": criterion(physics_residual, torch.zeros_like(physics_residual)),
         "ic": criterion(init_residual, torch.zeros_like(init_residual)),
     }

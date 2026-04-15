@@ -86,6 +86,7 @@ class PinnDatasetBundle:
     train_col_x: torch.Tensor
     train_init_x: torch.Tensor
     train_init_y: torch.Tensor
+    train_dt_weights: torch.Tensor | None = None
     train_col_weights: torch.Tensor | None = None
     train_init_weights: torch.Tensor | None = None
     val_x: torch.Tensor | None = None
