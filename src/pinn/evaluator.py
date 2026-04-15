@@ -62,6 +62,7 @@ def move_pinn_dataset_to_device(
         train_init_x=dataset.train_init_x.to(device=device, dtype=dtype),
         train_init_y=dataset.train_init_y.to(device=device, dtype=dtype),
         train_col_weights=None if dataset.train_col_weights is None else dataset.train_col_weights.to(device=device, dtype=dtype),
+        train_init_weights=None if dataset.train_init_weights is None else dataset.train_init_weights.to(device=device, dtype=dtype),
         val_x=None if dataset.val_x is None else dataset.val_x.to(device=device, dtype=dtype),
         val_y=None if dataset.val_y is None else dataset.val_y.to(device=device, dtype=dtype),
         val_col_x=None if dataset.val_col_x is None else dataset.val_col_x.to(device=device, dtype=dtype),
@@ -84,6 +85,7 @@ def move_pinn_training_data_to_device(
         train_init_x=dataset.train_init_x.to(device=device, dtype=dtype),
         train_init_y=dataset.train_init_y.to(device=device, dtype=dtype),
         train_col_weights=None if dataset.train_col_weights is None else dataset.train_col_weights.to(device=device, dtype=dtype),
+        train_init_weights=None if dataset.train_init_weights is None else dataset.train_init_weights.to(device=device, dtype=dtype),
         val_x=None if dataset.val_x is None else dataset.val_x.to(dtype=dtype),
         val_y=None if dataset.val_y is None else dataset.val_y.to(dtype=dtype),
         val_col_x=None if dataset.val_col_x is None else dataset.val_col_x.to(dtype=dtype),
@@ -105,6 +107,7 @@ def evaluate_pinn_loss_breakdown(
     x_col_weights: torch.Tensor | None,
     x_init: torch.Tensor,
     y_init: torch.Tensor,
+    x_init_weights: torch.Tensor | None,
     create_graph: bool = True,
 ) -> PinnLossBreakdown:
     """Evaluate the supervised, dt, physics, IC, and total PINN losses."""
@@ -136,6 +139,7 @@ def evaluate_pinn_loss_breakdown(
         collocation_weights=x_col_weights,
         init_prediction=init_pred,
         init_target=y_init,
+        init_weights=x_init_weights,
         weights=weights,
     )
 

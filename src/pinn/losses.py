@@ -70,6 +70,7 @@ def compute_pinn_losses(
     collocation_weights: torch.Tensor | None,
     init_prediction: torch.Tensor,
     init_target: torch.Tensor,
+    init_weights: torch.Tensor | None,
     weights: LossWeights,
 ) -> PinnLossBreakdown:
     physics_residual = collocation_terms.residual
@@ -78,11 +79,17 @@ def compute_pinn_losses(
         if physics_weights.ndim == 1:
             physics_weights = physics_weights.unsqueeze(1)
         physics_residual = physics_weights * physics_residual
+    init_residual = init_prediction - init_target
+    if init_weights is not None:
+        ic_weights = init_weights
+        if ic_weights.ndim == 1:
+            ic_weights = ic_weights.unsqueeze(1)
+        init_residual = ic_weights * init_residual
     components = {
         "data": criterion(supervised_prediction, supervised_target),
         "dt": criterion(supervised_dt_terms.residual, torch.zeros_like(supervised_dt_terms.residual)),
         "physics": criterion(physics_residual, torch.zeros_like(physics_residual)),
-        "ic": criterion(init_prediction, init_target),
+        "ic": criterion(init_residual, torch.zeros_like(init_residual)),
     }
     total = sum(float(weight) * components[name] for name, weight in weights.items())
     return PinnLossBreakdown(total=total, components=components)
