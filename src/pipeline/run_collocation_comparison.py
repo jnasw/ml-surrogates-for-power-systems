@@ -136,6 +136,44 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
             "]"
         ),
     },
+    "adam_periodic_ssbroyden_benchmark": {
+        "budget": "b256",
+        "preset": "default",
+        "epochs": 3000,
+        "batch_size": 1024,
+        "device": "cuda",
+        "gradient_telemetry": False,
+        "variants": ["static_generated", "random_r", "rad", "rar_d", "rar_g"],
+        "stage1_overrides": [],
+        "stage2_overrides": [
+            "time=0.05",
+            "num_of_points=80",
+            "model.ic_generation_method=joint_lhs",
+            "model.ic_num_samples=64",
+        ],
+        "collocation": {
+            "active_points": 4096,
+            "candidate_points": 16384,
+            "initial_points": 2048,
+            "append_points": 64,
+            "refresh_period_epochs": 500,
+            "refresh_mode": "epoch_periodic",
+            "refresh_on_phase_start": [],
+            "refresh_on_phase_end": [],
+            "sampler": "random",
+            "score_norm": "l2",
+            "rad_k": 1.0,
+            "rad_c": 1.0,
+            "rar_d_k": 2.0,
+            "rar_d_c": 0.0,
+        },
+        "optimizer_phases_override": (
+            "pinn.optimizer_phases=["
+            "{name:adam_periodic,optimizer:Adam,lr:0.001,epochs:3000,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},line_search:null,convergence:null},"
+            "{name:ssbroyden_tail,optimizer:SSBroyden,lr:1.0,epochs:2000,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null}"
+            "]"
+        ),
+    },
     "multipool_benchmark": {
         "budget": "b256",
         "preset": "default",
