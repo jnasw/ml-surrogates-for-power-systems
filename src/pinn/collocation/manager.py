@@ -85,11 +85,13 @@ class MultiPoolCollocationManager:
     def prepare_epoch_batch(self, *, context: CollocationStrategyContext) -> EpochPoolBatch:
         residual_points = self._residual_strategy.prepare_epoch_points(context=context)
         self._state.pools["residual"].points_x = residual_points
+        self._sync_residual_metadata()
         return self._build_epoch_batch(epoch=context.global_epoch)
 
     def handle_phase_boundary(self, *, context: CollocationStrategyContext) -> None:
         residual_points = self._residual_strategy.prepare_epoch_points(context=context)
         self._state.pools["residual"].points_x = residual_points
+        self._sync_residual_metadata()
 
     def observe_epoch_losses(self, *, global_epoch: int, losses: PinnLossBreakdown | None) -> None:
         self._last_observed_epoch = int(global_epoch)
@@ -124,6 +126,16 @@ class MultiPoolCollocationManager:
         residual_pool.metadata["epoch_rows"] = int(x_col.shape[0])
         ic_pool.metadata["epoch_rows"] = int(x_init.shape[0])
         return EpochPoolBatch(x_col=x_col, x_init=x_init, y_init=y_init)
+
+    def _sync_residual_metadata(self) -> None:
+        residual_state = getattr(self._residual_strategy, "state", None)
+        if residual_state is None:
+            return
+        residual_pool = self._state.pools["residual"]
+        residual_pool.metadata.update(dict(residual_state.metadata or {}))
+        for key, value in (residual_state.metadata or {}).items():
+            if isinstance(value, (bool, int, float, str)) or value is None:
+                self._state.metadata[f"residual_{key}"] = value
 
 
 def _sample_tensor_rows(*, x: torch.Tensor, target_rows: int, seed: int) -> torch.Tensor:

@@ -16,7 +16,9 @@ from src.pinn.collocation.strategies import (
     ResidualAdaptiveDistributionStrategy,
     StaticCollocationStrategy,
     UniformResampleCollocationStrategy,
+    VariationalResidualAdaptiveSamplingStrategy,
 )
+from src.pinn.vrba import vrba_config_from_config
 from src.train.runtime import cfg_get
 
 
@@ -113,6 +115,52 @@ def build_collocation_manager(
             seed=seed,
             total_rows=active_points,
         )
+    if strategy_name == "vrba_sample":
+        vrba_config = vrba_config_from_config(config)
+        if not vrba_config.enabled:
+            raise ValueError("pinn.collocation.strategy=vrba_sample requires pinn.vrba.enabled=true.")
+        if not vrba_config.adaptive_sampling:
+            raise ValueError("pinn.collocation.strategy=vrba_sample requires pinn.vrba.adaptive_sampling=true.")
+        pool_points = int(cfg_get(config, "pinn.collocation.vrba.pool_points", cfg_get(config, "pinn.collocation.candidate_points", max(active_points * 4, active_points))))
+        if pool_points < active_points:
+            raise ValueError("pinn.collocation.vrba.pool_points must be >= pinn.collocation.active_points.")
+        if mode == "generated":
+            persistent_pool = sample_collocation_points(
+                domain=domain,
+                n=pool_points,
+                method=sampler,
+                seed=seed,
+                dtype=initial_points.dtype,
+                device=initial_points.device,
+            )
+        else:
+            persistent_pool = _normalize_initial_points(
+                initial_points=initial_points,
+                active_points=min(pool_points, int(initial_points.shape[0])),
+                seed=seed,
+            )
+        initial_active = _normalize_initial_points(
+            initial_points=persistent_pool,
+            active_points=active_points,
+            seed=seed + 1,
+        )
+        residual_strategy = VariationalResidualAdaptiveSamplingStrategy(
+            initial_points=initial_active,
+            config=config,
+            pool_points=persistent_pool,
+            seed=seed,
+            active_points=active_points,
+            score_norm=str(cfg_get(config, "pinn.collocation.score_norm", "l2")),
+            vrba_config=vrba_config,
+        )
+        return _build_manager(
+            residual_strategy=residual_strategy,
+            init_x=init_x,
+            init_y=init_y,
+            config=config,
+            seed=seed,
+            total_rows=active_points,
+        )
     if strategy_name == "rar_d":
         candidate_points = int(
             cfg_get(config, "pinn.collocation.candidate_points", max(active_points * 4, active_points))
@@ -162,7 +210,7 @@ def build_collocation_manager(
             total_rows=active_points,
         )
     raise NotImplementedError(
-        "Supported pinn.collocation.strategy values are: static, random_r, rad, rar_d, rar_g."
+        "Supported pinn.collocation.strategy values are: static, random_r, rad, vrba_sample, rar_d, rar_g."
     )
 
 

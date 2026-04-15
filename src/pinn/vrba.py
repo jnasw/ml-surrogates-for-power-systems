@@ -33,6 +33,8 @@ class VrbAConfig:
     lambda_max0: float
     lambda_cap: float
     phi: float
+    temperature_scale: float
+    temperature_floor: float
     update_interval_epochs: int
     freeze_sampling_during_full_batch: bool
     freeze_weighting_during_full_batch: bool
@@ -88,6 +90,12 @@ def vrba_config_from_config(config: Any) -> VrbAConfig:
     phi = float(cfg_get(config, "pinn.vrba.phi", 1.0))
     if not (0.0 <= phi <= 1.0):
         raise ValueError("pinn.vrba.phi must be in [0, 1].")
+    temperature_scale = float(cfg_get(config, "pinn.vrba.temperature_scale", 1.0))
+    if temperature_scale <= 0.0:
+        raise ValueError("pinn.vrba.temperature_scale must be > 0.")
+    temperature_floor = float(cfg_get(config, "pinn.vrba.temperature_floor", 1.0e-12))
+    if temperature_floor <= 0.0:
+        raise ValueError("pinn.vrba.temperature_floor must be > 0.")
     update_interval_epochs = int(cfg_get(config, "pinn.vrba.update_interval_epochs", 1))
     if update_interval_epochs <= 0:
         raise ValueError("pinn.vrba.update_interval_epochs must be > 0.")
@@ -102,6 +110,8 @@ def vrba_config_from_config(config: Any) -> VrbAConfig:
         lambda_max0=lambda_max0,
         lambda_cap=lambda_cap,
         phi=phi,
+        temperature_scale=temperature_scale,
+        temperature_floor=temperature_floor,
         update_interval_epochs=update_interval_epochs,
         freeze_sampling_during_full_batch=bool(cfg_get(config, "pinn.vrba.freeze_sampling_during_full_batch", True)),
         freeze_weighting_during_full_batch=bool(cfg_get(config, "pinn.vrba.freeze_weighting_during_full_batch", True)),

@@ -13,6 +13,7 @@ from torch import nn
 from src.pinn.collocation.domain import CollocationDomain, sample_collocation_points
 from src.pinn.collocation.scoring import score_collocation_points
 from src.pinn.collocation.state import CollocationState
+from src.pinn.vrba import VrbAConfig
 from src.train.runtime import cfg_get
 
 
@@ -174,6 +175,98 @@ class ResidualAdaptiveDistributionStrategy(StaticCollocationStrategy):
         self._state.metadata["last_strategy"] = "rad"
         self._state.metadata["last_score_mean"] = float(scores.mean().item())
         self._state.metadata["last_score_max"] = float(scores.max().item())
+
+
+class VariationalResidualAdaptiveSamplingStrategy(StaticCollocationStrategy):
+    """vRBA-inspired adaptive collocation sampling with persistent point weights."""
+
+    def __init__(
+        self,
+        *,
+        initial_points: torch.Tensor,
+        config: Any,
+        pool_points: torch.Tensor,
+        seed: int,
+        active_points: int,
+        score_norm: str,
+        vrba_config: VrbAConfig,
+    ) -> None:
+        super().__init__(initial_points=initial_points, config=config)
+        self._pool_points = pool_points
+        self._seed = int(seed)
+        self._active_points = int(active_points)
+        self._score_norm = str(score_norm)
+        self._vrba_config = vrba_config
+        lambda_init = 0.1 * float(vrba_config.lambda_max0)
+        self._lambda = torch.full(
+            (int(pool_points.shape[0]),),
+            fill_value=lambda_init,
+            dtype=torch.float64,
+            device=pool_points.device,
+        )
+        self._state.metadata["last_strategy"] = "vrba_sample"
+        self._state.metadata["vrba_pool_rows"] = int(pool_points.shape[0])
+        self._state.metadata["vrba_active_rows"] = int(active_points)
+        self._state.metadata["vrba_potential"] = str(vrba_config.potential)
+        self._state.metadata["vrba_update_count"] = 0
+
+    def maybe_refresh(self, *, context: CollocationStrategyContext) -> None:
+        if not _should_refresh(config=self._config, context=context):
+            return
+        if context.model is None or context.ode_model is None:
+            raise ValueError("vRBA sampling requires model and ode_model in the collocation strategy context.")
+        pool_rows = int(self._pool_points.shape[0])
+        if pool_rows < self._active_points:
+            raise ValueError("vRBA sampling requires pool_points >= active_points.")
+
+        scores = score_collocation_points(
+            model=context.model,
+            x=self._pool_points,
+            ode_model=context.ode_model,
+            formulation=context.formulation,
+            norm=self._score_norm,
+        ).detach()
+
+        target = _vrba_target_distribution(
+            scores=scores,
+            potential=self._vrba_config.potential,
+            temperature_scale=self._vrba_config.temperature_scale,
+            temperature_floor=self._vrba_config.temperature_floor,
+            step=self._state.refresh_count + 1,
+        )
+        lambda_max = min(
+            float(self._vrba_config.lambda_cap),
+            float(self._vrba_config.lambda_max0)
+            + float(self._state.refresh_count + 1) / float(self._vrba_config.update_interval_epochs),
+        )
+        gamma = max(0.0, min(1.0 - (float(self._vrba_config.eta) / max(lambda_max, 1.0e-12)), 0.999999))
+        uniform = torch.full_like(target, fill_value=1.0 / float(pool_rows))
+        mixed_target = float(self._vrba_config.phi) * target + (1.0 - float(self._vrba_config.phi)) * uniform
+        eta_star = float(self._vrba_config.eta) / max(float(target.max().item()), 1.0e-12)
+        self._lambda = gamma * self._lambda + eta_star * mixed_target
+        normalized = _normalize_probabilities(self._lambda)
+
+        rng = np.random.default_rng(self._seed + self._state.refresh_count + int(context.global_epoch))
+        selected_ids = rng.choice(
+            pool_rows,
+            size=self._active_points,
+            replace=False,
+            p=normalized,
+        )
+        indices = torch.as_tensor(selected_ids, dtype=torch.long, device=self._pool_points.device)
+        self._state.active_points = self._pool_points.index_select(0, indices)
+        self._state.refresh_count += 1
+        self._state.last_refresh_epoch = int(context.global_epoch)
+        self._state.metadata["last_strategy"] = "vrba_sample"
+        self._state.metadata["last_score_mean"] = float(scores.mean().item())
+        self._state.metadata["last_score_max"] = float(scores.max().item())
+        self._state.metadata["vrba_lambda_mean"] = float(self._lambda.mean().item())
+        self._state.metadata["vrba_lambda_max"] = float(self._lambda.max().item())
+        self._state.metadata["vrba_lambda_min"] = float(self._lambda.min().item())
+        self._state.metadata["vrba_lambda_sum"] = float(self._lambda.sum().item())
+        self._state.metadata["vrba_gamma"] = float(gamma)
+        self._state.metadata["vrba_eta_star"] = float(eta_star)
+        self._state.metadata["vrba_update_count"] = int(self._state.refresh_count)
 
 
 class _AppendCollocationStrategy(StaticCollocationStrategy):
@@ -415,6 +508,44 @@ def _rad_probabilities(*, scores: torch.Tensor, k: float, c: float) -> np.ndarra
         total = weighted.sum()
     probabilities = (weighted / total).cpu().numpy()
     return probabilities
+
+
+def _normalize_probabilities(values: torch.Tensor) -> np.ndarray:
+    weighted = values.to(dtype=torch.float64).clamp_min(0.0)
+    total = weighted.sum()
+    if float(total.item()) <= 0.0:
+        weighted = torch.ones_like(weighted)
+        total = weighted.sum()
+    return (weighted / total).cpu().numpy()
+
+
+def _vrba_target_distribution(
+    *,
+    scores: torch.Tensor,
+    potential: str,
+    temperature_scale: float,
+    temperature_floor: float,
+    step: int,
+) -> torch.Tensor:
+    safe_scores = scores.to(dtype=torch.float64).clamp_min(0.0)
+    potential_name = str(potential).strip().lower()
+    if potential_name == "quadratic":
+        weighted = safe_scores
+    elif potential_name == "exponential":
+        max_score = float(safe_scores.max().item())
+        if max_score <= 0.0:
+            weighted = torch.ones_like(safe_scores)
+        else:
+            log_term = np.log(float(step) + 2.0)
+            epsilon = max(float(temperature_floor), float(temperature_scale) * max_score / max(log_term, 1.0))
+            weighted = torch.exp((safe_scores / epsilon).clamp(max=80.0))
+    else:
+        raise ValueError("vRBA potential must be one of: quadratic, exponential")
+    total = weighted.sum()
+    if float(total.item()) <= 0.0:
+        weighted = torch.ones_like(weighted)
+        total = weighted.sum()
+    return weighted / total
 
 
 def _cfg_get_collocation(*, config: Any, key: str, legacy_key: str, default: Any) -> Any:

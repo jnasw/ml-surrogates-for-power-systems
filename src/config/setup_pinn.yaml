@@ -33,7 +33,7 @@ pinn:
     enabled: true
   collocation:
     mode: preprocessed # preprocessed | generated
-    strategy: static # static | random_r | rad | rar_d | rar_g
+    strategy: static # static | random_r | rad | vrba_sample | rar_d | rar_g
     active_points: 4096
     initial_points: null
     candidate_points: 16384
@@ -49,6 +49,8 @@ pinn:
     rad:
       k: 1.0
       c: 1.0
+    vrba:
+      pool_points: null
     sampling:
       enabled: false
       rows_per_epoch: null
@@ -168,6 +170,8 @@ pinn:
     lambda_max0: 15.0
     lambda_cap: 25.0
     phi: 1.0
+    temperature_scale: 1.0
+    temperature_floor: 1.0e-12
     update_interval_epochs: 1
     freeze_sampling_during_full_batch: true
     freeze_weighting_during_full_batch: true

@@ -300,6 +300,11 @@ def _collocation_pool_diagnostics(manager: Any) -> dict[str, float | int | str |
         diagnostics["multipool_residual_target_rows"] = int(residual_pool.target_rows)
         diagnostics["multipool_residual_epoch_rows"] = int(residual_pool.metadata.get("epoch_rows", residual_pool.points_x.shape[0]))
         diagnostics["multipool_residual_pool_rows"] = int(residual_pool.points_x.shape[0])
+        for key, value in (residual_pool.metadata or {}).items():
+            if key == "epoch_rows":
+                continue
+            if isinstance(value, (bool, int, float, str)) or value is None:
+                diagnostics[f"multipool_residual_{key}"] = value
     if ic_pool is not None:
         diagnostics["multipool_ic_target_rows"] = int(ic_pool.target_rows)
         diagnostics["multipool_ic_epoch_rows"] = int(ic_pool.metadata.get("epoch_rows", ic_pool.points_x.shape[0]))
@@ -308,6 +313,30 @@ def _collocation_pool_diagnostics(manager: Any) -> dict[str, float | int | str |
         if isinstance(value, (bool, int, float, str)) or value is None:
             diagnostics[f"multipool_{key}"] = value
     return diagnostics
+
+
+def _collocation_vrba_summary(manager: Any) -> dict[str, Any]:
+    state = getattr(manager, "state", None)
+    if state is None:
+        return {
+            "enabled": False,
+            "sampling_enabled": False,
+            "weighting_enabled": False,
+            "potential": None,
+            "target_sets": None,
+            "update_count": None,
+        }
+    metadata = dict(getattr(state, "metadata", {}) or {})
+    strategy_name = metadata.get("residual_last_strategy")
+    enabled = str(strategy_name).strip().lower() == "vrba_sample"
+    return {
+        "enabled": bool(enabled),
+        "sampling_enabled": bool(enabled),
+        "weighting_enabled": False,
+        "potential": None if not enabled else metadata.get("residual_vrba_potential"),
+        "target_sets": None if not enabled else ("physics",),
+        "update_count": None if not enabled else metadata.get("residual_vrba_update_count"),
+    }
 
 
 @dataclass(frozen=True)
@@ -1810,6 +1839,7 @@ def _train_multistage_pinn(
                 if hasattr(optimizer_spec.optimizer, "get_last_diagnostics"):
                     optimizer_diagnostics.update(optimizer_spec.optimizer.get_last_diagnostics())
 
+                vrba_summary = _collocation_vrba_summary(collocation_manager)
                 row = EpochMetrics(
                     epoch=epoch,
                     global_epoch=global_epoch,
@@ -1832,12 +1862,12 @@ def _train_multistage_pinn(
                     weighting_probe_grad_max_abs=None,
                     weighting_probe_grad_std=None,
                     weighting_anchor="physics",
-                    vrba_enabled=bool(vrba_config.enabled),
-                    vrba_sampling_enabled=bool(vrba_config.adaptive_sampling),
-                    vrba_weighting_enabled=bool(vrba_config.adaptive_weighting),
-                    vrba_potential=None if not vrba_config.enabled else str(vrba_config.potential),
-                    vrba_target_sets=None if not vrba_config.enabled else tuple(vrba_config.target_sets),
-                    vrba_update_count=None if not vrba_config.enabled else int(vrba_state.global_update_count),
+                    vrba_enabled=bool(vrba_summary["enabled"]),
+                    vrba_sampling_enabled=bool(vrba_summary["sampling_enabled"]),
+                    vrba_weighting_enabled=bool(vrba_summary["weighting_enabled"]),
+                    vrba_potential=vrba_summary["potential"],
+                    vrba_target_sets=vrba_summary["target_sets"],
+                    vrba_update_count=None if vrba_summary["update_count"] is None else int(vrba_summary["update_count"]),
                     epoch_wall_seconds=epoch_wall_seconds,
                     cumulative_wall_seconds=cumulative_wall_seconds,
                     num_batches=num_batches if cost_tracking_enabled else None,
@@ -2325,6 +2355,7 @@ def train_pinn(
                 test_metrics = {
                     "data_loss": _evaluate_data_loss(model=model, x=dataset.test_x, y=dataset.test_y, criterion=criterion)
                 }
+            vrba_summary = _collocation_vrba_summary(collocation_manager)
             row = EpochMetrics(
                 epoch=epoch,
                 global_epoch=global_epoch,
@@ -2349,12 +2380,12 @@ def train_pinn(
                 weighting_probe_ntk_mean_trace=None if weight_update_stats is None else None if weight_update_stats.ntk_mean_trace is None else dict(weight_update_stats.ntk_mean_trace),
                 weighting_probe_ntk_batch_sizes=None if weight_update_stats is None else None if weight_update_stats.ntk_batch_sizes is None else dict(weight_update_stats.ntk_batch_sizes),
                 weighting_anchor=weighting_config.anchor,
-                vrba_enabled=bool(vrba_config.enabled),
-                vrba_sampling_enabled=bool(vrba_config.adaptive_sampling),
-                vrba_weighting_enabled=bool(vrba_config.adaptive_weighting),
-                vrba_potential=None if not vrba_config.enabled else str(vrba_config.potential),
-                vrba_target_sets=None if not vrba_config.enabled else tuple(vrba_config.target_sets),
-                vrba_update_count=None if not vrba_config.enabled else int(vrba_state.global_update_count),
+                vrba_enabled=bool(vrba_summary["enabled"]),
+                vrba_sampling_enabled=bool(vrba_summary["sampling_enabled"]),
+                vrba_weighting_enabled=bool(vrba_summary["weighting_enabled"]),
+                vrba_potential=vrba_summary["potential"],
+                vrba_target_sets=vrba_summary["target_sets"],
+                vrba_update_count=None if vrba_summary["update_count"] is None else int(vrba_summary["update_count"]),
                 epoch_wall_seconds=epoch_wall_seconds,
                 cumulative_wall_seconds=cumulative_wall_seconds,
                 num_batches=num_batches if cost_tracking_enabled else None,
