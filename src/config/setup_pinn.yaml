@@ -215,6 +215,13 @@ pinn:
       line_search:
         name: strong_wolfe
       convergence: null
+  optimizer_transition:
+    enabled: true
+    preserve_state_for: [Adam]
+    family_mode: optimizer # optimizer | phase_name
+    adam:
+      damping_after_refresh: 0.3
+      damping_after_switch: 0.6
   # Example SSBFGS optimizer-phase override:
   # optimizer_phases:
   #   - name: soap

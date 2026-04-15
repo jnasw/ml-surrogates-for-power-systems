@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 import time
 from typing import Any, Iterator
@@ -215,6 +216,21 @@ class PinnModel:
             stage_time_scales=None if architecture != "multistage" else [float(x) for x in payload.get("stage_time_scales", [])],
             stage_epsilons=None if architecture != "multistage" else [float(x) for x in payload.get("stage_epsilons", [])],
         )
+
+
+@dataclass(frozen=True)
+class OptimizerTransitionSettings:
+    enabled: bool
+    preserve_state_for: tuple[str, ...]
+    family_mode: str
+    adam_damping_after_refresh: float
+    adam_damping_after_switch: float
+
+
+@dataclass
+class OptimizerTransitionState:
+    cache: dict[str, dict[str, Any]]
+    previous_optimizer_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1113,6 +1129,115 @@ def _collocation_phase_boundary_enabled(config: Any) -> bool:
     return _collocation_refresh_mode(config) == "phase_boundary"
 
 
+def _optimizer_transition_settings(config: Any) -> OptimizerTransitionSettings:
+    preserve_raw = cfg_get(config, "pinn.optimizer_transition.preserve_state_for", ["Adam"])
+    preserve = tuple(str(name).strip().lower() for name in preserve_raw)
+    family_mode = str(cfg_get(config, "pinn.optimizer_transition.family_mode", "optimizer")).strip().lower()
+    if family_mode not in {"optimizer", "phase_name"}:
+        raise ValueError("pinn.optimizer_transition.family_mode must be one of: optimizer, phase_name.")
+    return OptimizerTransitionSettings(
+        enabled=bool(cfg_get(config, "pinn.optimizer_transition.enabled", True)),
+        preserve_state_for=preserve,
+        family_mode=family_mode,
+        adam_damping_after_refresh=float(cfg_get(config, "pinn.optimizer_transition.adam.damping_after_refresh", 0.3)),
+        adam_damping_after_switch=float(cfg_get(config, "pinn.optimizer_transition.adam.damping_after_switch", 0.6)),
+    )
+
+
+def _optimizer_transition_family(phase: OptimizerPhase, settings: OptimizerTransitionSettings) -> str:
+    optimizer_name = str(phase.optimizer).strip().lower()
+    if settings.family_mode == "phase_name":
+        return str(phase.name).strip().lower()
+    return optimizer_name
+
+
+def _phase_boundary_refresh_planned(config: Any, *, phase_name: str, event: str) -> bool:
+    if _collocation_refresh_mode(config) != "phase_boundary":
+        return False
+    raw_names = cfg_get(config, f"pinn.collocation.refresh.on_phase_{event}", [])
+    names = {str(name).strip().lower() for name in raw_names}
+    return str(phase_name).strip().lower() in names
+
+
+def _scale_optimizer_state_tensors(state_dict: dict[str, Any], factor: float) -> dict[str, Any]:
+    scaled = {
+        "state": {},
+        "param_groups": [dict(group) for group in state_dict.get("param_groups", [])],
+    }
+    for param_id, param_state in state_dict.get("state", {}).items():
+        new_state: dict[str, Any] = {}
+        for key, value in param_state.items():
+            if key in {"exp_avg", "exp_avg_sq", "max_exp_avg_sq"} and torch.is_tensor(value):
+                new_state[key] = value.clone().mul_(float(factor))
+            elif torch.is_tensor(value):
+                new_state[key] = value.clone()
+            else:
+                new_state[key] = value
+        scaled["state"][param_id] = new_state
+    return scaled
+
+
+def _maybe_restore_optimizer_state(
+    *,
+    optimizer_spec: OptimizerSpec,
+    phase: OptimizerPhase,
+    config: Any,
+    transition_settings: OptimizerTransitionSettings,
+    transition_state: OptimizerTransitionState,
+    refresh_on_phase_start: bool,
+) -> dict[str, Any]:
+    optimizer_name = str(phase.optimizer).strip().lower()
+    diagnostics = {
+        "state_transition_enabled": bool(transition_settings.enabled),
+        "state_restored": False,
+        "state_damping_factor": 1.0,
+        "state_cache_family": None,
+    }
+    if not transition_settings.enabled or optimizer_name not in transition_settings.preserve_state_for:
+        return diagnostics
+
+    family = _optimizer_transition_family(phase, transition_settings)
+    diagnostics["state_cache_family"] = family
+    cached = transition_state.cache.get(family)
+    if cached is None:
+        return diagnostics
+
+    optimizer_spec.optimizer.load_state_dict(cached["state_dict"])
+    damping = 1.0
+    previous_optimizer = transition_state.previous_optimizer_name
+    if optimizer_name == "adam":
+        if refresh_on_phase_start:
+            damping *= float(transition_settings.adam_damping_after_refresh)
+        if previous_optimizer is not None and previous_optimizer != optimizer_name:
+            damping *= float(transition_settings.adam_damping_after_switch)
+    if damping < 1.0:
+        optimizer_spec.optimizer.load_state_dict(
+            _scale_optimizer_state_tensors(optimizer_spec.optimizer.state_dict(), factor=damping)
+        )
+    diagnostics["state_restored"] = True
+    diagnostics["state_damping_factor"] = float(damping)
+    return diagnostics
+
+
+def _cache_optimizer_state(
+    *,
+    optimizer_spec: OptimizerSpec,
+    phase: OptimizerPhase,
+    transition_settings: OptimizerTransitionSettings,
+    transition_state: OptimizerTransitionState,
+) -> None:
+    optimizer_name = str(phase.optimizer).strip().lower()
+    if not transition_settings.enabled or optimizer_name not in transition_settings.preserve_state_for:
+        transition_state.previous_optimizer_name = optimizer_name
+        return
+    family = _optimizer_transition_family(phase, transition_settings)
+    transition_state.cache[family] = {
+        "state_dict": copy.deepcopy(optimizer_spec.optimizer.state_dict()),
+        "optimizer_name": optimizer_name,
+    }
+    transition_state.previous_optimizer_name = optimizer_name
+
+
 def _pinn_mode(config: Any) -> str:
     return str(cfg_get(config, "pinn.mode", "single_stage")).strip().lower()
 
@@ -1303,6 +1428,8 @@ def _train_multistage_pinn(
     gradient_telemetry_enabled = bool(cfg_get(config, "pinn.gradient_telemetry.enabled", False))
     cost_tracking_enabled = _cost_tracking_enabled(config)
     criterion = nn.MSELoss()
+    transition_settings = _optimizer_transition_settings(config)
+    transition_state = OptimizerTransitionState(cache={})
 
     dataset = move_pinn_training_data_to_device(dataset, device=device, dtype=dtype)
     collocation_manager = build_collocation_manager(
@@ -1458,6 +1585,15 @@ def _train_multistage_pinn(
                 if not optimizer_spec.supports_minibatch:
                     raise ValueError(f"Optimizer '{phase.optimizer}' does not support minibatch execution.")
                 phase_batch_size = phase.batch_size if phase.batch_size is not None else int(cfg_get(config, "pinn.default_batch_size", 1024))
+            refresh_on_phase_start = _phase_boundary_refresh_planned(config, phase_name=phase.name, event="start")
+            transition_diagnostics = _maybe_restore_optimizer_state(
+                optimizer_spec=optimizer_spec,
+                phase=phase,
+                config=config,
+                transition_settings=transition_settings,
+                transition_state=transition_state,
+                refresh_on_phase_start=refresh_on_phase_start,
+            )
 
             if _collocation_phase_boundary_enabled(config):
                 collocation_manager.handle_phase_boundary(
@@ -1641,6 +1777,7 @@ def _train_multistage_pinn(
                     "multistage_stage_epsilon": float(effective_stage_epsilon),
                     "multistage_stage_loss_ref": float(stage_loss_ref),
                 }
+                optimizer_diagnostics.update(transition_diagnostics)
                 optimizer_diagnostics.update(_collocation_pool_diagnostics(collocation_manager))
                 if stage_start_diagnostics is not None and stage_idx > 0:
                     optimizer_diagnostics["multistage_stage_start_residual_rms"] = float(stage_start_diagnostics.residual_rms)
@@ -1746,6 +1883,12 @@ def _train_multistage_pinn(
                         formulation=formulation,
                     )
                 )
+            _cache_optimizer_state(
+                optimizer_spec=optimizer_spec,
+                phase=phase,
+                transition_settings=transition_settings,
+                transition_state=transition_state,
+            )
 
         ensemble.eval()
 
@@ -1794,6 +1937,8 @@ def train_pinn(
     gradient_telemetry_enabled = bool(cfg_get(config, "pinn.gradient_telemetry.enabled", False))
     cost_tracking_enabled = _cost_tracking_enabled(config)
     criterion = nn.MSELoss()
+    transition_settings = _optimizer_transition_settings(config)
+    transition_state = OptimizerTransitionState(cache={})
 
     model = TimeConditionedMLP(
         input_dim=dataset.input_dim,
@@ -1879,6 +2024,15 @@ def train_pinn(
                 raise ValueError(f"Optimizer '{phase.optimizer}' does not support minibatch execution.")
             phase_batch_size = phase.batch_size if phase.batch_size is not None else int(cfg_get(config, "pinn.default_batch_size", 1024))
         phase_supports_dynamic_weight_updates = _phase_supports_dynamic_weight_updates(phase)
+        refresh_on_phase_start = _phase_boundary_refresh_planned(config, phase_name=phase.name, event="start")
+        transition_diagnostics = _maybe_restore_optimizer_state(
+            optimizer_spec=optimizer_spec,
+            phase=phase,
+            config=config,
+            transition_settings=transition_settings,
+            transition_state=transition_state,
+            refresh_on_phase_start=refresh_on_phase_start,
+        )
 
         if _collocation_phase_boundary_enabled(config):
             collocation_manager.handle_phase_boundary(
@@ -2162,6 +2316,7 @@ def train_pinn(
                     "sampling_enabled": phase_allows_sampling,
                     "line_search": optimizer_spec.line_search_name,
                     "dynamic_weight_updates_enabled": phase_supports_dynamic_weight_updates,
+                    **transition_diagnostics,
                     **_collocation_pool_diagnostics(collocation_manager),
                     **(
                         optimizer_spec.optimizer.get_last_diagnostics()
@@ -2234,6 +2389,12 @@ def train_pinn(
                     formulation=formulation,
                 )
             )
+        _cache_optimizer_state(
+            optimizer_spec=optimizer_spec,
+            phase=phase,
+            transition_settings=transition_settings,
+            transition_state=transition_state,
+        )
 
     model.eval()
     return pinn_model, rows
