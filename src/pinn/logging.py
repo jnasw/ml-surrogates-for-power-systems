@@ -211,6 +211,7 @@ class PinnLogger:
         self.run_dir = run_dir
         self.ckpt_dir = os.path.join(run_dir, "checkpoints")
         self.metrics_path = os.path.join(run_dir, "metrics.csv")
+        self._metrics_fieldnames: list[str] | None = None
         os.makedirs(self.ckpt_dir, exist_ok=True)
         self._wandb_run = None
         self._wandb_enabled = False
@@ -264,15 +265,28 @@ class PinnLogger:
     def write_metrics(self, rows: list[EpochMetrics]) -> None:
         if not rows:
             return
-        row = rows[-1]
-        row_dict = row.as_flat_dict()
-        fieldnames = list(row_dict.keys())
-        write_header = not os.path.exists(self.metrics_path) or os.path.getsize(self.metrics_path) == 0
-        with open(self.metrics_path, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            if write_header:
+        row_dicts = [row.as_flat_dict() for row in rows]
+        if self._metrics_fieldnames is None:
+            self._metrics_fieldnames = []
+        schema_expanded = False
+        for row_dict in row_dicts:
+            for key in row_dict.keys():
+                if key not in self._metrics_fieldnames:
+                    self._metrics_fieldnames.append(key)
+                    schema_expanded = True
+
+        metrics_exists = os.path.exists(self.metrics_path) and os.path.getsize(self.metrics_path) > 0
+        if not metrics_exists or schema_expanded:
+            with open(self.metrics_path, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=self._metrics_fieldnames)
                 writer.writeheader()
-            writer.writerow(row_dict)
+                for row_dict in row_dicts:
+                    writer.writerow(row_dict)
+            return
+
+        with open(self.metrics_path, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=self._metrics_fieldnames)
+            writer.writerow(row_dicts[-1])
 
     def _should_log_epoch(self, row: EpochMetrics) -> bool:
         log_every_epoch = int(getattr(getattr(self, "_config_logging", None), "log_every_epoch", 1))
