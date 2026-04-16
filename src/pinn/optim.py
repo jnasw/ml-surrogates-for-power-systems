@@ -13,8 +13,8 @@ except ImportError:  # pragma: no cover - optional dependency
     SOAP = None
 
 from src.pinn.optimizers.bfgs import BFGS
-from src.pinn.optimizers.ssbroyden import SSBroyden
-from src.pinn.optimizers.ssbfgs import SSBFGS
+from src.pinn.optimizers.ssbroyden import SSBroyden, StochasticSSBroyden
+from src.pinn.optimizers.ssbfgs import SSBFGS, StochasticSSBFGS
 
 
 @dataclass(frozen=True)
@@ -127,4 +127,36 @@ def build_optimizer(
             default_full_batch=True,
             line_search_name=str(line_search_cfg["name"]).strip().lower(),
         )
-    raise ValueError("Unsupported optimizer. Use one of: Adam, SOAP, LBFGS, BFGS, SSBFGS, SSBroyden.")
+    if normalized == "sssbfgs":
+        if line_search not in (None, {}):
+            raise ValueError("sSSBFGS phases must not configure line_search.")
+        optimizer = StochasticSSBFGS(
+            model.parameters(),
+            lr=lr,
+            **kwargs,
+        )
+        return OptimizerSpec(
+            optimizer=optimizer,
+            requires_closure=False,
+            supports_minibatch=True,
+            default_full_batch=False,
+            line_search_name=None,
+        )
+    if normalized == "sssbroyden":
+        if line_search not in (None, {}):
+            raise ValueError("sSSBroyden phases must not configure line_search.")
+        optimizer = StochasticSSBroyden(
+            model.parameters(),
+            lr=lr,
+            **kwargs,
+        )
+        return OptimizerSpec(
+            optimizer=optimizer,
+            requires_closure=False,
+            supports_minibatch=True,
+            default_full_batch=False,
+            line_search_name=None,
+        )
+    raise ValueError(
+        "Unsupported optimizer. Use one of: Adam, SOAP, LBFGS, BFGS, SSBFGS, SSBroyden, sSSBFGS, sSSBroyden."
+    )

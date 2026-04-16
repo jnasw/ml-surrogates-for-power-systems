@@ -8,6 +8,7 @@ from typing import Any
 import torch
 
 from src.pinn.optimizers.bfgs import BFGS
+from src.pinn.optimizers.stochastic_qn import LazyStochasticQuasiNewtonMixin
 
 
 class SSBroyden(BFGS):
@@ -262,3 +263,47 @@ class SSBroyden(BFGS):
         correction = torch.outer(Hy, Hy) / yHy
         updated = ((H - correction + rank_one) / tau) + ss_term
         return updated, False, ys, diagnostics
+
+
+class StochasticSSBroyden(LazyStochasticQuasiNewtonMixin, SSBroyden):
+    """Lazy stochastic self-scaled Broyden for mini-batch PINN training."""
+
+    def __init__(
+        self,
+        params,
+        *,
+        lr: float = 1.0,
+        curvature_threshold: float = 1.0e-12,
+        curvature_eps: float = 1.0e-12,
+        init_hessian_scale: float = 1.0,
+        grad_tol: float = 0.0,
+        step_tol: float = 0.0,
+        history_reset_on_failure: bool = False,
+        reset_on_direction_failure: bool = True,
+        tau_strategy: str = "paper_default",
+        phi_strategy: str = "paper_default",
+        tau_min: float = 0.0,
+        tau_max: float = math.inf,
+        phi_min: float = -math.inf,
+        phi_max: float = math.inf,
+    ) -> None:
+        super().__init__(
+            params,
+            lr=lr,
+            line_search=None,
+            curvature_eps=curvature_eps,
+            init_hessian_scale=init_hessian_scale,
+            grad_tol=grad_tol,
+            step_tol=step_tol,
+            history_reset_on_failure=history_reset_on_failure,
+            tau_strategy=tau_strategy,
+            phi_strategy=phi_strategy,
+            tau_min=tau_min,
+            tau_max=tau_max,
+            phi_min=phi_min,
+            phi_max=phi_max,
+        )
+        self._configure_stochastic_quasi_newton(
+            curvature_threshold=curvature_threshold,
+            reset_on_direction_failure=reset_on_direction_failure,
+        )

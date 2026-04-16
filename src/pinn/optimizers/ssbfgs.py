@@ -8,6 +8,7 @@ from typing import Any
 import torch
 
 from src.pinn.optimizers.bfgs import BFGS
+from src.pinn.optimizers.stochastic_qn import LazyStochasticQuasiNewtonMixin
 
 
 class SSBFGS(BFGS):
@@ -146,3 +147,41 @@ class SSBFGS(BFGS):
         V = identity - rho * sy
         updated = V @ scaled_H @ (identity - rho * ys_outer) + rho * ss
         return updated, False, ys, tau_diagnostics
+
+
+class StochasticSSBFGS(LazyStochasticQuasiNewtonMixin, SSBFGS):
+    """Lazy stochastic self-scaled BFGS for mini-batch PINN training."""
+
+    def __init__(
+        self,
+        params,
+        *,
+        lr: float = 1.0,
+        curvature_threshold: float = 1.0e-12,
+        curvature_eps: float = 1.0e-12,
+        init_hessian_scale: float = 1.0,
+        grad_tol: float = 0.0,
+        step_tol: float = 0.0,
+        history_reset_on_failure: bool = False,
+        reset_on_direction_failure: bool = True,
+        tau_strategy: str = "al_baali",
+        tau_min: float = 0.0,
+        tau_max: float = 1.0,
+    ) -> None:
+        super().__init__(
+            params,
+            lr=lr,
+            line_search=None,
+            curvature_eps=curvature_eps,
+            init_hessian_scale=init_hessian_scale,
+            grad_tol=grad_tol,
+            step_tol=step_tol,
+            history_reset_on_failure=history_reset_on_failure,
+            tau_strategy=tau_strategy,
+            tau_min=tau_min,
+            tau_max=tau_max,
+        )
+        self._configure_stochastic_quasi_newton(
+            curvature_threshold=curvature_threshold,
+            reset_on_direction_failure=reset_on_direction_failure,
+        )

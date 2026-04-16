@@ -99,6 +99,8 @@ def _validate_optimizer_phase(phase: OptimizerPhase) -> None:
             raise ValueError(f"{phase.optimizer} phases must set batch_size=null because they are full-batch.")
         if phase.allow_sampling is True:
             raise ValueError(f"{phase.optimizer} phases must not enable sampling because curvature updates require a stable objective.")
+    if optimizer_name in {"sssbfgs", "sssbroyden"} and phase.scheduler is not None:
+        raise ValueError(f"{phase.optimizer} phases do not currently support schedulers.")
 
 
 def load_optimizer_phases_from_raw(
