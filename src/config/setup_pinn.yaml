@@ -131,11 +131,16 @@ pinn:
   #       physics: 1.0e-4
   #       ic: 1.0e-3
   weighting:
-    scheme: static # static | ma | id | dn | relobralo | ntk_random_batch
-    anchor: physics # v1 keeps the paper-style anchor fixed to physics for ma/id/dn; relobralo/ntk_random_batch ignore it
-    ema_beta: 0.99
+    scheme: static # static | ma | paper_lr_annealing | id | dn | relobralo | ntk_random_batch
+    anchor: physics # v1 keeps the paper-style physics anchor fixed for ma/paper_lr_annealing/id/dn; relobralo/ntk_random_batch ignore it
+    ema_beta: null # null -> scheme default
     update_interval_epochs: 10
+    update_mode: null # null -> scheme default, or epoch | step
+    use_live_batch: null # null -> scheme default
     dynamic_components: [data, dt, ic] # relobralo/ntk_random_batch expand to all loss components in v1 unless explicitly overridden
+    gradient_eps: 1.0e-12
+    candidate_weight_min: 1.0e-8
+    candidate_weight_max: 1.0e8
     random_seed: 0
     relobralo:
       temperature: 1.0

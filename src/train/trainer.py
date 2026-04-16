@@ -1324,6 +1324,50 @@ def _compute_ntk_weight_update_stats(
     )
 
 
+def _compute_live_batch_weight_update_stats(
+    *,
+    model: nn.Module,
+    criterion: nn.Module,
+    ode_model: Any,
+    formulation: str,
+    weights: LossWeights,
+    x_data: torch.Tensor,
+    y_data: torch.Tensor,
+    x_data_dt_weights: torch.Tensor | None,
+    x_col: torch.Tensor,
+    x_col_weights: torch.Tensor | None,
+    x_init: torch.Tensor,
+    y_init: torch.Tensor,
+    x_init_weights: torch.Tensor | None,
+    anchor_component: str | None,
+    epoch: int,
+    global_epoch: int,
+) -> WeightUpdateStats:
+    probe_losses = evaluate_pinn_loss_breakdown(
+        model=model,
+        criterion=criterion,
+        ode_model=ode_model,
+        formulation=formulation,
+        weights=weights,
+        x_data=x_data,
+        y_data=y_data,
+        x_data_dt_weights=x_data_dt_weights,
+        x_col=x_col,
+        x_col_weights=x_col_weights,
+        x_init=x_init,
+        y_init=y_init,
+        x_init_weights=x_init_weights,
+        create_graph=True,
+    )
+    return _compute_weight_update_stats(
+        model=model,
+        losses=probe_losses,
+        anchor_component=anchor_component,
+        epoch=epoch,
+        global_epoch=global_epoch,
+    )
+
+
 def _measure_pinn_state(
     *,
     model: nn.Module,
@@ -2519,6 +2563,13 @@ def train_pinn(
             epoch_losses: list[PinnLossBreakdown] = []
             epoch_gradients: list[GradientTelemetry] = []
             capture_gradient_telemetry = gradient_telemetry_enabled
+            step_weight_updates_enabled = bool(
+                phase_supports_dynamic_weight_updates
+                and weighting_config.uses_step_updates
+                and weighting_config.use_live_batch
+            )
+            weighting_updated = False
+            weight_update_stats = None
             scheduled_base_weights = _scheduled_loss_weights(
                 base_weights=base_weights,
                 schedule=loss_weight_schedule,
@@ -2620,6 +2671,27 @@ def train_pinn(
                 num_init_rows = int(epoch_train_init_x.shape[0])
                 if gradient_telemetry is not None:
                     epoch_gradients.append(gradient_telemetry)
+                if step_weight_updates_enabled:
+                    weight_update_stats = _compute_live_batch_weight_update_stats(
+                        model=model,
+                        criterion=criterion,
+                        ode_model=ode_model,
+                        formulation=formulation,
+                        weights=active_weights,
+                        x_data=epoch_train_x,
+                        y_data=epoch_train_y,
+                        x_data_dt_weights=active_dt_weights,
+                        x_col=epoch_train_col_x,
+                        x_col_weights=active_collocation_weights,
+                        x_init=epoch_train_init_x,
+                        y_init=epoch_train_init_y,
+                        x_init_weights=active_init_weights,
+                        anchor_component=weighting_config.anchor,
+                        epoch=epoch,
+                        global_epoch=global_epoch + 1,
+                    )
+                    weighting_state = weighting_policy.update(weighting_state, weight_update_stats)
+                    weighting_updated = True
             else:
                 _steps, epoch_batches = _iter_minibatch_batches(
                     dataset=PinnDatasetBundle(
@@ -2637,6 +2709,7 @@ def train_pinn(
                     seed=seed + phase_idx + global_epoch,
                 )
                 for batch in epoch_batches:
+                    active_weights = scheduled_base_weights if weighting_config.scheme == "static" else weighting_policy.current_weights(weighting_state)
                     num_batches += 1
                     num_train_steps += 1
                     num_supervised_rows += int(batch.x_data.shape[0])
@@ -2662,6 +2735,27 @@ def train_pinn(
                     epoch_losses.append(breakdown)
                     if gradient_telemetry is not None:
                         epoch_gradients.append(gradient_telemetry)
+                    if step_weight_updates_enabled:
+                        weight_update_stats = _compute_live_batch_weight_update_stats(
+                            model=model,
+                            criterion=criterion,
+                            ode_model=ode_model,
+                            formulation=formulation,
+                            weights=active_weights,
+                            x_data=batch.x_data,
+                            y_data=batch.y_data,
+                            x_data_dt_weights=batch.x_data_dt_weights,
+                            x_col=batch.x_col,
+                            x_col_weights=batch.x_col_weights,
+                            x_init=batch.x_init,
+                            y_init=batch.y_init,
+                            x_init_weights=batch.x_init_weights,
+                            anchor_component=weighting_config.anchor,
+                            epoch=epoch,
+                            global_epoch=global_epoch + 1,
+                        )
+                        weighting_state = weighting_policy.update(weighting_state, weight_update_stats)
+                        weighting_updated = True
 
             epoch_wall_seconds = float(time.perf_counter() - epoch_started) if cost_tracking_enabled else None
             cumulative_wall_seconds = float(time.perf_counter() - train_started) if cost_tracking_enabled else None
@@ -2689,9 +2783,11 @@ def train_pinn(
                     for name in component_names
                 }
             global_epoch += 1
-            weighting_updated = False
-            weight_update_stats = None
-            if phase_supports_dynamic_weight_updates and weighting_policy.should_update(epoch=epoch, global_epoch=global_epoch):
+            if (
+                not step_weight_updates_enabled
+                and phase_supports_dynamic_weight_updates
+                and weighting_policy.should_update(epoch=epoch, global_epoch=global_epoch)
+            ):
                 if weighting_config.scheme == "relobralo":
                     zero_stats = {name: 0.0 for name in LOSS_COMPONENTS}
                     weight_update_stats = WeightUpdateStats(
@@ -2775,6 +2871,7 @@ def train_pinn(
                     )
                 weighting_state = weighting_policy.update(weighting_state, weight_update_stats)
                 weighting_updated = True
+            active_weights = scheduled_base_weights if weighting_config.scheme == "static" else weighting_policy.current_weights(weighting_state)
             val_total_loss = None
             val_component_losses = None
             test_metrics = None

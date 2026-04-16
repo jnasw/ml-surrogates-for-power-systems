@@ -25,7 +25,7 @@ from src.pipeline.manifest import save_manifest, set_stage_status, utc_now_iso
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SUPPORTED_WEIGHTING_SCHEMES = ("static", "ma", "id", "dn", "relobralo", "ntk_random_batch")
+SUPPORTED_WEIGHTING_SCHEMES = ("static", "ma", "paper_lr_annealing", "id", "dn", "relobralo", "ntk_random_batch")
 PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
     "smoke": {
         "method": "qbc_deep_ensemble",
@@ -364,6 +364,8 @@ def _build_pinn_command(
     loss_weight_schedule_override: str | None = None,
 ) -> list[str]:
     dynamic_components = "[data,dt,physics,ic]" if weighting_scheme == "ntk_random_batch" else "[data,dt,ic]"
+    update_mode = "step" if weighting_scheme == "paper_lr_annealing" else "epoch"
+    use_live_batch = "true" if weighting_scheme == "paper_lr_annealing" else "false"
     command = [
         python_bin,
         "20_run_pinn.py",
@@ -389,6 +391,8 @@ def _build_pinn_command(
         "pinn.weighting.anchor=physics",
         f"pinn.weighting.ema_beta={ema_beta}",
         f"pinn.weighting.update_interval_epochs={int(update_interval_epochs)}",
+        f"pinn.weighting.update_mode={update_mode}",
+        f"pinn.weighting.use_live_batch={use_live_batch}",
         f"pinn.weighting.dynamic_components={dynamic_components}",
         "pinn.weighting.relobralo.rho=0.95",
         f"pinn.weighting.probe.data_rows={int(probe_data_rows)}",

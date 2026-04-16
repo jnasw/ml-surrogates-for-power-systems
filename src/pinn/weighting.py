@@ -11,7 +11,15 @@ from src.pinn.losses import LOSS_COMPONENTS, LossWeights
 from src.train.runtime import cfg_get
 
 
-SUPPORTED_WEIGHTING_SCHEMES: tuple[str, ...] = ("static", "ma", "id", "dn", "relobralo", "ntk_random_batch")
+SUPPORTED_WEIGHTING_SCHEMES: tuple[str, ...] = (
+    "static",
+    "ma",
+    "paper_lr_annealing",
+    "id",
+    "dn",
+    "relobralo",
+    "ntk_random_batch",
+)
 DEFAULT_DYNAMIC_COMPONENTS: tuple[str, ...] = ("data", "dt", "ic")
 DEFAULT_WEIGHTING_ANCHOR = "physics"
 DEFAULT_RELOBRALO_COMPONENTS: tuple[str, ...] = LOSS_COMPONENTS
@@ -73,6 +81,8 @@ class WeightingConfig:
     anchor: str | None
     ema_beta: float
     update_interval_epochs: int
+    update_mode: str
+    use_live_batch: bool
     dynamic_components: tuple[str, ...]
     probe: ProbeSubsetConfig
     ntk_batch_sizes: NTKBatchConfig
@@ -83,6 +93,9 @@ class WeightingConfig:
     relobralo_temperature: float
     relobralo_alpha: float
     relobralo_rho: float
+    gradient_eps: float
+    candidate_weight_min: float
+    candidate_weight_max: float
     random_seed: int = 0
 
     @property
@@ -91,11 +104,15 @@ class WeightingConfig:
 
     @property
     def uses_anchor(self) -> bool:
-        return self.scheme in {"ma", "id", "dn"}
+        return self.scheme in {"ma", "paper_lr_annealing", "id", "dn"}
 
     @property
     def uses_uniform_initialization(self) -> bool:
         return self.scheme in {"relobralo", "ntk_random_batch"}
+
+    @property
+    def uses_step_updates(self) -> bool:
+        return self.is_dynamic and self.update_mode == "step"
 
 
 def _weights_from_mapping(values: dict[str, float]) -> LossWeights:
@@ -115,7 +132,7 @@ def weighting_config_from_config(config: Any) -> WeightingConfig:
 
     anchor_raw = str(cfg_get(config, "pinn.weighting.anchor", DEFAULT_WEIGHTING_ANCHOR)).strip().lower()
     anchor = anchor_raw
-    if scheme in {"ma", "id", "dn", "static"}:
+    if scheme in {"ma", "paper_lr_annealing", "id", "dn", "static"}:
         if anchor != DEFAULT_WEIGHTING_ANCHOR:
             raise ValueError("pinn.weighting.anchor must be 'physics' in v1.")
     elif scheme in {"relobralo", "ntk_random_batch"}:
@@ -123,13 +140,28 @@ def weighting_config_from_config(config: Any) -> WeightingConfig:
         # not used even if it stays present in config for backward compatibility.
         anchor = None
 
-    ema_beta = float(cfg_get(config, "pinn.weighting.ema_beta", 0.99))
+    ema_beta_default = 0.9 if scheme == "paper_lr_annealing" else 0.99
+    ema_beta_raw = cfg_get(config, "pinn.weighting.ema_beta", None)
+    ema_beta = ema_beta_default if ema_beta_raw in (None, "null") else float(ema_beta_raw)
     if not (0.0 <= ema_beta < 1.0):
         raise ValueError("pinn.weighting.ema_beta must be in [0, 1).")
 
     update_interval_epochs = int(cfg_get(config, "pinn.weighting.update_interval_epochs", 10))
     if update_interval_epochs <= 0:
         raise ValueError("pinn.weighting.update_interval_epochs must be > 0.")
+    update_mode_default = "step" if scheme == "paper_lr_annealing" else "epoch"
+    update_mode_raw = cfg_get(config, "pinn.weighting.update_mode", None)
+    if update_mode_raw in (None, "null"):
+        update_mode = update_mode_default
+    else:
+        update_mode = str(update_mode_raw).strip().lower()
+    if update_mode not in {"epoch", "step"}:
+        raise ValueError("pinn.weighting.update_mode must be one of: epoch, step.")
+    use_live_batch_default = scheme == "paper_lr_annealing"
+    use_live_batch_raw = cfg_get(config, "pinn.weighting.use_live_batch", None)
+    use_live_batch = use_live_batch_default if use_live_batch_raw in (None, "null") else bool(use_live_batch_raw)
+    if update_mode == "step" and not use_live_batch:
+        raise ValueError("pinn.weighting.use_live_batch must be true when pinn.weighting.update_mode=step.")
 
     raw_dynamic_components = cfg_get(config, "pinn.weighting.dynamic_components", list(DEFAULT_DYNAMIC_COMPONENTS))
     dynamic_components = tuple(str(name).strip().lower() for name in raw_dynamic_components)
@@ -184,6 +216,15 @@ def weighting_config_from_config(config: Any) -> WeightingConfig:
     relobralo_rho = float(cfg_get(config, "pinn.weighting.relobralo.rho", 0.95))
     if not (0.0 <= relobralo_rho <= 1.0):
         raise ValueError("pinn.weighting.relobralo.rho must be in [0, 1].")
+    gradient_eps = float(cfg_get(config, "pinn.weighting.gradient_eps", 1.0e-12))
+    if gradient_eps <= 0.0:
+        raise ValueError("pinn.weighting.gradient_eps must be > 0.")
+    candidate_weight_min = float(cfg_get(config, "pinn.weighting.candidate_weight_min", 1.0e-8))
+    candidate_weight_max = float(cfg_get(config, "pinn.weighting.candidate_weight_max", 1.0e8))
+    if candidate_weight_min <= 0.0:
+        raise ValueError("pinn.weighting.candidate_weight_min must be > 0.")
+    if candidate_weight_max < candidate_weight_min:
+        raise ValueError("pinn.weighting.candidate_weight_max must be >= pinn.weighting.candidate_weight_min.")
     random_seed = int(cfg_get(config, "pinn.weighting.random_seed", 0))
 
     return WeightingConfig(
@@ -191,6 +232,8 @@ def weighting_config_from_config(config: Any) -> WeightingConfig:
         anchor=anchor,
         ema_beta=ema_beta,
         update_interval_epochs=update_interval_epochs,
+        update_mode=update_mode,
+        use_live_batch=use_live_batch,
         dynamic_components=dynamic_components,
         probe=ProbeSubsetConfig(
             data_rows=probe_data_rows,
@@ -206,6 +249,9 @@ def weighting_config_from_config(config: Any) -> WeightingConfig:
         relobralo_temperature=relobralo_temperature,
         relobralo_alpha=relobralo_alpha,
         relobralo_rho=relobralo_rho,
+        gradient_eps=gradient_eps,
+        candidate_weight_min=candidate_weight_min,
+        candidate_weight_max=candidate_weight_max,
         random_seed=random_seed,
     )
 
@@ -245,6 +291,8 @@ class BaseWeightingPolicy:
 
     def should_update(self, *, epoch: int, global_epoch: int) -> bool:
         if not self.config.is_dynamic:
+            return False
+        if self.config.uses_step_updates:
             return False
         if self.config.scheme == "relobralo":
             return True
@@ -300,6 +348,20 @@ class MAPINNWeightingPolicy(BaseWeightingPolicy):
             prev_weight = max(float(state.active_weights.get(name)), eps)
             mean_abs = max(float(stats.grad_mean_abs[name]), eps)
             result[name] = anchor_value / (prev_weight * mean_abs)
+        return result
+
+
+@dataclass(frozen=True)
+class PaperLearningRateAnnealingPolicy(BaseWeightingPolicy):
+    def _raw_candidate_weights(self, state: WeightingState, stats: WeightUpdateStats) -> dict[str, float]:
+        anchor_value = float(stats.grad_max_abs[self.config.anchor])
+        eps = max(float(self.config.gradient_eps), 1.0e-18)
+        result: dict[str, float] = {}
+        for name in self.config.dynamic_components:
+            mean_abs = max(float(stats.grad_mean_abs[name]), eps)
+            candidate = anchor_value / mean_abs
+            candidate = min(max(candidate, float(self.config.candidate_weight_min)), float(self.config.candidate_weight_max))
+            result[name] = candidate
         return result
 
 
@@ -448,6 +510,8 @@ def build_weighting_policy(weighting_config: WeightingConfig) -> LossWeightingPo
         return StaticWeightingPolicy(config=weighting_config)
     if weighting_config.scheme == "ma":
         return MAPINNWeightingPolicy(config=weighting_config)
+    if weighting_config.scheme == "paper_lr_annealing":
+        return PaperLearningRateAnnealingPolicy(config=weighting_config)
     if weighting_config.scheme == "id":
         return IDPINNWeightingPolicy(config=weighting_config)
     if weighting_config.scheme == "dn":
