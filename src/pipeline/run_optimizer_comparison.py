@@ -24,7 +24,8 @@ from src.pipeline.manifest import save_manifest, set_stage_status, utc_now_iso
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SUPPORTED_OPTIMIZERS = ("LBFGS", "BFGS", "SSBFGS", "SSBroyden")
+SUPPORTED_OPTIMIZERS = ("LBFGS", "BFGS", "SSBFGS", "SSBroyden", "sSSBFGS", "sSSBroyden")
+MINIBATCH_OPTIMIZERS = frozenset({"sSSBFGS", "sSSBroyden"})
 PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
     "smoke": {
         "budget": "b256",
@@ -279,10 +280,16 @@ def _optimizer_stage(
     optimizer: str,
     epochs: int,
     lr: float,
+    batch_size: int,
     line_search_name: str,
 ) -> str:
     lower = optimizer.lower()
     optimizer_kwargs = "{}"
+    batch_size_value = "null"
+    shuffle = "false"
+    full_batch = "true"
+    allow_sampling = "false"
+    line_search = f"{{name:{line_search_name}}}"
     if optimizer == "SSBFGS":
         optimizer_kwargs = "{tau_strategy:al_baali}"
     elif optimizer == "SSBroyden":
@@ -292,18 +299,31 @@ def _optimizer_stage(
     elif optimizer == "LBFGS":
         optimizer_kwargs = "{}"
         line_search_name = "strong_wolfe"
+        line_search = f"{{name:{line_search_name}}}"
+    elif optimizer == "sSSBFGS":
+        optimizer_kwargs = "{curvature_threshold:1.0e-12,tau_strategy:al_baali}"
+        batch_size_value = str(int(batch_size))
+        shuffle = "true"
+        full_batch = "false"
+        line_search = "null"
+    elif optimizer == "sSSBroyden":
+        optimizer_kwargs = "{curvature_threshold:1.0e-12,tau_strategy:paper_default,phi_strategy:paper_default}"
+        batch_size_value = str(int(batch_size))
+        shuffle = "true"
+        full_batch = "false"
+        line_search = "null"
     return (
         "{"
         f"name:{lower},"
         f"optimizer:{optimizer},"
         f"lr:{lr},"
         f"epochs:{int(epochs)},"
-        "batch_size:null,"
-        "shuffle:false,"
-        "full_batch:true,"
-        "allow_sampling:false,"
+        f"batch_size:{batch_size_value},"
+        f"shuffle:{shuffle},"
+        f"full_batch:{full_batch},"
+        f"allow_sampling:{allow_sampling},"
         f"optimizer_kwargs:{optimizer_kwargs},"
-        f"line_search:{{name:{line_search_name}}},"
+        f"line_search:{line_search},"
         "convergence:null"
         "}"
     )
@@ -341,6 +361,7 @@ def _optimizer_phase_override(
             optimizer=optimizer,
             epochs=quasi_newton_epochs,
             lr=quasi_newton_lr,
+            batch_size=batch_size,
             line_search_name=line_search_name,
         )
     )
