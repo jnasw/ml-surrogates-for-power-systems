@@ -974,43 +974,47 @@ def _ceil_div(num: int, den: int) -> int:
     return (int(num) + int(den) - 1) // int(den)
 
 
-class _ComponentBatchSampler:
-    def __init__(self, size: int, batch_size: int, *, shuffle: bool, seed: int) -> None:
-        if size <= 0:
-            raise ValueError("Sampler size must be > 0.")
-        if batch_size <= 0:
-            raise ValueError("Sampler batch_size must be > 0.")
-        self.size = int(size)
-        self.batch_size = int(batch_size)
-        self.shuffle = bool(shuffle)
-        self._generator = torch.Generator(device="cpu")
-        self._generator.manual_seed(int(seed))
-        self._indices = torch.empty(0, dtype=torch.long)
-        self._offset = 0
+def _epoch_component_index_chunks(
+    *,
+    size: int,
+    steps_per_epoch: int,
+    shuffle: bool,
+    seed: int,
+) -> list[torch.Tensor]:
+    """Plan one epoch of component batches with minimal within-epoch repetition.
 
-    def _reset(self) -> None:
-        if self.shuffle:
-            self._indices = torch.randperm(self.size, generator=self._generator, device="cpu")
-        else:
-            self._indices = torch.arange(self.size, dtype=torch.long)
-        self._offset = 0
+    For pools with at least one sample per step, this creates a shuffled
+    partition that covers the pool approximately once per epoch. For very small
+    pools, it falls back to repeating single rows as evenly as possible so every
+    training step still has a non-empty component batch.
+    """
 
-    def next_indices(self, *, target_device: torch.device) -> torch.Tensor:
-        if self._offset >= int(self._indices.numel()):
-            self._reset()
+    if size <= 0:
+        raise ValueError("Component size must be > 0.")
+    if steps_per_epoch <= 0:
+        raise ValueError("steps_per_epoch must be > 0.")
 
-        end = min(self._offset + self.batch_size, int(self._indices.numel()))
-        chunk = self._indices[self._offset:end]
-        self._offset = end
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(int(seed))
+    if shuffle:
+        base_indices = torch.randperm(int(size), generator=generator, device="cpu")
+    else:
+        base_indices = torch.arange(int(size), dtype=torch.long)
 
-        if int(chunk.numel()) < self.batch_size:
-            remainder = self.batch_size - int(chunk.numel())
-            self._reset()
-            refill = self._indices[:remainder]
-            self._offset = remainder
-            chunk = torch.cat((chunk, refill), dim=0)
+    if int(size) >= int(steps_per_epoch):
+        chunks: list[torch.Tensor] = []
+        for step_idx in range(int(steps_per_epoch)):
+            start = (step_idx * int(size)) // int(steps_per_epoch)
+            end = ((step_idx + 1) * int(size)) // int(steps_per_epoch)
+            chunk = base_indices[start:end]
+            if int(chunk.numel()) <= 0:
+                raise RuntimeError("Balanced minibatch planning produced an empty chunk unexpectedly.")
+            chunks.append(chunk)
+        return chunks
 
-        return chunk.to(device=target_device)
+    repeats = _ceil_div(int(steps_per_epoch), int(size))
+    tiled = base_indices.repeat(repeats)[: int(steps_per_epoch)]
+    return [tiled[idx : idx + 1] for idx in range(int(steps_per_epoch))]
 
 
 def _sample_rows_with_indices(
@@ -1035,30 +1039,30 @@ def _iter_minibatch_batches(
         _ceil_div(dataset.train_col_x.shape[0], batch_size),
         _ceil_div(dataset.train_init_x.shape[0], batch_size),
     )
-    data_sampler = _ComponentBatchSampler(
-        int(dataset.train_x.shape[0]),
-        batch_size,
+    data_chunks = _epoch_component_index_chunks(
+        size=int(dataset.train_x.shape[0]),
+        steps_per_epoch=steps_per_epoch,
         shuffle=shuffle,
         seed=seed,
     )
-    col_sampler = _ComponentBatchSampler(
-        int(dataset.train_col_x.shape[0]),
-        batch_size,
+    col_chunks = _epoch_component_index_chunks(
+        size=int(dataset.train_col_x.shape[0]),
+        steps_per_epoch=steps_per_epoch,
         shuffle=shuffle,
         seed=seed + 1,
     )
-    init_sampler = _ComponentBatchSampler(
-        int(dataset.train_init_x.shape[0]),
-        batch_size,
+    init_chunks = _epoch_component_index_chunks(
+        size=int(dataset.train_init_x.shape[0]),
+        steps_per_epoch=steps_per_epoch,
         shuffle=shuffle,
         seed=seed + 2,
     )
 
     def batch_iterator():
-        for _ in range(steps_per_epoch):
-            data_idx = data_sampler.next_indices(target_device=dataset.train_x.device)
-            col_idx = col_sampler.next_indices(target_device=dataset.train_col_x.device)
-            init_idx = init_sampler.next_indices(target_device=dataset.train_init_x.device)
+        for step_idx in range(steps_per_epoch):
+            data_idx = data_chunks[step_idx].to(device=dataset.train_x.device)
+            col_idx = col_chunks[step_idx].to(device=dataset.train_col_x.device)
+            init_idx = init_chunks[step_idx].to(device=dataset.train_init_x.device)
             x_data, y_data = _sample_rows_with_indices(dataset.train_x, data_idx, dataset.train_y)
             x_data_dt_weights = None if dataset.train_dt_weights is None else _sample_rows_with_indices(dataset.train_dt_weights, data_idx)
             x_init, y_init = _sample_rows_with_indices(dataset.train_init_x, init_idx, dataset.train_init_y)
