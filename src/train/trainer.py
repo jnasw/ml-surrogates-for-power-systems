@@ -11,6 +11,7 @@ import numpy as np
 import os
 import torch
 from torch import nn
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
 from omegaconf import OmegaConf
 
@@ -37,6 +38,7 @@ from src.pinn.optim import OptimizerSpec, build_optimizer
 from src.pinn.residuals import compute_residual_terms, compute_supervised_dt_terms
 from src.pinn.runtime import (
     OptimizerPhase,
+    SchedulerConfig,
     load_optimizer_phases,
     load_optimizer_phases_from_raw,
     resolve_torch_dtype,
@@ -1506,6 +1508,76 @@ def _phase_supports_dynamic_weight_updates(phase: OptimizerPhase) -> bool:
     return str(phase.optimizer).strip().lower() == "adam"
 
 
+def _build_phase_scheduler(
+    *,
+    optimizer: torch.optim.Optimizer,
+    scheduler_config: SchedulerConfig | None,
+) -> ReduceLROnPlateau | None:
+    if scheduler_config is None:
+        return None
+    if scheduler_config.name != "reduce_on_plateau":
+        raise ValueError("Unsupported scheduler. Use scheduler.name='reduce_on_plateau' or null.")
+    return ReduceLROnPlateau(
+        optimizer,
+        mode=str(scheduler_config.mode),
+        factor=float(scheduler_config.factor),
+        patience=int(scheduler_config.patience),
+        threshold=float(scheduler_config.threshold),
+        threshold_mode=str(scheduler_config.threshold_mode),
+        cooldown=int(scheduler_config.cooldown),
+        min_lr=float(scheduler_config.min_lr),
+        eps=float(scheduler_config.eps),
+    )
+
+
+def _scheduler_metric_value(
+    *,
+    scheduler_config: SchedulerConfig | None,
+    train_total_loss: float,
+    val_total_loss: float | None,
+) -> tuple[float | None, str | None]:
+    if scheduler_config is None:
+        return None, None
+    metric_name = str(scheduler_config.metric)
+    if metric_name == "train_total_loss":
+        return float(train_total_loss), metric_name
+    if metric_name == "val_total_loss":
+        if val_total_loss is not None:
+            return float(val_total_loss), metric_name
+        return float(train_total_loss), "train_total_loss_fallback"
+    raise ValueError("Unsupported scheduler metric. Use scheduler.metric='train_total_loss' or 'val_total_loss'.")
+
+
+def _current_optimizer_lr(optimizer: torch.optim.Optimizer) -> float | None:
+    if not optimizer.param_groups:
+        return None
+    lr = optimizer.param_groups[0].get("lr")
+    return None if lr is None else float(lr)
+
+
+def _scheduler_diagnostics(
+    *,
+    optimizer: torch.optim.Optimizer,
+    scheduler: ReduceLROnPlateau | None,
+    scheduler_metric_name: str | None,
+    scheduler_metric_value: float | None,
+) -> dict[str, float | int | str | bool | None]:
+    diagnostics: dict[str, float | int | str | bool | None] = {
+        "current_lr": _current_optimizer_lr(optimizer),
+        "scheduler_enabled": bool(scheduler is not None),
+    }
+    if scheduler is None:
+        diagnostics["scheduler_name"] = None
+        return diagnostics
+    diagnostics["scheduler_name"] = "reduce_on_plateau"
+    diagnostics["scheduler_metric"] = scheduler_metric_name
+    diagnostics["scheduler_metric_value"] = scheduler_metric_value
+    diagnostics["scheduler_best"] = None if getattr(scheduler, "best", None) is None else float(scheduler.best)
+    diagnostics["scheduler_num_bad_epochs"] = int(getattr(scheduler, "num_bad_epochs", 0))
+    diagnostics["scheduler_cooldown_counter"] = int(getattr(scheduler, "cooldown_counter", 0))
+    return diagnostics
+
+
 def _collocation_refresh_mode(config: Any) -> str:
     return str(cfg_get(config, "pinn.collocation.refresh.mode", "epoch_periodic")).strip().lower()
 
@@ -1979,6 +2051,10 @@ def _train_multistage_pinn(
                 optimizer_kwargs=phase.optimizer_kwargs,
                 line_search=phase.line_search,
             )
+            scheduler = _build_phase_scheduler(
+                optimizer=optimizer_spec.optimizer,
+                scheduler_config=phase.scheduler,
+            )
             phase_full_batch = _phase_effective_full_batch(phase, optimizer_spec)
             if phase_full_batch and phase.batch_size is not None:
                 raise ValueError(f"Optimizer phase '{phase.name}' is full-batch and must set batch_size=null.")
@@ -2223,6 +2299,13 @@ def _train_multistage_pinn(
                     val_component_losses["ic"] = init_val
                     val_total_loss = _compute_weighted_total_loss(val_component_losses, active_weights)
                     test_metrics = {"data_loss": _evaluate_data_loss(model=ensemble, x=dataset.test_x, y=dataset.test_y, criterion=criterion)}
+                scheduler_metric_value, scheduler_metric_name = _scheduler_metric_value(
+                    scheduler_config=phase.scheduler,
+                    train_total_loss=train_total,
+                    val_total_loss=val_total_loss,
+                )
+                if scheduler is not None and scheduler_metric_value is not None:
+                    scheduler.step(float(scheduler_metric_value))
 
                 optimizer_diagnostics = {
                     "requires_closure": optimizer_spec.requires_closure,
@@ -2237,6 +2320,14 @@ def _train_multistage_pinn(
                     "multistage_stage_epsilon": float(effective_stage_epsilon),
                     "multistage_stage_loss_ref": float(stage_loss_ref),
                 }
+                optimizer_diagnostics.update(
+                    _scheduler_diagnostics(
+                        optimizer=optimizer_spec.optimizer,
+                        scheduler=scheduler,
+                        scheduler_metric_name=scheduler_metric_name,
+                        scheduler_metric_value=scheduler_metric_value,
+                    )
+                )
                 optimizer_diagnostics.update(transition_diagnostics)
                 optimizer_diagnostics.update(_collocation_pool_diagnostics(collocation_manager))
                 if stage_start_diagnostics is not None and stage_idx > 0:
@@ -2516,6 +2607,10 @@ def train_pinn(
             lr=phase.lr,
             optimizer_kwargs=phase.optimizer_kwargs,
             line_search=phase.line_search,
+        )
+        scheduler = _build_phase_scheduler(
+            optimizer=optimizer_spec.optimizer,
+            scheduler_config=phase.scheduler,
         )
         phase_full_batch = _phase_effective_full_batch(phase, optimizer_spec)
         if phase_full_batch and phase.batch_size is not None:
@@ -2897,6 +2992,13 @@ def train_pinn(
                 test_metrics = {
                     "data_loss": _evaluate_data_loss(model=model, x=dataset.test_x, y=dataset.test_y, criterion=criterion)
                 }
+            scheduler_metric_value, scheduler_metric_name = _scheduler_metric_value(
+                scheduler_config=phase.scheduler,
+                train_total_loss=train_total,
+                val_total_loss=val_total_loss,
+            )
+            if scheduler is not None and scheduler_metric_value is not None:
+                scheduler.step(float(scheduler_metric_value))
             vrba_summary = _collocation_vrba_summary(collocation_manager)
             vrba_details = _collocation_vrba_details(collocation_manager)
             row = EpochMetrics(
@@ -2952,6 +3054,12 @@ def train_pinn(
                     "sampling_enabled": phase_allows_sampling,
                     "line_search": optimizer_spec.line_search_name,
                     "dynamic_weight_updates_enabled": phase_supports_dynamic_weight_updates,
+                    **_scheduler_diagnostics(
+                        optimizer=optimizer_spec.optimizer,
+                        scheduler=scheduler,
+                        scheduler_metric_name=scheduler_metric_name,
+                        scheduler_metric_value=scheduler_metric_value,
+                    ),
                     **transition_diagnostics,
                     **_collocation_pool_diagnostics(collocation_manager),
                     **(

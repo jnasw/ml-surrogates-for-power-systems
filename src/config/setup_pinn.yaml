@@ -215,6 +215,7 @@ pinn:
           full_batch: false
           allow_sampling: false
           optimizer_kwargs: {}
+          scheduler: null
           line_search: null
           convergence: null
   optimizer_phases:
@@ -227,6 +228,7 @@ pinn:
       full_batch: false
       allow_sampling: true
       optimizer_kwargs: {}
+      scheduler: null
       line_search: null
       convergence: null
     - name: lbfgs
@@ -238,9 +240,34 @@ pinn:
       full_batch: true
       allow_sampling: false
       optimizer_kwargs: {}
+      scheduler: null
       line_search:
         name: strong_wolfe
       convergence: null
+  # Example scheduler on an Adam phase:
+  # optimizer_phases:
+  #   - name: adam
+  #     optimizer: Adam
+  #     lr: 0.001
+  #     epochs: 100
+  #     batch_size: 1024
+  #     shuffle: true
+  #     full_batch: false
+  #     allow_sampling: true
+  #     optimizer_kwargs: {}
+  #     scheduler:
+  #       name: reduce_on_plateau
+  #       metric: train_total_loss # or val_total_loss
+  #       mode: min
+  #       factor: 0.5
+  #       patience: 10
+  #       threshold: 1.0e-4
+  #       threshold_mode: rel
+  #       cooldown: 0
+  #       min_lr: 1.0e-6
+  #       eps: 1.0e-8
+  #     line_search: null
+  #     convergence: null
   optimizer_transition:
     enabled: true
     preserve_state_for: [Adam]
