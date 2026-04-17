@@ -225,7 +225,7 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
     "adaptive_collocation_scheduler_benchmark": {
         "budget": "b256",
         "preset": "default",
-        "epochs": 3000,
+        "epochs": 5000,
         "batch_size": 1024,
         "device": "cuda",
         "gradient_telemetry": False,
@@ -255,14 +255,15 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
         },
         "optimizer_phases_override": (
             "pinn.optimizer_phases=["
-            "{name:adam_periodic_sched,optimizer:Adam,lr:0.001,epochs:3000,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},scheduler:{name:reduce_on_plateau,metric:val_total_loss,mode:min,factor:0.5,patience:200,threshold:0.0001,threshold_mode:rel,cooldown:0,min_lr:1.0e-6,eps:1.0e-8},line_search:null,convergence:null}"
+            "{name:adam_periodic_sched,optimizer:Adam,lr:0.001,epochs:5000,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},scheduler:{name:reduce_on_plateau,metric:val_total_loss,mode:min,factor:0.5,patience:300,threshold:0.0001,threshold_mode:rel,cooldown:0,min_lr:1.0e-6,eps:1.0e-8},line_search:null,convergence:null},"
+            "{name:ssbroyden_tail,optimizer:SSBroyden,lr:1.0,epochs:1000,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null}"
             "]"
         ),
     },
     "vrba_functionality_scheduler_benchmark": {
         "budget": "b256",
         "preset": "default",
-        "epochs": 3000,
+        "epochs": 5000,
         "batch_size": 1024,
         "device": "cuda",
         "gradient_telemetry": False,
@@ -300,7 +301,8 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
         },
         "optimizer_phases_override": (
             "pinn.optimizer_phases=["
-            "{name:adam_periodic_sched,optimizer:Adam,lr:0.001,epochs:3000,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},scheduler:{name:reduce_on_plateau,metric:val_total_loss,mode:min,factor:0.5,patience:200,threshold:0.0001,threshold_mode:rel,cooldown:0,min_lr:1.0e-6,eps:1.0e-8},line_search:null,convergence:null}"
+            "{name:adam_periodic_sched,optimizer:Adam,lr:0.001,epochs:5000,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},scheduler:{name:reduce_on_plateau,metric:val_total_loss,mode:min,factor:0.5,patience:300,threshold:0.0001,threshold_mode:rel,cooldown:0,min_lr:1.0e-6,eps:1.0e-8},line_search:null,convergence:null},"
+            "{name:ssbroyden_tail,optimizer:SSBroyden,lr:1.0,epochs:1000,batch_size:null,shuffle:false,full_batch:true,allow_sampling:false,optimizer_kwargs:{},line_search:{name:strong_wolfe},convergence:null}"
             "]"
         ),
     },
