@@ -282,6 +282,8 @@ def _optimizer_stage(
     lr: float,
     batch_size: int,
     line_search_name: str,
+    stochastic_curvature_threshold: float,
+    stochastic_init_hessian_scale: float,
 ) -> str:
     lower = optimizer.lower()
     optimizer_kwargs = "{}"
@@ -301,13 +303,25 @@ def _optimizer_stage(
         line_search_name = "strong_wolfe"
         line_search = f"{{name:{line_search_name}}}"
     elif optimizer == "sSSBFGS":
-        optimizer_kwargs = "{curvature_threshold:1.0e-12,tau_strategy:al_baali}"
+        optimizer_kwargs = (
+            "{"
+            f"curvature_threshold:{stochastic_curvature_threshold},"
+            f"init_hessian_scale:{stochastic_init_hessian_scale},"
+            "tau_strategy:al_baali"
+            "}"
+        )
         batch_size_value = str(int(batch_size))
         shuffle = "true"
         full_batch = "false"
         line_search = "null"
     elif optimizer == "sSSBroyden":
-        optimizer_kwargs = "{curvature_threshold:1.0e-12,tau_strategy:paper_default,phi_strategy:paper_default}"
+        optimizer_kwargs = (
+            "{"
+            f"curvature_threshold:{stochastic_curvature_threshold},"
+            f"init_hessian_scale:{stochastic_init_hessian_scale},"
+            "tau_strategy:paper_default,phi_strategy:paper_default"
+            "}"
+        )
         batch_size_value = str(int(batch_size))
         shuffle = "true"
         full_batch = "false"
@@ -336,8 +350,11 @@ def _optimizer_phase_override(
     adam_lr: float,
     quasi_newton_epochs: int,
     quasi_newton_lr: float,
+    stochastic_qn_lr: float,
     batch_size: int,
     line_search_name: str,
+    stochastic_curvature_threshold: float,
+    stochastic_init_hessian_scale: float,
 ) -> str:
     phases: list[str] = []
     if adam_warmup_epochs > 0:
@@ -360,9 +377,11 @@ def _optimizer_phase_override(
         _optimizer_stage(
             optimizer=optimizer,
             epochs=quasi_newton_epochs,
-            lr=quasi_newton_lr,
+            lr=stochastic_qn_lr if optimizer in MINIBATCH_OPTIMIZERS else quasi_newton_lr,
             batch_size=batch_size,
             line_search_name=line_search_name,
+            stochastic_curvature_threshold=stochastic_curvature_threshold,
+            stochastic_init_hessian_scale=stochastic_init_hessian_scale,
         )
     )
     return "pinn.optimizer_phases=[" + ",".join(phases) + "]"
@@ -390,8 +409,11 @@ def _build_pinn_command(
     adam_lr: float,
     quasi_newton_epochs: int,
     quasi_newton_lr: float,
+    stochastic_qn_lr: float,
     optimizer: str,
     line_search_name: str,
+    stochastic_curvature_threshold: float,
+    stochastic_init_hessian_scale: float,
     log_every_epoch: int,
     loss_weight_data: float,
     loss_weight_dt: float,
@@ -405,8 +427,11 @@ def _build_pinn_command(
         adam_lr=adam_lr,
         quasi_newton_epochs=quasi_newton_epochs,
         quasi_newton_lr=quasi_newton_lr,
+        stochastic_qn_lr=stochastic_qn_lr,
         batch_size=batch_size,
         line_search_name=line_search_name,
+        stochastic_curvature_threshold=stochastic_curvature_threshold,
+        stochastic_init_hessian_scale=stochastic_init_hessian_scale,
     )
     command = [
         python_bin,
@@ -461,7 +486,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=1024, help="Adam warm-up batch size.")
     parser.add_argument("--adam-lr", type=float, default=1e-3, help="Adam learning rate.")
     parser.add_argument("--quasi-newton-lr", type=float, default=1.0, help="Learning rate passed to quasi-Newton optimizer phases.")
+    parser.add_argument(
+        "--stochastic-qn-lr",
+        type=float,
+        default=5.0e-2,
+        help="Learning rate used for stochastic quasi-Newton phases such as sSSBFGS and sSSBroyden.",
+    )
     parser.add_argument("--line-search", default="strong_wolfe", choices=["strong_wolfe", "backtracking"], help="Line-search method for BFGS-family optimizer phases.")
+    parser.add_argument(
+        "--stochastic-curvature-threshold",
+        type=float,
+        default=1.0e-6,
+        help="Curvature acceptance threshold for stochastic quasi-Newton phases.",
+    )
+    parser.add_argument(
+        "--stochastic-init-hessian-scale",
+        type=float,
+        default=1.0e-1,
+        help="Initial inverse-Hessian scale for stochastic quasi-Newton phases.",
+    )
     parser.add_argument("--optimizers", default="LBFGS,BFGS,SSBFGS,SSBroyden", help="Comma-separated optimizer list.")
     parser.add_argument("--warmup-epochs", default=None, help="Comma-separated Adam warm-up lengths. Default depends on --profile.")
     parser.add_argument("--quasi-newton-epochs", default=None, help="Comma-separated quasi-Newton epoch counts. Default depends on --profile.")
@@ -608,8 +651,11 @@ def main() -> None:
                     adam_lr=args.adam_lr,
                     quasi_newton_epochs=qn_epochs,
                     quasi_newton_lr=args.quasi_newton_lr,
+                    stochastic_qn_lr=args.stochastic_qn_lr,
                     optimizer=optimizer,
                     line_search_name=args.line_search,
+                    stochastic_curvature_threshold=args.stochastic_curvature_threshold,
+                    stochastic_init_hessian_scale=args.stochastic_init_hessian_scale,
                     log_every_epoch=args.log_every_epoch,
                     loss_weight_data=args.loss_weight_data,
                     loss_weight_dt=args.loss_weight_dt,

@@ -20,6 +20,11 @@ class LazyStochasticQuasiNewtonMixin:
         group["stochastic_curvature_threshold"] = float(curvature_threshold)
         group["reset_on_direction_failure"] = bool(reset_on_direction_failure)
 
+    def _max_abs_or_none(self, tensor: torch.Tensor | None) -> float | None:
+        if tensor is None or tensor.numel() == 0:
+            return None
+        return float(torch.max(torch.abs(tensor)).item())
+
     @torch.no_grad()
     def step(self, closure=None):
         if closure is not None:
@@ -34,6 +39,35 @@ class LazyStochasticQuasiNewtonMixin:
         xk = self._flat_params()
         gk = self._flat_grads()
         grad_norm = float(torch.linalg.vector_norm(gk, ord=2).item()) if gk.numel() > 0 else 0.0
+        param_norm = float(torch.linalg.vector_norm(xk, ord=2).item()) if xk.numel() > 0 else 0.0
+        param_finite = bool(torch.isfinite(xk).all().item()) if xk.numel() > 0 else True
+        grad_finite = bool(torch.isfinite(gk).all().item()) if gk.numel() > 0 else True
+
+        if not param_finite or not grad_finite:
+            self._last_diagnostics = {
+                "line_search_success": False,
+                "line_search_evals": 0,
+                "step_size": 0.0,
+                "effective_step_norm": None,
+                "grad_norm": grad_norm,
+                "grad_max_abs": self._max_abs_or_none(gk),
+                "curvature_ys": None,
+                "update_skipped": True,
+                "direction_reset": False,
+                "directional_derivative": None,
+                "param_norm": param_norm,
+                "param_max_abs": self._max_abs_or_none(xk),
+                "optimizer": self._optimizer_label(),
+                "stochastic_mode": True,
+                "stochastic_prev_available": bool(state.get("g_prev") is not None and state.get("s_prev") is not None),
+                "stochastic_hessian_updated": False,
+                "stochastic_curvature_condition_met": False,
+                "stochastic_curvature_rhs": None,
+                "reason": "nonfinite_state",
+            }
+            raise FloatingPointError(
+                f"{self._optimizer_label()} encountered non-finite parameters or gradients before applying a step."
+            )
 
         if gk.numel() == 0:
             self._last_diagnostics = {
@@ -69,6 +103,29 @@ class LazyStochasticQuasiNewtonMixin:
                 device=xk.device,
                 scale=float(group["init_hessian_scale"]),
             )
+        elif not bool(torch.isfinite(H).all().item()):
+            self._last_diagnostics = {
+                "line_search_success": False,
+                "line_search_evals": 0,
+                "step_size": 0.0,
+                "effective_step_norm": None,
+                "grad_norm": grad_norm,
+                "grad_max_abs": self._max_abs_or_none(gk),
+                "curvature_ys": None,
+                "update_skipped": True,
+                "direction_reset": False,
+                "directional_derivative": None,
+                "param_norm": param_norm,
+                "param_max_abs": self._max_abs_or_none(xk),
+                "optimizer": self._optimizer_label(),
+                "stochastic_mode": True,
+                "stochastic_prev_available": bool(state.get("g_prev") is not None and state.get("s_prev") is not None),
+                "stochastic_hessian_updated": False,
+                "stochastic_curvature_condition_met": False,
+                "stochastic_curvature_rhs": None,
+                "reason": "nonfinite_hessian",
+            }
+            raise FloatingPointError(f"{self._optimizer_label()} encountered a non-finite inverse-Hessian estimate.")
 
         prev_gradient = state.get("g_prev")
         prev_step = state.get("s_prev")
@@ -137,11 +194,13 @@ class LazyStochasticQuasiNewtonMixin:
                 "step_size": float(group["lr"]),
                 "effective_step_norm": step_norm,
                 "grad_norm": grad_norm,
+                "grad_max_abs": self._max_abs_or_none(gk),
                 "curvature_ys": curvature_ys,
                 "update_skipped": True,
                 "direction_reset": bool(direction_reset),
                 "directional_derivative": directional,
-                "param_norm": float(torch.linalg.vector_norm(xk, ord=2).item()),
+                "param_norm": param_norm,
+                "param_max_abs": self._max_abs_or_none(xk),
                 "optimizer": self._optimizer_label(),
                 "stochastic_mode": True,
                 "stochastic_prev_available": bool(prev_gradient is not None and prev_step is not None),
@@ -154,6 +213,30 @@ class LazyStochasticQuasiNewtonMixin:
             return None
 
         x_next = xk + step
+        if not bool(torch.isfinite(x_next).all().item()):
+            self._last_diagnostics = {
+                "line_search_success": False,
+                "line_search_evals": 0,
+                "step_size": float(group["lr"]),
+                "effective_step_norm": step_norm,
+                "grad_norm": grad_norm,
+                "grad_max_abs": self._max_abs_or_none(gk),
+                "curvature_ys": curvature_ys,
+                "update_skipped": True,
+                "direction_reset": bool(direction_reset),
+                "directional_derivative": directional,
+                "param_norm": param_norm,
+                "param_max_abs": self._max_abs_or_none(xk),
+                "optimizer": self._optimizer_label(),
+                "stochastic_mode": True,
+                "stochastic_prev_available": bool(prev_gradient is not None and prev_step is not None),
+                "stochastic_hessian_updated": bool(hessian_updated),
+                "stochastic_curvature_condition_met": bool(curvature_condition_met),
+                "stochastic_curvature_rhs": curvature_rhs,
+                "reason": "nonfinite_step",
+                **update_diagnostics,
+            }
+            raise FloatingPointError(f"{self._optimizer_label()} produced a non-finite parameter step.")
         self._set_flat_params(x_next)
 
         state["H"] = H
@@ -167,11 +250,13 @@ class LazyStochasticQuasiNewtonMixin:
             "step_size": float(group["lr"]),
             "effective_step_norm": step_norm,
             "grad_norm": grad_norm,
+            "grad_max_abs": self._max_abs_or_none(gk),
             "curvature_ys": curvature_ys,
             "update_skipped": bool(update_skipped),
             "direction_reset": bool(direction_reset),
             "directional_derivative": directional,
-            "param_norm": float(torch.linalg.vector_norm(xk, ord=2).item()),
+            "param_norm": param_norm,
+            "param_max_abs": self._max_abs_or_none(xk),
             "optimizer": self._optimizer_label(),
             "stochastic_mode": True,
             "stochastic_prev_available": bool(prev_gradient is not None and prev_step is not None),

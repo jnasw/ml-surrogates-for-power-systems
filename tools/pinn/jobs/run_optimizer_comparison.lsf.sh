@@ -49,6 +49,9 @@ PINN_DTYPE="${PINN_DTYPE:-float64}"
 PINN_BATCH_SIZE="${PINN_BATCH_SIZE:-1024}"
 ADAM_LR="${ADAM_LR:-1e-3}"
 QUASI_NEWTON_LR="${QUASI_NEWTON_LR:-1.0}"
+STOCHASTIC_QN_LR="${STOCHASTIC_QN_LR:-5e-2}"
+STOCHASTIC_CURVATURE_THRESHOLD="${STOCHASTIC_CURVATURE_THRESHOLD:-1e-6}"
+STOCHASTIC_INIT_HESSIAN_SCALE="${STOCHASTIC_INIT_HESSIAN_SCALE:-1e-1}"
 LINE_SEARCH="${LINE_SEARCH:-strong_wolfe}"
 OPTIMIZERS="${OPTIMIZERS:-sSSBFGS,sSSBroyden}"
 WARMUP_EPOCHS="${WARMUP_EPOCHS:-300}"
@@ -82,6 +85,9 @@ CMD=(
   --batch-size "${PINN_BATCH_SIZE}"
   --adam-lr "${ADAM_LR}"
   --quasi-newton-lr "${QUASI_NEWTON_LR}"
+  --stochastic-qn-lr "${STOCHASTIC_QN_LR}"
+  --stochastic-curvature-threshold "${STOCHASTIC_CURVATURE_THRESHOLD}"
+  --stochastic-init-hessian-scale "${STOCHASTIC_INIT_HESSIAN_SCALE}"
   --line-search "${LINE_SEARCH}"
   --optimizers "${OPTIMIZERS}"
   --wandb-project "${WANDB_PROJECT}"
@@ -155,6 +161,9 @@ fi
 if [[ -n "${QUASI_NEWTON_EPOCHS}" ]]; then
   echo "[optimizer-comparison] quasi_newton_epochs=${QUASI_NEWTON_EPOCHS}"
 fi
+echo "[optimizer-comparison] stochastic_qn_lr=${STOCHASTIC_QN_LR}"
+echo "[optimizer-comparison] stochastic_curvature_threshold=${STOCHASTIC_CURVATURE_THRESHOLD}"
+echo "[optimizer-comparison] stochastic_init_hessian_scale=${STOCHASTIC_INIT_HESSIAN_SCALE}"
 if [[ -n "${DATASET_ROOT}" ]]; then
   echo "[optimizer-comparison] dataset_root=${DATASET_ROOT}"
 fi

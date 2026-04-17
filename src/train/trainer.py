@@ -1442,6 +1442,20 @@ def _train_pinn_step(
     scale = max(float(objective_scale), 1.0e-12)
     retain_graph_for_telemetry = bool(capture_gradient_telemetry and not optimizer_spec.requires_closure)
 
+    def _raise_on_nonfinite_losses(losses: PinnLossBreakdown, *, stage: str) -> None:
+        if not bool(torch.isfinite(losses.total.detach()).item()):
+            raise FloatingPointError(f"Encountered non-finite total loss during {stage}.")
+        for name, value in losses.components.items():
+            if not bool(torch.isfinite(value.detach()).item()):
+                raise FloatingPointError(f"Encountered non-finite loss component '{name}' during {stage}.")
+
+    def _raise_on_nonfinite_params(*, stage: str) -> None:
+        for name, param in model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if not bool(torch.isfinite(param.detach()).all().item()):
+                raise FloatingPointError(f"Encountered non-finite parameter '{name}' during {stage}.")
+
     def closure() -> torch.Tensor:
         optimizer.zero_grad(set_to_none=True)
         losses = evaluate_pinn_loss_breakdown(
@@ -1460,6 +1474,7 @@ def _train_pinn_step(
             x_init_weights=x_init_weights,
             create_graph=True,
         )
+        _raise_on_nonfinite_losses(losses, stage="forward pass")
         scaled_total = losses.total / scale
         scaled_total.backward(retain_graph=retain_graph_for_telemetry)
         breakdown_box["losses"] = losses
@@ -1467,6 +1482,7 @@ def _train_pinn_step(
 
     if optimizer_spec.requires_closure:
         optimizer.step(closure)
+        _raise_on_nonfinite_params(stage="optimizer step")
         optimizer.zero_grad(set_to_none=True)
         measured_losses, measured_telemetry = _measure_pinn_state(
             model=model,
@@ -1484,6 +1500,7 @@ def _train_pinn_step(
             x_init_weights=x_init_weights,
             capture_gradient_telemetry=capture_gradient_telemetry,
         )
+        _raise_on_nonfinite_losses(measured_losses, stage="post-step evaluation")
         breakdown_box["losses"] = measured_losses
         telemetry_box["telemetry"] = measured_telemetry
     else:
@@ -1495,6 +1512,7 @@ def _train_pinn_step(
                 weights=weights,
             )
         optimizer.step()
+        _raise_on_nonfinite_params(stage="optimizer step")
     return breakdown_box["losses"], telemetry_box["telemetry"]
 
 
