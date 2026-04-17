@@ -14,8 +14,11 @@ from src.data.generate.dataset_functions import ODETrajectoryBuilder
 from src.data.contracts.data_contract import (
     H5_COLLOCATION_SUFFIX,
     H5_DATA_SUFFIX,
+    H5_DIFFICULTY_BIN_KEYS,
+    H5_DIFFICULTY_SCORE_KEYS,
     H5_FILE_SUFFIX,
     H5_INIT_SUFFIX,
+    H5_TRAJECTORY_ID_KEYS,
     H5_X_KEYS,
     H5_Y_KEYS,
     INFO_FILE_NAME,
@@ -24,6 +27,7 @@ from src.data.contracts.data_contract import (
     TEST_SPLIT,
     validate_info_lines,
 )
+from src.methods.marker_utils import compute_marker_matrix
 
 
 class Datapreprocessor:
@@ -143,6 +147,7 @@ class Datapreprocessor:
 
         self.input_dim = len(keys) + (len(keys_ext) if keys_ext else 0) + 1
         self.output_dim = len(keys)
+        self.state_names = [str(key) for key in keys]
 
     def _existing_split_count(self, folder_path: str, suffix: str) -> int:
         return len(
@@ -160,6 +165,7 @@ class Datapreprocessor:
         y_data: np.ndarray | None,
         cnt: int,
         suffix: str = H5_DATA_SUFFIX,
+        supervised_metadata: dict[str, np.ndarray] | None = None,
     ) -> None:
         folder = {
             TRAIN_SPLIT: self.train_folder,
@@ -172,6 +178,9 @@ class Datapreprocessor:
             h5f.create_dataset(H5_X_KEYS[split], data=x_data, compression="gzip", compression_opts=9)
             if y_data is not None:
                 h5f.create_dataset(H5_Y_KEYS[split], data=y_data, compression="gzip", compression_opts=9)
+            if suffix == H5_DATA_SUFFIX and supervised_metadata:
+                for key, values in supervised_metadata.items():
+                    h5f.create_dataset(key, data=values, compression="gzip", compression_opts=9)
 
     def _update_train_stats(self, x_chunk: np.ndarray) -> None:
         if x_chunk.size == 0:
@@ -275,6 +284,149 @@ class Datapreprocessor:
         x[:, 1:] = x[0, 1:]
         return x, y
 
+    def _curriculum_enabled(self) -> bool:
+        return bool(getattr(getattr(self.cfg, "pinn", {}), "curriculum", {}).get("enabled", False))
+
+    def _trajectory_marker_payload(
+        self,
+        trajectory: Any,
+        time_limit: float,
+        simulation_time: float | None = None,
+    ) -> tuple[np.ndarray, list[str]]:
+        arr = np.asarray(trajectory, dtype=np.float32)
+        sim_time = self.time_sim if simulation_time is None else float(simulation_time)
+        if time_limit > sim_time:
+            raise ValueError("Configured preprocessing time exceeds simulation time in info.txt.")
+        if time_limit != 0:
+            arr = arr[:, arr[0] <= time_limit]
+        time_grid = arr[0].astype(np.float32, copy=False)
+        traj = arr[1 : self.output_dim + 1].T.astype(np.float32, copy=False)[None, :, :]
+        return compute_marker_matrix(
+            trajs=traj,
+            time_grid=time_grid,
+            state_names=self.state_names,
+        )
+
+    def _trajectory_difficulty_score(self, trajectory: Any, time_limit: float, simulation_time: float | None = None) -> float:
+        marker_values, marker_names = self._trajectory_marker_payload(
+            trajectory=trajectory,
+            time_limit=time_limit,
+            simulation_time=simulation_time,
+        )
+        marker_row = marker_values[0]
+        index_by_name = {name: idx for idx, name in enumerate(marker_names)}
+        cfg = getattr(getattr(self.cfg, "pinn", {}), "curriculum", {})
+        weight_cfg = getattr(getattr(cfg, "difficulty", {}), "weights", {})
+        default_weights = {
+            "derivative_energy_l2": 0.30,
+            "max_derivative_mag": 0.20,
+            "total_variation__state_mean": 0.20,
+            "settling_time__state_mean": 0.15,
+            "iae__state_mean": 0.15,
+        }
+        score = 0.0
+        for name, default_weight in default_weights.items():
+            if name not in index_by_name:
+                continue
+            weight = float(getattr(weight_cfg, name, default_weight))
+            score += weight * float(marker_row[index_by_name[name]])
+        return float(score)
+
+    def _local_curriculum_metadata(self) -> tuple[list[dict[str, float | int | str]], np.ndarray] | None:
+        if not self._curriculum_enabled():
+            return None
+
+        raw_files = sorted([f for f in os.listdir(self.raw_data_path) if f.endswith(".pkl")])
+        has_val = bool(self.dataset_cfg.validation_flag)
+        train_traj = int(self.total_init_conditions * float(self.dataset_cfg.split_ratio))
+        if self.test_split_mode in {"internal", "paired_common_from_datasets"}:
+            if has_val:
+                remaining = self.total_init_conditions - train_traj
+                val_cutoff = train_traj + (remaining // 2)
+            else:
+                val_cutoff = train_traj
+        else:
+            val_cutoff = self.total_init_conditions if has_val else train_traj
+
+        records: list[dict[str, float | int | str]] = []
+        train_scores: list[float] = []
+        traj_idx_global = 0
+        for raw_file in raw_files:
+            file_path = os.path.join(self.raw_data_path, raw_file)
+            trajectories = self._load_raw_file(file_path, bool(self.dataset_cfg.shuffle))
+            for trajectory in trajectories:
+                if self.test_split_mode == "internal":
+                    split = self._split_from_index(
+                        traj_idx=traj_idx_global,
+                        train_cutoff=train_traj,
+                        val_cutoff=val_cutoff,
+                        has_val=has_val,
+                    )
+                else:
+                    if traj_idx_global < train_traj:
+                        split = TRAIN_SPLIT
+                    elif has_val:
+                        split = VAL_SPLIT
+                    else:
+                        split = TRAIN_SPLIT
+                score = self._trajectory_difficulty_score(
+                    trajectory=trajectory,
+                    time_limit=float(self.cfg.time),
+                    simulation_time=self.time_sim,
+                )
+                records.append(
+                    {
+                        "trajectory_id": int(traj_idx_global),
+                        "difficulty_score": float(score),
+                        "split": split,
+                    }
+                )
+                if split == TRAIN_SPLIT:
+                    train_scores.append(float(score))
+                traj_idx_global += 1
+
+        num_bins = int(getattr(getattr(self.cfg.pinn, "curriculum", {}), "num_bins", 3))
+        if num_bins < 1:
+            raise ValueError("pinn.curriculum.num_bins must be >= 1.")
+        if train_scores:
+            quantiles = np.linspace(0.0, 1.0, num_bins + 1, dtype=np.float64)[1:-1]
+            bin_edges = np.quantile(np.asarray(train_scores, dtype=np.float32), quantiles).astype(np.float32)
+        else:
+            bin_edges = np.asarray([], dtype=np.float32)
+        for record in records:
+            score = float(record["difficulty_score"])
+            record["difficulty_bin"] = int(np.searchsorted(bin_edges, score, side="right"))
+        self.set_info_attributes(
+            curriculum_enabled=True,
+            curriculum_num_bins=int(num_bins),
+            curriculum_bin_edges=bin_edges.tolist(),
+        )
+        return records, bin_edges
+
+    def _supervised_metadata_rows(
+        self,
+        *,
+        x: np.ndarray,
+        trajectory_id: int,
+        difficulty_score: float,
+        difficulty_bin: int,
+    ) -> dict[str, np.ndarray]:
+        row_count = int(x.shape[0])
+        return {
+            H5_TRAJECTORY_ID_KEYS[TRAIN_SPLIT]: np.full((row_count,), int(trajectory_id), dtype=np.int64),
+            H5_DIFFICULTY_SCORE_KEYS[TRAIN_SPLIT]: np.full((row_count,), float(difficulty_score), dtype=np.float32),
+            H5_DIFFICULTY_BIN_KEYS[TRAIN_SPLIT]: np.full((row_count,), int(difficulty_bin), dtype=np.int64),
+        }
+
+    def _metadata_with_split_keys(self, split: str, payload: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+        if split == TRAIN_SPLIT:
+            return payload
+        remapped: dict[str, np.ndarray] = {}
+        remapped[H5_TRAJECTORY_ID_KEYS[split]] = payload[H5_TRAJECTORY_ID_KEYS[TRAIN_SPLIT]]
+        remapped[H5_DIFFICULTY_SCORE_KEYS[split]] = payload[H5_DIFFICULTY_SCORE_KEYS[TRAIN_SPLIT]]
+        remapped[H5_DIFFICULTY_BIN_KEYS[split]] = payload[H5_DIFFICULTY_BIN_KEYS[TRAIN_SPLIT]]
+        return remapped
+
     def _split_from_index(self, traj_idx: int, train_cutoff: int, val_cutoff: int, has_val: bool) -> str:
         if traj_idx < train_cutoff:
             return TRAIN_SPLIT
@@ -370,7 +522,10 @@ class Datapreprocessor:
 
         buffers_x = {TRAIN_SPLIT: [], VAL_SPLIT: [], TEST_SPLIT: []}
         buffers_y = {TRAIN_SPLIT: [], VAL_SPLIT: [], TEST_SPLIT: []}
+        buffers_meta = {TRAIN_SPLIT: [], VAL_SPLIT: [], TEST_SPLIT: []}
         trajectories_by_split = {TRAIN_SPLIT: 0, VAL_SPLIT: 0, TEST_SPLIT: 0}
+        curriculum_metadata = self._local_curriculum_metadata()
+        local_curriculum_records = None if curriculum_metadata is None else curriculum_metadata[0]
 
         raw_files = sorted([f for f in os.listdir(self.raw_data_path) if f.endswith(".pkl")])
         if self.test_split_mode != "paired_common_from_datasets":
@@ -401,8 +556,22 @@ class Datapreprocessor:
                         float(self.cfg.time),
                         simulation_time=self.time_sim,
                     )
+                    row_metadata: dict[str, np.ndarray] | None = None
+                    if local_curriculum_records is not None:
+                        record = local_curriculum_records[traj_idx_global]
+                        row_metadata = self._metadata_with_split_keys(
+                            split,
+                            self._supervised_metadata_rows(
+                                x=x,
+                                trajectory_id=int(record["trajectory_id"]),
+                                difficulty_score=float(record["difficulty_score"]),
+                                difficulty_bin=int(record["difficulty_bin"]),
+                            ),
+                        )
                     buffers_x[split].append(x)
                     buffers_y[split].append(y)
+                    if row_metadata is not None:
+                        buffers_meta[split].append(row_metadata)
                     trajectories_by_split[split] += 1
                     traj_idx_global += 1
 
@@ -410,7 +579,7 @@ class Datapreprocessor:
                     for split_name in (TRAIN_SPLIT, VAL_SPLIT, TEST_SPLIT):
                         sample_count = sum(chunk.shape[0] for chunk in buffers_x[split_name])
                         if sample_count >= self.save_freq:
-                            self._flush_split_buffers(split_name, buffers_x, buffers_y)
+                            self._flush_split_buffers(split_name, buffers_x, buffers_y, buffers_meta)
 
         if self.test_split_mode == "shared_dataset":
             if self.shared_test_dataset_root in (None, "") and self.shared_test_dataset_number is None:
@@ -446,14 +615,33 @@ class Datapreprocessor:
                         float(self.cfg.time),
                         simulation_time=shared_time_sim,
                     )
+                    row_metadata = None
+                    if curriculum_metadata is not None:
+                        score = self._trajectory_difficulty_score(
+                            trajectory=trajectory,
+                            time_limit=float(self.cfg.time),
+                            simulation_time=shared_time_sim,
+                        )
+                        bin_edges = curriculum_metadata[1]
+                        row_metadata = self._metadata_with_split_keys(
+                            TEST_SPLIT,
+                            self._supervised_metadata_rows(
+                                x=x,
+                                trajectory_id=int(self.total_init_conditions + test_count),
+                                difficulty_score=float(score),
+                                difficulty_bin=int(np.searchsorted(bin_edges, score, side="right")),
+                            ),
+                        )
                     buffers_x[TEST_SPLIT].append(x)
                     buffers_y[TEST_SPLIT].append(y)
+                    if row_metadata is not None:
+                        buffers_meta[TEST_SPLIT].append(row_metadata)
                     trajectories_by_split[TEST_SPLIT] += 1
                     test_count += 1
 
                     sample_count = sum(chunk.shape[0] for chunk in buffers_x[TEST_SPLIT])
                     if sample_count >= self.save_freq:
-                        self._flush_split_buffers(TEST_SPLIT, buffers_x, buffers_y)
+                        self._flush_split_buffers(TEST_SPLIT, buffers_x, buffers_y, buffers_meta)
                 if max_test is not None and test_count >= max_test:
                     break
 
@@ -479,6 +667,7 @@ class Datapreprocessor:
             # Rebuild train/val buffers from current dataset without any common-test ICs.
             buffers_x = {TRAIN_SPLIT: [], VAL_SPLIT: [], TEST_SPLIT: []}
             buffers_y = {TRAIN_SPLIT: [], VAL_SPLIT: [], TEST_SPLIT: []}
+            buffers_meta = {TRAIN_SPLIT: [], VAL_SPLIT: [], TEST_SPLIT: []}
             trajectories_by_split = {TRAIN_SPLIT: 0, VAL_SPLIT: 0, TEST_SPLIT: 0}
 
             non_test_flags: list[bool] = []
@@ -526,14 +715,28 @@ class Datapreprocessor:
                             float(self.cfg.time),
                             simulation_time=self.time_sim,
                         )
+                        row_metadata = None
+                        if local_curriculum_records is not None:
+                            record = local_curriculum_records[global_idx]
+                            row_metadata = self._metadata_with_split_keys(
+                                split,
+                                self._supervised_metadata_rows(
+                                    x=x,
+                                    trajectory_id=int(record["trajectory_id"]),
+                                    difficulty_score=float(record["difficulty_score"]),
+                                    difficulty_bin=int(record["difficulty_bin"]),
+                                ),
+                            )
                         buffers_x[split].append(x)
                         buffers_y[split].append(y)
+                        if row_metadata is not None:
+                            buffers_meta[split].append(row_metadata)
                         trajectories_by_split[split] += 1
                         non_test_idx += 1
 
                         sample_count = sum(chunk.shape[0] for chunk in buffers_x[split])
                         if sample_count >= self.save_freq:
-                            self._flush_split_buffers(split, buffers_x, buffers_y)
+                            self._flush_split_buffers(split, buffers_x, buffers_y, buffers_meta)
                     global_idx += 1
 
             # Append shared/common test set (identical for both compared datasets).
@@ -545,15 +748,34 @@ class Datapreprocessor:
                     float(self.cfg.time),
                     simulation_time=source_time,
                 )
+                row_metadata = None
+                if curriculum_metadata is not None:
+                    score = self._trajectory_difficulty_score(
+                        trajectory=trajectory,
+                        time_limit=float(self.cfg.time),
+                        simulation_time=source_time,
+                    )
+                    bin_edges = curriculum_metadata[1]
+                    row_metadata = self._metadata_with_split_keys(
+                        TEST_SPLIT,
+                        self._supervised_metadata_rows(
+                            x=x,
+                            trajectory_id=int(self.total_init_conditions + trajectories_by_split[TEST_SPLIT]),
+                            difficulty_score=float(score),
+                            difficulty_bin=int(np.searchsorted(bin_edges, score, side="right")),
+                        ),
+                    )
                 buffers_x[TEST_SPLIT].append(x)
                 buffers_y[TEST_SPLIT].append(y)
+                if row_metadata is not None:
+                    buffers_meta[TEST_SPLIT].append(row_metadata)
                 trajectories_by_split[TEST_SPLIT] += 1
                 sample_count = sum(chunk.shape[0] for chunk in buffers_x[TEST_SPLIT])
                 if sample_count >= self.save_freq:
-                    self._flush_split_buffers(TEST_SPLIT, buffers_x, buffers_y)
+                    self._flush_split_buffers(TEST_SPLIT, buffers_x, buffers_y, buffers_meta)
 
         for split_name in (TRAIN_SPLIT, VAL_SPLIT, TEST_SPLIT):
-            self._flush_split_buffers(split_name, buffers_x, buffers_y, flush_all=True)
+            self._flush_split_buffers(split_name, buffers_x, buffers_y, buffers_meta, flush_all=True)
 
         self._finalize_stats()
         self.set_info_attributes(
@@ -584,6 +806,7 @@ class Datapreprocessor:
         split: str,
         buffers_x: dict[str, list[np.ndarray]],
         buffers_y: dict[str, list[np.ndarray]],
+        buffers_meta: dict[str, list[dict[str, np.ndarray]]],
         flush_all: bool = False,
     ) -> None:
         if not buffers_x[split]:
@@ -593,21 +816,49 @@ class Datapreprocessor:
 
         x_chunk = np.concatenate(buffers_x[split], axis=0)
         y_chunk = np.concatenate(buffers_y[split], axis=0)
+        metadata_chunk: dict[str, np.ndarray] | None = None
+        if buffers_meta[split]:
+            metadata_chunk = {
+                key: np.concatenate([payload[key] for payload in buffers_meta[split]], axis=0)
+                for key in buffers_meta[split][0]
+            }
         buffers_x[split].clear()
         buffers_y[split].clear()
+        buffers_meta[split].clear()
 
         if split == TRAIN_SPLIT:
             self.train_file_count += 1
             self._update_train_stats(x_chunk)
-            self._save_dataset(split, x_chunk, y_chunk, self.train_file_count, suffix=H5_DATA_SUFFIX)
+            self._save_dataset(
+                split,
+                x_chunk,
+                y_chunk,
+                self.train_file_count,
+                suffix=H5_DATA_SUFFIX,
+                supervised_metadata=metadata_chunk,
+            )
             out_idx = self.train_file_count
         elif split == VAL_SPLIT:
             self.val_file_count += 1
-            self._save_dataset(split, x_chunk, y_chunk, self.val_file_count, suffix=H5_DATA_SUFFIX)
+            self._save_dataset(
+                split,
+                x_chunk,
+                y_chunk,
+                self.val_file_count,
+                suffix=H5_DATA_SUFFIX,
+                supervised_metadata=metadata_chunk,
+            )
             out_idx = self.val_file_count
         else:
             self.test_file_count += 1
-            self._save_dataset(split, x_chunk, y_chunk, self.test_file_count, suffix=H5_DATA_SUFFIX)
+            self._save_dataset(
+                split,
+                x_chunk,
+                y_chunk,
+                self.test_file_count,
+                suffix=H5_DATA_SUFFIX,
+                supervised_metadata=metadata_chunk,
+            )
             out_idx = self.test_file_count
         print(
             f"[preprocess] Wrote {split} chunk #{out_idx} | "

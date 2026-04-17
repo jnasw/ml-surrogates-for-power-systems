@@ -80,6 +80,19 @@ pinn:
     enabled: false
     rows_per_epoch: null
     fraction_per_epoch: null
+  curriculum:
+    enabled: false
+    num_bins: 3
+    unlock_epochs: [1, 101, 201]
+    stage_length_epochs: 100
+    balance_active_bins: true
+    difficulty:
+      weights:
+        derivative_energy_l2: 0.30
+        max_derivative_mag: 0.20
+        total_variation__state_mean: 0.20
+        settling_time__state_mean: 0.15
+        iae__state_mean: 0.15
   evaluation:
     frequency: 1
   checkpointing:

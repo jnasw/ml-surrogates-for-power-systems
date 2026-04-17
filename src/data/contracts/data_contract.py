@@ -34,6 +34,21 @@ H5_Y_KEYS = {
     VAL_SPLIT: "y_val",
     TEST_SPLIT: "y_test",
 }
+H5_TRAJECTORY_ID_KEYS = {
+    TRAIN_SPLIT: "trajectory_id_train",
+    VAL_SPLIT: "trajectory_id_val",
+    TEST_SPLIT: "trajectory_id_test",
+}
+H5_DIFFICULTY_SCORE_KEYS = {
+    TRAIN_SPLIT: "difficulty_score_train",
+    VAL_SPLIT: "difficulty_score_val",
+    TEST_SPLIT: "difficulty_score_test",
+}
+H5_DIFFICULTY_BIN_KEYS = {
+    TRAIN_SPLIT: "difficulty_bin_train",
+    VAL_SPLIT: "difficulty_bin_val",
+    TEST_SPLIT: "difficulty_bin_test",
+}
 
 INFO_REQUIRED_KEYS = (
     "Number of files",

@@ -13,8 +13,11 @@ from torch.utils.data import Dataset
 from src.data.contracts.data_contract import (
     H5_COLLOCATION_SUFFIX,
     H5_DATA_SUFFIX,
+    H5_DIFFICULTY_BIN_KEYS,
+    H5_DIFFICULTY_SCORE_KEYS,
     H5_FILE_SUFFIX,
     H5_INIT_SUFFIX,
+    H5_TRAJECTORY_ID_KEYS,
     H5_X_KEYS,
     H5_Y_KEYS,
     TEST_SPLIT,
@@ -54,6 +57,18 @@ def _load_h5_tensor_rows(paths: Iterable[str], dataset_key: str, dtype: torch.dt
     return torch.cat(parts, dim=0)
 
 
+def _load_optional_h5_tensor_rows(paths: Iterable[str], dataset_key: str, dtype: torch.dtype) -> torch.Tensor | None:
+    parts = []
+    for path in paths:
+        with h5py.File(path, "r") as h5f:
+            if dataset_key not in h5f:
+                return None
+            parts.append(torch.tensor(h5f[dataset_key][:], dtype=dtype))
+    if not parts:
+        return None
+    return torch.cat(parts, dim=0)
+
+
 class TensorRowDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     def __init__(self, x: torch.Tensor, y: torch.Tensor):
         if x.shape[0] != y.shape[0]:
@@ -86,6 +101,9 @@ class PinnDatasetBundle:
     train_col_x: torch.Tensor
     train_init_x: torch.Tensor
     train_init_y: torch.Tensor
+    train_traj_ids: torch.Tensor | None = None
+    train_difficulty_scores: torch.Tensor | None = None
+    train_difficulty_bins: torch.Tensor | None = None
     train_dt_weights: torch.Tensor | None = None
     train_col_weights: torch.Tensor | None = None
     train_init_weights: torch.Tensor | None = None
@@ -144,6 +162,17 @@ def load_pinn_dataset_from_preprocessed_root(
 
     train_x = _load_h5_tensor_rows(_iter_split_files(train_dir, H5_DATA_SUFFIX), H5_X_KEYS[TRAIN_SPLIT], torch_dtype)
     train_y = _load_h5_tensor_rows(_iter_split_files(train_dir, H5_DATA_SUFFIX), H5_Y_KEYS[TRAIN_SPLIT], torch_dtype)
+    train_traj_ids = _load_optional_h5_tensor_rows(_iter_split_files(train_dir, H5_DATA_SUFFIX), H5_TRAJECTORY_ID_KEYS[TRAIN_SPLIT], torch.int64)
+    train_difficulty_scores = _load_optional_h5_tensor_rows(
+        _iter_split_files(train_dir, H5_DATA_SUFFIX),
+        H5_DIFFICULTY_SCORE_KEYS[TRAIN_SPLIT],
+        torch.float32,
+    )
+    train_difficulty_bins = _load_optional_h5_tensor_rows(
+        _iter_split_files(train_dir, H5_DATA_SUFFIX),
+        H5_DIFFICULTY_BIN_KEYS[TRAIN_SPLIT],
+        torch.int64,
+    )
     train_col_x = _load_h5_tensor_rows(_iter_split_files(train_dir, H5_COLLOCATION_SUFFIX), H5_X_KEYS[TRAIN_SPLIT], torch_dtype)
     train_init_x = _load_h5_tensor_rows(_iter_split_files(train_dir, H5_INIT_SUFFIX), H5_X_KEYS[TRAIN_SPLIT], torch_dtype)
     train_init_y = _load_h5_tensor_rows(_iter_split_files(train_dir, H5_INIT_SUFFIX), H5_Y_KEYS[TRAIN_SPLIT], torch_dtype)
@@ -169,6 +198,9 @@ def load_pinn_dataset_from_preprocessed_root(
         train_col_x=train_col_x,
         train_init_x=train_init_x,
         train_init_y=train_init_y,
+        train_traj_ids=train_traj_ids,
+        train_difficulty_scores=train_difficulty_scores,
+        train_difficulty_bins=train_difficulty_bins,
         val_x=val_x,
         val_y=val_y,
         val_col_x=val_col_x,
