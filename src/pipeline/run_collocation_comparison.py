@@ -222,6 +222,88 @@ PROFILE_CONFIGS: dict[str, dict[str, Any]] = {
             "]"
         ),
     },
+    "adaptive_collocation_scheduler_benchmark": {
+        "budget": "b256",
+        "preset": "default",
+        "epochs": 3000,
+        "batch_size": 1024,
+        "device": "cuda",
+        "gradient_telemetry": False,
+        "variants": ["static_generated", "random_r", "rad", "rar_d", "rar_g", "vrba_sample_quad"],
+        "stage1_overrides": [],
+        "stage2_overrides": [
+            "time=0.05",
+            "num_of_points=80",
+            "model.ic_generation_method=joint_lhs",
+            "model.ic_num_samples=64",
+        ],
+        "collocation": {
+            "active_points": 4096,
+            "candidate_points": 16384,
+            "initial_points": 2048,
+            "append_points": 64,
+            "refresh_period_epochs": 500,
+            "refresh_mode": "epoch_periodic",
+            "refresh_on_phase_start": [],
+            "refresh_on_phase_end": [],
+            "sampler": "random",
+            "score_norm": "l2",
+            "rad_k": 1.0,
+            "rad_c": 1.0,
+            "rar_d_k": 2.0,
+            "rar_d_c": 0.0,
+        },
+        "optimizer_phases_override": (
+            "pinn.optimizer_phases=["
+            "{name:adam_periodic_sched,optimizer:Adam,lr:0.001,epochs:3000,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},scheduler:{name:reduce_on_plateau,metric:val_total_loss,mode:min,factor:0.5,patience:200,threshold:0.0001,threshold_mode:rel,cooldown:0,min_lr:1.0e-6,eps:1.0e-8},line_search:null,convergence:null}"
+            "]"
+        ),
+    },
+    "vrba_functionality_scheduler_benchmark": {
+        "budget": "b256",
+        "preset": "default",
+        "epochs": 3000,
+        "batch_size": 1024,
+        "device": "cuda",
+        "gradient_telemetry": False,
+        "variants": [
+            "static_generated",
+            "rad",
+            "vrba_sample_quad",
+            "vrba_weight_quad",
+            "vrba_full_quad",
+            "vrba_full_quad_ic",
+            "vrba_full_quad_ic_dt",
+        ],
+        "stage1_overrides": [],
+        "stage2_overrides": [
+            "time=0.05",
+            "num_of_points=80",
+            "model.ic_generation_method=joint_lhs",
+            "model.ic_num_samples=64",
+        ],
+        "collocation": {
+            "active_points": 4096,
+            "candidate_points": 16384,
+            "initial_points": 2048,
+            "append_points": 64,
+            "refresh_period_epochs": 500,
+            "refresh_mode": "epoch_periodic",
+            "refresh_on_phase_start": [],
+            "refresh_on_phase_end": [],
+            "sampler": "random",
+            "score_norm": "l2",
+            "rad_k": 1.0,
+            "rad_c": 1.0,
+            "rar_d_k": 2.0,
+            "rar_d_c": 0.0,
+        },
+        "optimizer_phases_override": (
+            "pinn.optimizer_phases=["
+            "{name:adam_periodic_sched,optimizer:Adam,lr:0.001,epochs:3000,batch_size:1024,shuffle:true,full_batch:false,allow_sampling:true,optimizer_kwargs:{},scheduler:{name:reduce_on_plateau,metric:val_total_loss,mode:min,factor:0.5,patience:200,threshold:0.0001,threshold_mode:rel,cooldown:0,min_lr:1.0e-6,eps:1.0e-8},line_search:null,convergence:null}"
+            "]"
+        ),
+    },
     "adam_periodic_ssbroyden_benchmark": {
         "budget": "b256",
         "preset": "default",
