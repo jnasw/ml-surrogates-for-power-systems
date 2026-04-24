@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 from src.pinn.landscape.evaluate import RawLandscape1D, RawLandscape2D
-from src.train.runtime import write_json
+from src.training.runtime import write_json
 
 
 def ensure_output_dir(path: str) -> str:

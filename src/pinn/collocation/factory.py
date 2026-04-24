@@ -20,7 +20,7 @@ from src.pinn.collocation.strategies import (
     VariationalResidualAdaptiveSamplingStrategy,
 )
 from src.pinn.vrba import vrba_config_from_config
-from src.train.runtime import cfg_get
+from src.training.runtime import cfg_get
 
 
 def build_collocation_manager(
@@ -231,17 +231,6 @@ def build_collocation_manager(
     )
 
 
-def build_collocation_strategy(*, initial_points: torch.Tensor, config: Any) -> CollocationStrategy:
-    """Backward-compatible residual-only strategy constructor."""
-    manager = build_collocation_manager(
-        initial_points=initial_points,
-        init_x=initial_points,
-        init_y=initial_points,
-        config=config,
-    )
-    return manager._residual_strategy  # pragma: no cover
-
-
 def _build_manager(
     *,
     residual_strategy: CollocationStrategy,
@@ -284,7 +273,11 @@ def _resolve_active_points(*, config: Any, fallback_points: torch.Tensor) -> int
 
 
 def _build_collocation_domain(*, config: Any, fallback_points: torch.Tensor) -> CollocationDomain:
-    feature_bounds = torch.as_tensor(load_ic_bounds(config, use_nn_file=True), dtype=torch.float32)
+    numpy_bounds_dtype = np.float64 if fallback_points.dtype == torch.float64 else np.float32
+    feature_bounds = torch.as_tensor(
+        load_ic_bounds(config, use_nn_file=True, dtype=numpy_bounds_dtype),
+        dtype=fallback_points.dtype,
+    )
     input_dim = int(fallback_points.shape[1]) if int(fallback_points.shape[1]) > 0 else int(feature_bounds.shape[0]) + 1
     return CollocationDomain(
         time_min=0.0,

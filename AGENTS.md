@@ -18,7 +18,11 @@ Do not optimize for framework complexity or speculative extensibility.
 - Prefer lightweight functional modules over heavy class hierarchies.
 - Prefer fewer files when possible.
 - Preserve numerical behavior unless a change is explicitly intended and documented.
-- Preserve float64 throughout the pipeline unless explicitly approved otherwise.
+- Preserve explicit and intentional precision behavior.
+- Dataset generation and stored datasets may use float32 for efficiency.
+- PINN training, residual evaluation, and physics-informed runtime paths should use float64 by default unless explicitly configured otherwise.
+- Avoid accidental precision downgrades inside the PINN runtime path.
+- Do not change baseline precision behavior unless explicitly intended.
 - Avoid duplicate training, evaluation, and logging paths.
 - Keep experiment behavior config-driven whenever possible.
 - Reuse existing definitions and components wherever possible.
@@ -105,6 +109,8 @@ These should be structurally integrated into the new architecture, but not behav
 - Preserve deterministic preprocessing behavior.
 - Save the effective config used for each run.
 - Do not silently change preprocessing semantics, splits, or numeric precision.
+- Precision choices must be explicit and consistent with the intended workflow.
+- Dataset storage precision and runtime training precision may differ by design, but this must not happen accidentally inside the PINN runtime path.
 
 ---
 

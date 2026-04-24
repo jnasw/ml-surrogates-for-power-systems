@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
 from src.pinn.losses import LOSS_COMPONENTS
-from src.train.runtime import cfg_get
+from src.training.runtime import cfg_get
 
 
 SUPPORTED_VRBA_TARGET_SETS: tuple[str, ...] = LOSS_COMPONENTS

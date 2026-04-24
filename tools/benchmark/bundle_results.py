@@ -1,4 +1,4 @@
-"""Copy compact benchmark analysis artifacts from outputs/ into a tracked results/ tree."""
+"""Copy benchmark summary artifacts from outputs/ into a tracked results/ tree."""
 
 from __future__ import annotations
 
@@ -30,6 +30,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--campaign-glob",
         default="benchmark_*",
         help="Glob used to select campaign directories under --campaigns-root.",
+    )
+    parser.add_argument(
+        "--include-run-artifacts",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Also copy legacy per-run operational artifacts into results/. "
+            "Disabled by default so results/ stays summary-only."
+        ),
     )
     return parser
 
@@ -83,7 +92,7 @@ def _copy_campaign_artifacts(
     return count, total_bytes
 
 
-def _copy_run_artifacts(
+def _copy_legacy_run_artifacts(
     *,
     run_root: Path,
     experiments_root: Path,
@@ -163,22 +172,23 @@ def main() -> None:
         if not experiment_id or not preset:
             continue
 
-        run_items = campaign.get("dataset_runs", campaign.get("runs", []))
-        for run in run_items:
-            method = str(run.get("method", "")).strip()
-            budget = str(run.get("budget", "")).strip()
-            dataset_seed = str(run.get("dataset_seed", "")).strip()
-            if not method or not budget or not dataset_seed:
-                continue
-            run_root = experiments_root / experiment_id / preset / method / budget / dataset_seed
-            count, total_bytes = _copy_run_artifacts(
-                run_root=run_root,
-                experiments_root=experiments_root,
-                dst_root=dst_root,
-                copied=copied,
-            )
-            copied_files += count
-            copied_bytes += total_bytes
+        if args.include_run_artifacts:
+            run_items = campaign.get("dataset_runs", campaign.get("runs", []))
+            for run in run_items:
+                method = str(run.get("method", "")).strip()
+                budget = str(run.get("budget", "")).strip()
+                dataset_seed = str(run.get("dataset_seed", "")).strip()
+                if not method or not budget or not dataset_seed:
+                    continue
+                run_root = experiments_root / experiment_id / preset / method / budget / dataset_seed
+                count, total_bytes = _copy_legacy_run_artifacts(
+                    run_root=run_root,
+                    experiments_root=experiments_root,
+                    dst_root=dst_root,
+                    copied=copied,
+                )
+                copied_files += count
+                copied_bytes += total_bytes
 
     print(f"[benchmark-bundle] campaigns source: {campaigns_root}")
     print(f"[benchmark-bundle] experiments source: {experiments_root}")
@@ -186,6 +196,10 @@ def main() -> None:
     print(f"[benchmark-bundle] matched campaigns: {matched_campaigns}")
     print(f"[benchmark-bundle] copied files: {copied_files}")
     print(f"[benchmark-bundle] copied size: {copied_bytes / (1024 * 1024):.1f} MiB")
+    if args.include_run_artifacts:
+        print("[benchmark-bundle] legacy per-run artifact copy enabled")
+    else:
+        print("[benchmark-bundle] summary-only mode enabled (no per-run artifacts copied)")
 
 
 if __name__ == "__main__":

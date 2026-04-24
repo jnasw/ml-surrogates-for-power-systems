@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.pinn.losses import PinnLossBreakdown
-from src.train.runtime import cfg_get
+from src.training.runtime import cfg_get
 
 
 @dataclass(frozen=True)

@@ -24,8 +24,9 @@ class CollocationDomain:
 
     def input_bounds(self) -> torch.Tensor:
         """Return box bounds for the full model input `(t, features...)`."""
-        lower = torch.full((self.input_dim,), float(self.time_min), dtype=torch.float32)
-        upper = torch.full((self.input_dim,), float(self.time_max), dtype=torch.float32)
+        bounds_dtype = torch.float64 if self.feature_bounds is None else self.feature_bounds.dtype
+        lower = torch.full((self.input_dim,), float(self.time_min), dtype=bounds_dtype)
+        upper = torch.full((self.input_dim,), float(self.time_max), dtype=bounds_dtype)
         if self.feature_bounds is not None:
             if self.feature_bounds.ndim != 2 or self.feature_bounds.shape[1] != 2:
                 raise ValueError("feature_bounds must have shape (D, 2).")
@@ -45,20 +46,21 @@ def sample_collocation_points(
     n: int,
     method: str,
     seed: int | None = None,
-    dtype: torch.dtype = torch.float32,
+    dtype: torch.dtype = torch.float64,
     device: torch.device | None = None,
 ) -> torch.Tensor:
     """Sample collocation points uniformly inside a box domain."""
     if n <= 0:
         raise ValueError("n must be positive.")
 
+    np_dtype = np.float64 if dtype == torch.float64 else np.float32
     bounds = domain.input_bounds().cpu().numpy()
     lower = bounds[:, 0]
     upper = bounds[:, 1]
     variable_mask = upper > lower
     d_var = int(variable_mask.sum())
 
-    out = np.zeros((n, domain.input_dim), dtype=np.float32)
+    out = np.zeros((n, domain.input_dim), dtype=np_dtype)
     if d_var > 0:
         method_name = str(method).strip().lower()
         if method_name == "sobol":
@@ -75,7 +77,7 @@ def sample_collocation_points(
             raise ValueError(f"Unknown collocation sampler: {method}")
 
         scaled = qmc.scale(unit, l_bounds=lower[variable_mask], u_bounds=upper[variable_mask])
-        out[:, variable_mask] = scaled.astype(np.float32)
+        out[:, variable_mask] = scaled.astype(np_dtype)
 
     if np.any(~variable_mask):
         out[:, ~variable_mask] = lower[~variable_mask]

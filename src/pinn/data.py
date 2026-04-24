@@ -24,6 +24,7 @@ from src.data.contracts.data_contract import (
     TRAIN_SPLIT,
     VAL_SPLIT,
 )
+from src.data.runtime_validation import validate_pinn_runtime_dataset
 from src.pinn.runtime import resolve_torch_dtype
 
 
@@ -148,11 +149,14 @@ class PinnDatasetBundle:
 
 def load_pinn_dataset_from_preprocessed_root(
     dataset_root: str,
-    dtype: str = "float32",
+    dtype: str = "float64",
     allow_missing_collocation: bool = False,
 ) -> PinnDatasetBundle:
-    if not os.path.exists(dataset_root):
-        raise FileNotFoundError(f"Dataset folder not found: {dataset_root}")
+    validate_pinn_runtime_dataset(
+        dataset_root,
+        collocation_mode="generated" if allow_missing_collocation else "preprocessed",
+        curriculum_enabled=False,
+    )
 
     torch_dtype = resolve_torch_dtype(dtype)
 
@@ -213,7 +217,7 @@ def load_pinn_dataset_from_preprocessed(
     dataset_dir: str,
     model_flag: str,
     dataset_number: int,
-    dtype: str = "float32",
+    dtype: str = "float64",
     allow_missing_collocation: bool = False,
 ) -> PinnDatasetBundle:
     dataset_root = os.path.join(dataset_dir, model_flag, f"dataset_v{dataset_number}")

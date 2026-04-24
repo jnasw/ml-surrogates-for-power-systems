@@ -109,7 +109,7 @@ For each model, the layout is:
     logs/
   pinn_adam300/
     config.yaml
-    metrics.csv
+    metrics.json
     checkpoints/
 ```
 

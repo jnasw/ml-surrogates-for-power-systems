@@ -14,7 +14,7 @@ from src.pinn.collocation.domain import CollocationDomain, sample_collocation_po
 from src.pinn.collocation.scoring import score_collocation_points
 from src.pinn.collocation.state import CollocationState
 from src.pinn.vrba import VrbAConfig
-from src.train.runtime import cfg_get
+from src.training.runtime import cfg_get
 
 
 @dataclass(frozen=True)

@@ -37,7 +37,9 @@ Optional experiments should be supported structurally, but they must not drive t
 
 The refactor must preserve the following unless explicitly approved otherwise:
 
-- float64 throughout the pipeline
+- explicit and intentional precision behavior across the pipeline
+- PINN training, residual evaluation, and physics-informed runtime paths should use float64 by default unless explicitly configured otherwise
+- dataset generation and stored datasets may remain float32 for efficiency
 - deterministic preprocessing behaviour
 - local execution via Python entrypoints
 - HPC execution via `lsf.sh` wrappers that call Python scripts
@@ -67,6 +69,7 @@ The current repository has grown incrementally through implementation of methods
 - inconsistent smoke-test coverage across methods
 - diagnostics and plots partly living only in notebooks
 - optional / advanced methods being harder to integrate cleanly
+- precision policy is currently implicit and inconsistent: dataset generation/storage, baseline runtime, and PINN runtime use different dtypes, but the intended boundary is not clearly enforced
 
 More specifically, the main structural pain points are:
 
@@ -203,6 +206,15 @@ Outputs:
 - shared metric schema
 - defined logging/reporting responsibilities
 
+Current status:
+- direct baseline and direct PINN runs now write `config.yaml`, `run_manifest.json`, `metrics.json`, and `timings.json`
+- checkpointing is opt-in
+- `outputs/` vs `results/` boundary is enforced more clearly
+- per-run PINN `metrics.csv` has been removed in favor of canonical `metrics.json`
+- tiny trusted smoke paths have been verified for:
+  - dataset -> preprocess -> baseline via `src.pipeline.run_experiment`
+  - direct `20_run_pinn.py` on a tiny preprocessed dataset
+
 ---
 
 ### Phase 3 — Stabilize Data and Preprocessing Contracts
@@ -334,6 +346,8 @@ This refactor should not:
 - move all notebook-based diagnostics into runtime scripts
 - create a large generic framework for hypothetical future needs
 - force all experiments into one giant canonical runner
+- a full pipeline-wide float64 migration for dataset generation and storage
+- changing baseline precision behavior unless explicitly required
 
 The focus is a minimal, practical, thesis-oriented experimental codebase.
 
@@ -348,3 +362,10 @@ The focus is a minimal, practical, thesis-oriented experimental codebase.
 5. Define the initial run artifact structure (`outputs/` vs `results/`).
 6. Define the shared metric schema, including MAE.
 7. Propose the first low-risk code changes before editing core logic.
+
+## Deferred Issues
+- checkpoints still default on
+- legacy top-level metrics still duplicated in metrics.json
+- float64 invariant still violated in some data paths
+- ID/OOD evaluation contract not yet first-class
+- vRBA config/runtime support mismatch

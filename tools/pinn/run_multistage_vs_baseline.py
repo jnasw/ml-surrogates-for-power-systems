@@ -296,6 +296,7 @@ def _build_pinn_command(
         "pinn.collocation_sampling.enabled=false",
         "pinn.weighting.scheme=static",
         "pinn.evaluation.frequency=1",
+        "pinn.checkpointing.enabled=true",
         "pinn.checkpointing.epoch_fractions=[0.25,0.5,0.75,1.0]",
         f"pinn.gradient_telemetry.enabled={'true' if gradient_telemetry else 'false'}",
         f"pinn.loss_weights.data={loss_weight_data}",

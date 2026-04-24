@@ -27,7 +27,7 @@ from src.data.contracts.data_contract import (
     TEST_SPLIT,
     validate_info_lines,
 )
-from src.methods.marker_utils import compute_marker_matrix
+from src.data.active_learning.marker_utils import compute_marker_matrix
 
 
 class Datapreprocessor:

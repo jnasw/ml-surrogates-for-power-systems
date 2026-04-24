@@ -193,7 +193,7 @@ Several experiments depend on preprocessing artifacts and metadata contracts.
 
 ### Shared preprocessing requirements
 - deterministic preprocessing
-- preserved float64 precision
+- preserved float64 precision for PINN Training
 - stable train/validation/test semantics
 - stable normalization metadata
 - stable HDF5 / dataset contracts where relevant

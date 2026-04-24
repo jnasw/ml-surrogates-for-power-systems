@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import csv
 import importlib
+import json
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -64,11 +64,6 @@ class EpochMetrics:
     peak_gpu_memory_allocated_bytes: int | None = None
     peak_gpu_memory_reserved_bytes: int | None = None
     optimizer_diagnostics: dict[str, float | int | str | bool | None] | None = None
-
-    @property
-    def stage_name(self) -> str:
-        """Backward-compatible alias for older code paths."""
-        return self.phase_name
 
     def _component_loss(self, split: str, name: str) -> float | None:
         if split == "train":
@@ -210,9 +205,6 @@ class PinnLogger:
     def __init__(self, run_dir: str, config: Any | None = None):
         self.run_dir = run_dir
         self.ckpt_dir = os.path.join(run_dir, "checkpoints")
-        self.metrics_path = os.path.join(run_dir, "metrics.csv")
-        self._metrics_fieldnames: list[str] | None = None
-        os.makedirs(self.ckpt_dir, exist_ok=True)
         self._wandb_run = None
         self._wandb_enabled = False
         self._config_logging = None
@@ -262,31 +254,50 @@ class PinnLogger:
             f=os.path.join(self.run_dir, "config.yaml"),
         )
 
-    def write_metrics(self, rows: list[EpochMetrics]) -> None:
+    def write_metrics_json(
+        self,
+        rows: list[EpochMetrics],
+        *,
+        run_summary: dict[str, Any] | None = None,
+        final_train_metrics: dict[str, Any] | None = None,
+        final_val_metrics: dict[str, Any] | None = None,
+        final_test_metrics: dict[str, Any] | None = None,
+    ) -> str | None:
         if not rows:
-            return
-        row_dicts = [row.as_flat_dict() for row in rows]
-        if self._metrics_fieldnames is None:
-            self._metrics_fieldnames = []
-        schema_expanded = False
-        for row_dict in row_dicts:
-            for key in row_dict.keys():
-                if key not in self._metrics_fieldnames:
-                    self._metrics_fieldnames.append(key)
-                    schema_expanded = True
-
-        metrics_exists = os.path.exists(self.metrics_path) and os.path.getsize(self.metrics_path) > 0
-        if not metrics_exists or schema_expanded:
-            with open(self.metrics_path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames=self._metrics_fieldnames)
-                writer.writeheader()
-                for row_dict in row_dicts:
-                    writer.writerow(row_dict)
-            return
-
-        with open(self.metrics_path, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=self._metrics_fieldnames)
-            writer.writerow(row_dicts[-1])
+            return None
+        path = os.path.join(self.run_dir, "metrics.json")
+        final_row_obj = rows[-1]
+        final_row = final_row_obj.as_flat_dict()
+        final_train_losses = {
+            "total_loss": float(final_row_obj.train_total_loss),
+            "component_losses": dict(final_row_obj.train_component_losses),
+        }
+        if final_row_obj.train_loss_weights is not None:
+            final_train_losses["loss_weights"] = dict(final_row_obj.train_loss_weights)
+        final_val_losses = None
+        if final_row_obj.val_total_loss is not None or final_row_obj.val_component_losses is not None:
+            final_val_losses = {
+                "total_loss": final_row_obj.val_total_loss,
+                "component_losses": None if final_row_obj.val_component_losses is None else dict(final_row_obj.val_component_losses),
+            }
+        # final_*_metrics and final_*_losses are the canonical semantic summaries.
+        # final_epoch is retained as the last logged epoch telemetry/debug snapshot.
+        payload = {
+            "schema_version": "run_metrics_v1",
+            "run_summary": {} if run_summary is None else dict(run_summary),
+            "final_train_metrics": final_train_metrics,
+            "final_val_metrics": final_val_metrics,
+            "final_test_metrics": final_test_metrics,
+            "final_train_losses": final_train_losses,
+            "final_val_losses": final_val_losses,
+            "final_test_losses": None,
+            "epochs_recorded": int(len(rows)),
+            "final_epoch": final_row,
+        }
+        os.makedirs(self.run_dir, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        return path
 
     def _should_log_epoch(self, row: EpochMetrics) -> bool:
         log_every_epoch = int(getattr(getattr(self, "_config_logging", None), "log_every_epoch", 1))
@@ -304,53 +315,25 @@ class PinnLogger:
             f"optimizer={row.optimizer}",
             f"train_total={float(row.train_total_loss):.6e}",
         ]
-        for name, value in row.train_component_losses.items():
-            parts.append(f"train_{name}={float(value):.6e}")
-        for name, value in (row.train_loss_weights or {}).items():
-            parts.append(f"weight_{name}={float(value):.6e}")
-        if row.weighting_scheme is not None:
-            parts.append(f"weighting={row.weighting_scheme}")
-        if row.weighting_anchor is not None:
-            parts.append(f"weight_anchor={row.weighting_anchor}")
-        parts.append(f"weight_updated={bool(row.weighting_updated)}")
-        if row.vrba_enabled:
-            parts.append(f"vrba_sampling={bool(row.vrba_sampling_enabled)}")
-            parts.append(f"vrba_weighting={bool(row.vrba_weighting_enabled)}")
-            if row.vrba_potential is not None:
-                parts.append(f"vrba_potential={row.vrba_potential}")
-            if row.vrba_update_count is not None:
-                parts.append(f"vrba_updates={int(row.vrba_update_count)}")
-        if row.train_total_grad_norm is not None:
-            parts.append(f"grad_total={float(row.train_total_grad_norm):.6e}")
-        if row.epoch_wall_seconds is not None:
-            parts.append(f"epoch_s={float(row.epoch_wall_seconds):.3f}")
-        if row.cumulative_wall_seconds is not None:
-            parts.append(f"elapsed_s={float(row.cumulative_wall_seconds):.3f}")
-        if row.num_train_steps is not None:
-            parts.append(f"steps={int(row.num_train_steps)}")
-        if row.peak_gpu_memory_allocated_bytes is not None:
-            parts.append(f"gpu_peak_mem_mb={float(row.peak_gpu_memory_allocated_bytes) / (1024.0 * 1024.0):.1f}")
-        for name, value in (row.train_component_grad_norms or {}).items():
+        current_lr = None if row.optimizer_diagnostics is None else row.optimizer_diagnostics.get("current_lr")
+        if current_lr is not None:
+            parts.append(f"lr={float(current_lr):.6e}")
+        for name in LOSS_COMPONENTS:
+            value = row.train_component_losses.get(name)
             if value is not None:
-                parts.append(f"grad_{name}={float(value):.6e}")
-        for name, value in (row.train_weighted_component_grad_norms or {}).items():
+                parts.append(f"train_{name}={float(value):.6e}")
+        weight_values = row.train_loss_weights or {}
+        for name in ("data", "physics", "dt", "ic"):
+            value = weight_values.get(name)
             if value is not None:
-                parts.append(f"grad_weighted_{name}={float(value):.6e}")
-        for name, value in (row.val_component_losses or {}).items():
-            if value is not None:
-                parts.append(f"val_{name}={float(value):.6e}")
+                parts.append(f"weight_{name}={float(value):.6e}")
         if row.val_total_loss is not None:
             parts.append(f"val_total={float(row.val_total_loss):.6e}")
-        for name, value in (row.weighting_raw_candidate_weights or {}).items():
-            parts.append(f"weight_candidate_{name}={float(value):.6e}")
-        for name, value in (row.weighting_probe_ntk_mean_trace or {}).items():
-            parts.append(f"ntk_mean_{name}={float(value):.6e}")
-        for key, value in (row.test_metrics or {}).items():
-            if value is not None:
-                parts.append(f"test_{key.replace('_loss', '')}={float(value):.6e}")
-        for key, value in (row.optimizer_diagnostics or {}).items():
-            if value is not None:
-                parts.append(f"opt_{key}={value}")
+        test_data_loss = None if row.test_metrics is None else row.test_metrics.get("data_loss")
+        if test_data_loss is not None:
+            parts.append(f"test_data={float(test_data_loss):.6e}")
+        if row.epoch_wall_seconds is not None:
+            parts.append(f"epoch_s={float(row.epoch_wall_seconds):.3f}")
         print(" ".join(parts), flush=True)
 
     def log_epoch_metrics(self, row: EpochMetrics) -> None:
@@ -359,21 +342,15 @@ class PinnLogger:
         if not self._should_log_epoch(row):
             return
         payload = {
-            "phase/epoch": int(row.epoch),
-            "phase/global_epoch": int(row.global_epoch),
             "phase/name": str(row.phase_name),
             "phase/optimizer": str(row.optimizer),
-            "train/total_loss": float(row.train_total_loss),
-            "weighting/updated": bool(row.weighting_updated),
+            "train/loss/total": float(row.train_total_loss),
+            "weights/updated": bool(row.weighting_updated),
         }
-        payload["stage/epoch"] = int(row.epoch)
-        payload["stage/global_epoch"] = int(row.global_epoch)
-        payload["stage/name"] = str(row.phase_name)
-        payload["stage/optimizer"] = str(row.optimizer)
         if row.weighting_scheme is not None:
-            payload["weighting/scheme"] = str(row.weighting_scheme)
+            payload["weights/scheme"] = str(row.weighting_scheme)
         if row.weighting_anchor is not None:
-            payload["weighting/anchor"] = str(row.weighting_anchor)
+            payload["weights/anchor"] = str(row.weighting_anchor)
         if row.vrba_enabled:
             payload["vrba/enabled"] = True
             payload["vrba/adaptive_sampling"] = bool(row.vrba_sampling_enabled)
@@ -385,78 +362,69 @@ class PinnLogger:
             if row.vrba_update_count is not None:
                 payload["vrba/update_count"] = int(row.vrba_update_count)
         for name, value in row.train_component_losses.items():
-            payload[f"train/{name}_loss"] = float(value)
             payload[f"train/loss/{name}"] = float(value)
         for name, value in (row.train_loss_weights or {}).items():
-            payload[f"weighting/active_{name}"] = float(value)
-            payload[f"weighting/active/{name}"] = float(value)
+            payload[f"weights/active/{name}"] = float(value)
         for name, value in (row.weighting_raw_candidate_weights or {}).items():
-            payload[f"weighting/candidate_{name}"] = float(value)
-            payload[f"weighting/candidate/{name}"] = float(value)
+            payload[f"debug/weights/candidate/{name}"] = float(value)
         if row.train_total_grad_norm is not None:
-            payload["train/grad_total_norm"] = float(row.train_total_grad_norm)
             payload["train/grad_norm/total"] = float(row.train_total_grad_norm)
         if row.epoch_wall_seconds is not None:
-            payload["cost/epoch_wall_seconds"] = float(row.epoch_wall_seconds)
+            payload["runtime/epoch_seconds"] = float(row.epoch_wall_seconds)
         if row.cumulative_wall_seconds is not None:
-            payload["cost/cumulative_wall_seconds"] = float(row.cumulative_wall_seconds)
+            payload["runtime/cumulative_seconds"] = float(row.cumulative_wall_seconds)
         if row.num_batches is not None:
-            payload["cost/num_batches"] = int(row.num_batches)
+            payload["runtime/num_batches"] = int(row.num_batches)
         if row.num_train_steps is not None:
-            payload["cost/num_train_steps"] = int(row.num_train_steps)
+            payload["runtime/num_train_steps"] = int(row.num_train_steps)
         if row.num_supervised_rows is not None:
-            payload["cost/num_supervised_rows"] = int(row.num_supervised_rows)
+            payload["runtime/num_supervised_rows"] = int(row.num_supervised_rows)
         if row.num_collocation_rows is not None:
-            payload["cost/num_collocation_rows"] = int(row.num_collocation_rows)
+            payload["runtime/num_collocation_rows"] = int(row.num_collocation_rows)
         if row.num_init_rows is not None:
-            payload["cost/num_init_rows"] = int(row.num_init_rows)
+            payload["runtime/num_init_rows"] = int(row.num_init_rows)
         if row.peak_gpu_memory_allocated_bytes is not None:
-            payload["cost/peak_gpu_memory_allocated_bytes"] = int(row.peak_gpu_memory_allocated_bytes)
-            payload["cost/peak_gpu_memory_allocated_mb"] = float(row.peak_gpu_memory_allocated_bytes) / (1024.0 * 1024.0)
+            payload["runtime/peak_gpu_memory_allocated_bytes"] = int(row.peak_gpu_memory_allocated_bytes)
+            payload["runtime/peak_gpu_memory_allocated_mb"] = float(row.peak_gpu_memory_allocated_bytes) / (1024.0 * 1024.0)
         if row.peak_gpu_memory_reserved_bytes is not None:
-            payload["cost/peak_gpu_memory_reserved_bytes"] = int(row.peak_gpu_memory_reserved_bytes)
-            payload["cost/peak_gpu_memory_reserved_mb"] = float(row.peak_gpu_memory_reserved_bytes) / (1024.0 * 1024.0)
+            payload["runtime/peak_gpu_memory_reserved_bytes"] = int(row.peak_gpu_memory_reserved_bytes)
+            payload["runtime/peak_gpu_memory_reserved_mb"] = float(row.peak_gpu_memory_reserved_bytes) / (1024.0 * 1024.0)
         for name, value in (row.train_component_grad_norms or {}).items():
             if value is not None:
-                payload[f"train/grad_{name}_norm"] = float(value)
                 payload[f"train/grad_norm/{name}"] = float(value)
         for name, value in (row.train_weighted_component_grad_norms or {}).items():
             if value is not None:
-                payload[f"train/grad_weighted_{name}_norm"] = float(value)
                 payload[f"train/grad_weighted_norm/{name}"] = float(value)
         for name, value in (row.weighting_probe_grad_l2_norms or {}).items():
-            payload[f"weighting/probe_{name}_l2_norm"] = float(value)
-            payload[f"weighting/probe/l2_norm/{name}"] = float(value)
+            payload[f"debug/weights/probe/l2_norm/{name}"] = float(value)
         for name, value in (row.weighting_probe_grad_mean_abs or {}).items():
-            payload[f"weighting/probe_{name}_mean_abs"] = float(value)
-            payload[f"weighting/probe/mean_abs/{name}"] = float(value)
+            payload[f"debug/weights/probe/mean_abs/{name}"] = float(value)
         for name, value in (row.weighting_probe_grad_max_abs or {}).items():
-            payload[f"weighting/probe_{name}_max_abs"] = float(value)
-            payload[f"weighting/probe/max_abs/{name}"] = float(value)
+            payload[f"debug/weights/probe/max_abs/{name}"] = float(value)
         for name, value in (row.weighting_probe_grad_std or {}).items():
-            payload[f"weighting/probe_{name}_std"] = float(value)
-            payload[f"weighting/probe/std/{name}"] = float(value)
+            payload[f"debug/weights/probe/std/{name}"] = float(value)
         for name, value in (row.weighting_probe_ntk_mean_trace or {}).items():
-            payload[f"weighting/probe_{name}_ntk_mean_trace"] = float(value)
-            payload[f"weighting/probe/ntk_mean_trace/{name}"] = float(value)
+            payload[f"debug/weights/probe/ntk_mean_trace/{name}"] = float(value)
         for name, value in (row.weighting_probe_ntk_batch_sizes or {}).items():
-            payload[f"weighting/probe_{name}_ntk_batch_size"] = int(value)
-            payload[f"weighting/probe/ntk_batch_size/{name}"] = int(value)
+            payload[f"debug/weights/probe/ntk_batch_size/{name}"] = int(value)
         for name, value in (row.val_component_losses or {}).items():
             if value is not None:
-                payload[f"val/{name}_loss"] = float(value)
                 payload[f"val/loss/{name}"] = float(value)
         if row.val_total_loss is not None:
-            payload["val/total_loss"] = float(row.val_total_loss)
+            payload["val/loss/total"] = float(row.val_total_loss)
         for key, value in (row.test_metrics or {}).items():
             if value is not None:
-                payload[f"test/{key}"] = float(value)
+                if key == "data_loss":
+                    payload["test/loss/data"] = float(value)
+                else:
+                    payload[f"test/metric/{key}"] = float(value)
         for key, value in (row.optimizer_diagnostics or {}).items():
             if value is not None:
                 payload[f"optimizer/{key}"] = value
         self._wandb_run.log(payload, step=int(row.global_epoch))
 
     def save_checkpoint(self, payload: dict[str, Any], tag: str) -> str:
+        os.makedirs(self.ckpt_dir, exist_ok=True)
         path = os.path.join(self.ckpt_dir, f"{tag}.pt")
         torch.save(payload, path)
         return path

@@ -1,10 +1,5 @@
-"""Backward-compatible baseline training exports."""
+"""Compatibility shim for src.training.baseline."""
 
-from __future__ import annotations
+from src.training import baseline as _impl
 
-from src.data.loaders.trajectory_dataset import TrajectoryDataset
-from src.train.trainer import BaselineConfig, SurrogateModel, evaluate, train_baseline_surrogate
-
-
-def evaluate_baseline(model: SurrogateModel, dataset: TrajectoryDataset) -> dict[str, float]:
-    return evaluate(model=model, dataset=dataset)
+globals().update({k: v for k, v in _impl.__dict__.items() if not k.startswith("__")})

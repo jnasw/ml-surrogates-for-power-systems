@@ -9,7 +9,11 @@ import numpy as np
 from omegaconf import OmegaConf
 
 
-def load_ic_bounds(config: Any, use_nn_file: bool = False) -> np.ndarray:
+def load_ic_bounds(
+    config: Any,
+    use_nn_file: bool = False,
+    dtype: np.dtype | type[np.floating] = np.float32,
+) -> np.ndarray:
     bounds_dir = str(config.dirs.init_conditions_dir)
     model_flag = str(config.model.model_flag)
     suffix = int(config.model.init_condition_bounds)
@@ -27,4 +31,4 @@ def load_ic_bounds(config: Any, use_nn_file: bool = False) -> np.ndarray:
             bounds.append([v, v])
         else:
             bounds.append([float(r[0]), float(r[1])])
-    return np.asarray(bounds, dtype=np.float32)
+    return np.asarray(bounds, dtype=dtype)

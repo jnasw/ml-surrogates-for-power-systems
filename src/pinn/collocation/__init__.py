@@ -1,6 +1,6 @@
 """Train-time collocation abstractions for PINN sampling strategies."""
 
-from src.pinn.collocation.factory import build_collocation_manager, build_collocation_strategy
+from src.pinn.collocation.factory import build_collocation_manager
 from src.pinn.collocation.manager import EpochPoolBatch, MultiPoolCollocationManager
 from src.pinn.collocation.scoring import score_collocation_points
 from src.pinn.collocation.state import CollocationPoolState, CollocationState, MultiPoolCollocationState
@@ -28,6 +28,5 @@ __all__ = [
     "StaticCollocationStrategy",
     "UniformResampleCollocationStrategy",
     "build_collocation_manager",
-    "build_collocation_strategy",
     "score_collocation_points",
 ]

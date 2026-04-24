@@ -9,6 +9,7 @@ import h5py
 import numpy as np
 
 from src.data.loaders.trajectory_dataset import TrajectoryDataset
+from src.data.runtime_validation import validate_baseline_runtime_dataset
 from src.data.contracts.data_contract import (
     H5_COLLOCATION_SUFFIX,
     H5_DATA_SUFFIX,
@@ -115,8 +116,7 @@ def load_trajectory_dataset_from_preprocessed_root(
     include_val_in_train: bool = False,
 ) -> TrajectoryDataset:
     """Load TrajectoryDataset from an explicit dataset root path."""
-    if not os.path.exists(dataset_root):
-        raise FileNotFoundError(f"Dataset folder not found: {dataset_root}")
+    validate_baseline_runtime_dataset(dataset_root)
 
     x_train, y_train, t_train = _load_split(dataset_root=dataset_root, split=TRAIN_SPLIT)
     if include_val_in_train:

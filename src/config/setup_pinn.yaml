@@ -96,6 +96,7 @@ pinn:
   evaluation:
     frequency: 1
   checkpointing:
+    enabled: false
     save_init: true
     epoch_fractions: []
     save_best: true

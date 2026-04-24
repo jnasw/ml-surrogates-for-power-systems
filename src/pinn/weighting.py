@@ -8,7 +8,7 @@ import random
 from typing import Any, Protocol
 
 from src.pinn.losses import LOSS_COMPONENTS, LossWeights
-from src.train.runtime import cfg_get
+from src.training.runtime import cfg_get
 
 
 SUPPORTED_WEIGHTING_SCHEMES: tuple[str, ...] = (

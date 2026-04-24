@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hydra
 
+from src.data.active_learning.orchestration import resolve_method, run_method
 from src.data.generate.dataset_functions import ODETrajectoryBuilder
-from src.data.generate.dataset_functions import resolve_method, run_method
 
 
 @hydra.main(config_path="src/config", config_name="setup_dataset", version_base=None)

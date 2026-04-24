@@ -16,6 +16,8 @@ baseline:
   epochs: 300
   device: auto # auto | cuda | mps | cpu
   run_dir: ${hydra:runtime.cwd}/outputs/baseline
+  checkpointing:
+    enabled: false
   checkpoint_name: baseline_model.pt
 
 dirs:
