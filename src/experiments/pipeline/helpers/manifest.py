@@ -86,3 +86,4 @@ def set_stage_status(
     if extra is not None:
         entry.update(extra)
     manifest["stages"][stage] = entry
+

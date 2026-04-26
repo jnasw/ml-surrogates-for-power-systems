@@ -219,6 +219,13 @@ src/data/**/*.pyc
 *.npz
 *.npy
 obsolete/
+!obsolete/
+!obsolete/tools/
+!obsolete/tools/pinn/
+!obsolete/tools/pinn/run_optimizer_comparison.py
+!obsolete/src/
+!obsolete/src/pipeline/
+!obsolete/src/pipeline/run_optimizer_comparison.py
 tests/
 other_repos/
 .DS_Storeshou

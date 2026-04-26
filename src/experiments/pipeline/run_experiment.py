@@ -14,8 +14,8 @@ from typing import Any
 
 from omegaconf import OmegaConf
 
-from src.experiments.pipeline.manifest import init_dataset_manifest, save_manifest, set_stage_status, utc_now_iso
-from src.experiments.pipeline.telemetry import (
+from src.experiments.pipeline.helpers.manifest import init_dataset_manifest, save_manifest, set_stage_status, utc_now_iso
+from src.experiments.pipeline.helpers.telemetry import (
     build_round_telemetry_rows,
     write_rows_csv,
     write_rows_parquet_best_effort,

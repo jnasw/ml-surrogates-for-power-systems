@@ -10,7 +10,7 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
-from src.experiments.pipeline.manifest import save_manifest, set_stage_status, utc_now_iso
+from src.experiments.pipeline.helpers.manifest import save_manifest, set_stage_status, utc_now_iso
 
 
 def init_experiment_manifest(*, run_root: str, experiment: dict[str, Any]) -> dict[str, Any]:
@@ -221,23 +221,22 @@ def run_logged_command(
             "started_at_utc": started_at,
             "completed_at_utc": completed_at,
             "elapsed_seconds": 0.0,
-            "error": None,
         }
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     if extra_env:
         env.update(extra_env)
-    run_started = monotonic()
+    started = monotonic()
     with log_path.open("w", encoding="utf-8") as logf:
         proc = subprocess.run(command, cwd=cwd, text=True, check=False, env=env, stdout=logf, stderr=subprocess.STDOUT)
-
-    completed_at = utc_now_iso()
+    elapsed = monotonic() - started
     return {
         "status": "completed" if proc.returncode == 0 else "failed",
         "return_code": int(proc.returncode),
         "started_at_utc": started_at,
-        "completed_at_utc": completed_at,
-        "elapsed_seconds": monotonic() - run_started,
-        "error": None if proc.returncode == 0 else f"Run failed. See {log_path}",
+        "completed_at_utc": utc_now_iso(),
+        "elapsed_seconds": elapsed,
+        "error": None if proc.returncode == 0 else f"{label} failed. See {log_path}",
     }
+

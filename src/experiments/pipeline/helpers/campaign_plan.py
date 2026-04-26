@@ -218,45 +218,37 @@ def resolve_campaign_plan(
     model_flag: str,
     skip_preprocess: bool,
     skip_baseline: bool,
-    baseline_epochs: int | None,
+    dry_run: bool,
+    force: bool,
 ) -> CampaignPlan:
-    axes = to_container_if_config(cfg.axes, {})
-    if not isinstance(axes, dict) or not axes:
-        raise ValueError("campaign config must define non-empty 'axes'.")
-    axes = normalize_dataset_axes({k: list(v) for k, v in axes.items()})
-    combos = build_matrix(axes=axes)
+    axes = normalize_dataset_axes(dict(to_container_if_config(cfg.axes, {})))
+    combos = build_matrix(axes)
+    excludes = list(to_container_if_config(getattr(cfg, "exclude", []), []))
+    combos = apply_exclusions(combos, excludes)
+    if not combos:
+        raise ValueError("No campaign combinations remain after exclusions.")
 
     baseline_seeds = [str(x) for x in to_container_if_config(getattr(cfg, "baseline_seeds", []), [])]
     if not skip_baseline and not baseline_seeds:
-        raise ValueError("campaign config must define non-empty 'baseline_seeds' unless skip_baseline=true.")
+        raise ValueError("Campaign requires 'baseline_seeds' unless skip_baseline=true.")
 
-    excludes = list(to_container_if_config(getattr(cfg, "exclude", []), []))
-    combos = apply_exclusions(combos, excludes)
-    total_dataset_runs = len(combos)
-    total_baseline_subruns = total_dataset_runs * len(baseline_seeds) if not skip_baseline else 0
+    stage1_overrides = [str(x) for x in to_container_if_config(getattr(cfg, "stage1_overrides", []), [])]
+    stage2_overrides = [str(x) for x in to_container_if_config(getattr(cfg, "stage2_overrides", []), [])]
+    stage3_overrides = [str(x) for x in to_container_if_config(getattr(cfg, "stage3_overrides", []), [])]
 
-    stage_overrides = dict(to_container_if_config(getattr(cfg, "stage_overrides", {}), {}))
-    stage1_overrides = [str(x) for x in stage_overrides.get("stage1", [])]
-    stage2_overrides = [str(x) for x in stage_overrides.get("stage2", [])]
-    stage3_overrides = [str(x) for x in stage_overrides.get("stage3", [])]
-    run_override_rules = list(to_container_if_config(getattr(cfg, "run_overrides", []), []))
-    hpo_run_override_rules, hpo_integration_meta = resolve_hpo_run_overrides(cfg, repo_root)
-    run_override_rules.extend(hpo_run_override_rules)
+    hpo_run_overrides, hpo_integration_meta = resolve_hpo_run_overrides(cfg, repo_root)
+    config_run_overrides = list(to_container_if_config(getattr(cfg, "run_overrides", []), []))
+    run_override_rules = [*config_run_overrides, *hpo_run_overrides]
 
-    campaign_root = os.path.join(
-        repo_root,
-        "outputs",
-        "campaigns",
-        f"{name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-    )
-
+    campaign_root = os.path.dirname(os.path.abspath(config_path))
     run_plans: list[CampaignRunPlan] = []
-    for idx, combo in enumerate(combos):
-        method = combo.get("method")
-        budget = combo.get("budget")
-        dataset_seed = combo.get("dataset_seed")
+
+    for idx, combo in enumerate(combos, start=1):
+        method = str(combo.get("method", "")).strip()
+        budget = str(combo.get("budget", "")).strip()
+        dataset_seed = str(combo.get("dataset_seed", "")).strip()
         if not method or not budget or not dataset_seed:
-            raise ValueError("Each matrix row must define method, budget, dataset_seed.")
+            raise ValueError(f"Each combo must define method, budget, and dataset_seed. Got: {combo}")
 
         combo_stage1 = list(stage1_overrides)
         combo_stage2 = list(stage2_overrides)
@@ -264,13 +256,23 @@ def resolve_campaign_plan(
         for rule in run_override_rules:
             match = dict(rule.get("match", {}))
             if matches_rule(combo, match):
-                combo_stage1.extend([str(x) for x in rule.get("stage1", [])])
-                combo_stage2.extend([str(x) for x in rule.get("stage2", [])])
-                combo_stage3.extend([str(x) for x in rule.get("stage3", [])])
+                combo_stage1.extend(str(x) for x in rule.get("stage1", []))
+                combo_stage2.extend(str(x) for x in rule.get("stage2", []))
+                combo_stage3.extend(str(x) for x in rule.get("stage3", []))
 
-        cmd = [
+        run_root = expected_run_root(
+            repo_root=repo_root,
+            experiment_id=experiment_id,
+            preset=preset,
+            method=method,
+            budget=budget,
+            dataset_seed=dataset_seed,
+        )
+
+        command = [
             sys.executable,
-            "tools/benchmark/run_experiment.py",
+            "-m",
+            "src.experiments.pipeline.run_experiment",
             "--method",
             method,
             "--budget",
@@ -283,37 +285,35 @@ def resolve_campaign_plan(
             experiment_id,
             "--model-flag",
             model_flag,
-            "--dataset-run-index",
-            str(idx + 1),
-            "--dataset-run-total",
-            str(total_dataset_runs),
+            "--run-root",
+            run_root,
         ]
-        if not skip_baseline:
-            cmd.extend(["--baseline-run-offset", str(idx * len(baseline_seeds))])
-            cmd.extend(["--baseline-run-total", str(total_baseline_subruns)])
-        for baseline_seed in baseline_seeds:
-            cmd.extend(["--baseline-seed", baseline_seed])
         if skip_preprocess:
-            cmd.append("--skip-preprocess")
+            command.append("--skip-preprocess")
         if skip_baseline:
-            cmd.append("--skip-baseline")
-        if baseline_epochs is not None:
-            cmd.extend(["--baseline-epochs", str(int(baseline_epochs))])
-        for ov in combo_stage1:
-            cmd.extend(["--stage1-override", ov])
-        for ov in combo_stage2:
-            cmd.extend(["--stage2-override", ov])
-        for ov in combo_stage3:
-            cmd.extend(["--stage3-override", ov])
+            command.append("--skip-baseline")
+        else:
+            for baseline_seed in baseline_seeds:
+                command.extend(["--baseline-seed", baseline_seed])
+        if dry_run:
+            command.append("--dry-run")
+        if force:
+            command.append("--force")
+        for override in combo_stage1:
+            command.extend(["--stage1-override", override])
+        for override in combo_stage2:
+            command.extend(["--stage2-override", override])
+        for override in combo_stage3:
+            command.extend(["--stage3-override", override])
 
         run_plans.append(
             CampaignRunPlan(
                 index=idx,
-                combo=dict(combo),
+                combo=combo,
                 method=method,
                 budget=budget,
                 dataset_seed=dataset_seed,
-                command=cmd,
+                command=command,
                 stage1_overrides=combo_stage1,
                 stage2_overrides=combo_stage2,
                 stage3_overrides=combo_stage3,
@@ -324,8 +324,8 @@ def resolve_campaign_plan(
         axes=axes,
         combos=combos,
         baseline_seeds=baseline_seeds,
-        total_dataset_runs=total_dataset_runs,
-        total_baseline_subruns=total_baseline_subruns,
+        total_dataset_runs=len(run_plans),
+        total_baseline_subruns=len(run_plans) * len(baseline_seeds) if not skip_baseline else 0,
         run_override_rules=run_override_rules,
         hpo_integration_meta=hpo_integration_meta,
         stage1_overrides=stage1_overrides,
@@ -334,3 +334,4 @@ def resolve_campaign_plan(
         campaign_root=campaign_root,
         run_plans=run_plans,
     )
+

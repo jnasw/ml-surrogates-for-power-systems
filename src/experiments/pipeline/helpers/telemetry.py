@@ -149,3 +149,4 @@ def write_rows_parquet_best_effort(rows: list[dict[str, Any]], out_path: str) ->
     table = pa.Table.from_pylist(rows)
     pq.write_table(table, out_path)
     return True
+

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from src.experiments.pipeline.launch_utils import (
+from src.experiments.pipeline.helpers.launch_utils import (
     build_dataset_pipeline_command,
     dataset_root_from_manifest,
     format_hydra_list,
@@ -28,7 +28,7 @@ from src.experiments.pipeline.launch_utils import (
     tag_stamp,
     upsert_run_status,
 )
-from src.experiments.pipeline.manifest import save_manifest, utc_now_iso
+from src.experiments.pipeline.helpers.manifest import save_manifest, utc_now_iso
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

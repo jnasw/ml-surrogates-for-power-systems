@@ -123,3 +123,4 @@ def load_round_table(root: str) -> list[dict[str, Any]]:
             row["manifest_path"] = manifest_path
             out.append(row)
     return out
+
