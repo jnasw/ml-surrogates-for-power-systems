@@ -24,7 +24,13 @@ set -euo pipefail
 #     bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+else
+  # When submitted via `bsub < script`, BASH_SOURCE may not point to this file.
+  # LSF sets LSB_SUBCWD to the directory where `bsub` was called.
+  REPO_ROOT="${REPO_ROOT:-${LSB_SUBCWD:-$(pwd)}}"
+fi
 
 MODE="${MODE:-screening}"
 REFERENCE_ID="${REFERENCE_ID:-}"

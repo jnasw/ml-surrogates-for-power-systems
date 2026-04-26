@@ -27,7 +27,13 @@ set -euo pipefail
 #     bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+else
+  # When submitted via `bsub < script`, BASH_SOURCE may not point to this file.
+  # LSF sets LSB_SUBCWD to the directory where `bsub` was called.
+  REPO_ROOT="${REPO_ROOT:-${LSB_SUBCWD:-$(pwd)}}"
+fi
 
 MODEL_FLAG="${MODEL_FLAG:-SM4}"
 SUITE="${SUITE:-all}"
