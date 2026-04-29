@@ -229,3 +229,4 @@ obsolete/
 tests/
 other_repos/
 .DS_Storeshou
+.claude/

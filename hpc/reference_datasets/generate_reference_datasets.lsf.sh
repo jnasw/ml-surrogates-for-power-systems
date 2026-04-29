@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-#BSUB -J ref_datasets
-#BSUB -q normal
+#BSUB -J ref_data
+#BSUB -q gpua100
 #BSUB -n 4
-#BSUB -R "rusage[mem=4096]"
+#BSUB -R "rusage[mem=8GB]"
 #BSUB -W 04:00
 #BSUB -oo hpc/logs/reference_datasets_%J.out
 #BSUB -eo hpc/logs/reference_datasets_%J.err
@@ -11,20 +11,15 @@ set -euo pipefail
 
 # Example submissions:
 #   Dry-run all SM4 references:
-#     export MODEL_FLAG=SM4 SUITE=all DRY_RUN=true
-#     bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+#     MODEL_FLAG=SM4 SUITE=all DRY_RUN=true bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
 #   Generate smoke only:
-#     export MODEL_FLAG=SM4 SUITE=smoke DRY_RUN=false
-#     bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+#     MODEL_FLAG=SM4 SUITE=smoke DRY_RUN=false bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
 #   Generate main only:
-#     export MODEL_FLAG=SM4 SUITE=main DRY_RUN=false
-#     bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+#     MODEL_FLAG=SM4 SUITE=main DRY_RUN=false bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
 #   Generate one specific reference ID:
-#     export REFERENCE_IDS=main_SM4_qbc_b512_ds01
-#     bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+#     REFERENCE_IDS=main_SM4_qbc_b512_ds01 bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
 #   Force rebuild one reference ID:
-#     export REFERENCE_IDS=dev_SM4_lhs_b512_ds01 FORCE_REBUILD=true
-#     bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+#     REFERENCE_IDS=dev_SM4_lhs_b512_ds01 FORCE_REBUILD=true bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
@@ -35,6 +30,12 @@ else
   REPO_ROOT="${REPO_ROOT:-${LSB_SUBCWD:-$(pwd)}}"
 fi
 
+source "${REPO_ROOT}/hpc/common/lsf_defaults.sh"
+
+QUEUE="${QUEUE:-${QUEUE_CPU}}"
+WALLTIME="${WALLTIME:-04:00}"
+MEM_GB="${MEM_GB:-${DEFAULT_MEM_GB}}"
+N_CORES="${N_CORES:-${DEFAULT_N_CORES}}"
 MODEL_FLAG="${MODEL_FLAG:-SM4}"
 SUITE="${SUITE:-all}"
 REFERENCE_IDS="${REFERENCE_IDS:-}"
@@ -45,8 +46,13 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-data/reference}"
 mkdir -p "${REPO_ROOT}/hpc/logs"
 
 cd "${REPO_ROOT}"
+activate_repo_venv "${REPO_ROOT}"
 
 echo "[hpc] repo_root=${REPO_ROOT}"
+echo "[hpc] queue=${QUEUE} (static #BSUB default: gpua100)"
+echo "[hpc] walltime=${WALLTIME} (static #BSUB default: 04:00)"
+echo "[hpc] mem_gb=${MEM_GB} (static #BSUB default: 8GB)"
+echo "[hpc] n_cores=${N_CORES} (static #BSUB default: 4)"
 echo "[hpc] model_flag=${MODEL_FLAG}"
 echo "[hpc] suite=${SUITE}"
 echo "[hpc] reference_ids=${REFERENCE_IDS:-<none>}"

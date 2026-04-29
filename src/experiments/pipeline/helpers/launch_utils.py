@@ -5,25 +5,17 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from datetime import datetime
 from pathlib import Path
 from time import monotonic
 from typing import Any
 
-from src.experiments.pipeline.helpers.manifest import save_manifest, set_stage_status, utc_now_iso
-
-
-def init_experiment_manifest(*, run_root: str, experiment: dict[str, Any]) -> dict[str, Any]:
-    """Create the common manifest scaffold used by launcher scripts."""
-    return {
-        "created_at_utc": utc_now_iso(),
-        "updated_at_utc": utc_now_iso(),
-        "run_root": run_root,
-        "experiment": dict(experiment),
-        "stages": {},
-        "artifacts": {},
-        "runs": [],
-    }
+from src.experiments.pipeline.helpers.manifest import (
+    init_experiment_manifest,
+    save_manifest,
+    set_stage_status,
+    upsert_run_status,
+    utc_now_iso,
+)
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -32,6 +24,8 @@ def read_json(path: Path) -> dict[str, Any]:
 
 
 def tag_stamp() -> str:
+    from datetime import datetime
+
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
@@ -154,53 +148,6 @@ def run_logged_stage(
     return int(proc.returncode)
 
 
-def upsert_run_status(
-    manifest: dict[str, Any],
-    *,
-    run_name: str,
-    run_dir: str,
-    run_metadata: dict[str, Any],
-    status: str,
-    command: list[str] | None = None,
-    log_file: str | None = None,
-    started_at_utc: str | None = None,
-    completed_at_utc: str | None = None,
-    return_code: int | None = None,
-    error: str | None = None,
-    metrics_summary: dict[str, Any] | None = None,
-    extra_fields: dict[str, Any] | None = None,
-) -> None:
-    existing = None
-    for item in manifest["runs"]:
-        if item.get("run_name") == run_name:
-            existing = item
-            break
-    if existing is None:
-        existing = {
-            "run_name": run_name,
-            "run_dir": run_dir,
-            **dict(run_metadata),
-        }
-        manifest["runs"].append(existing)
-    existing["status"] = status
-    if command is not None:
-        existing["command"] = command
-    if log_file is not None:
-        existing["log_file"] = log_file
-    if started_at_utc is not None:
-        existing["started_at_utc"] = started_at_utc
-    if completed_at_utc is not None:
-        existing["completed_at_utc"] = completed_at_utc
-    if return_code is not None:
-        existing["return_code"] = int(return_code)
-    if error is not None:
-        existing["error"] = error
-    if metrics_summary is not None:
-        existing["metrics_summary"] = metrics_summary
-    if extra_fields:
-        existing.update(dict(extra_fields))
-
-
 def run_logged_command(
     *,
     label: str,
@@ -239,4 +186,3 @@ def run_logged_command(
         "elapsed_seconds": elapsed,
         "error": None if proc.returncode == 0 else f"{label} failed. See {log_path}",
     }
-

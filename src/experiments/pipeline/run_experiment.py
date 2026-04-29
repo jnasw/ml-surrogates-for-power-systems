@@ -9,12 +9,14 @@ import statistics
 import subprocess
 import sys
 from datetime import datetime
+from pathlib import Path
 from time import monotonic
 from typing import Any
 
 from omegaconf import OmegaConf
 
 from src.experiments.pipeline.helpers.manifest import init_dataset_manifest, save_manifest, set_stage_status, utc_now_iso
+from src.experiments.pipeline.helpers.seeds import load_seed_registry
 from src.experiments.pipeline.helpers.telemetry import (
     build_round_telemetry_rows,
     write_rows_csv,
@@ -37,12 +39,10 @@ def _resolve_path(path_like: str, cwd: str) -> str:
 
 def _load_seed_value(repo_root: str, seed_label: str) -> int:
     seed_registry = os.path.join(repo_root, "src", "config", "registry", "seeds.yaml")
-    if not os.path.exists(seed_registry):
-        raise FileNotFoundError(f"Seed registry not found: {seed_registry}")
-    cfg = OmegaConf.load(seed_registry)
-    if seed_label not in cfg:
+    registry = load_seed_registry(Path(seed_registry))
+    if seed_label not in registry:
         raise ValueError(f"Unknown seed label '{seed_label}' in {seed_registry}")
-    return int(cfg[seed_label])
+    return int(registry[seed_label])
 
 
 def _load_budget(repo_root: str, budget_label: str) -> dict[str, int]:

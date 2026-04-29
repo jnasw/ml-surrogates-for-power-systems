@@ -104,6 +104,27 @@ def main(config) -> None:
             )
         legacy_test_metrics = {} if test_metrics is None else dict(test_metrics)
 
+        evaluation_sets: dict | None = None
+        for eval_kind in ("id", "ood"):
+            eval_root = cfg_get(config, f"evaluation.{eval_kind}.root", None)
+            if not eval_root:
+                continue
+            eval_root = str(eval_root)
+            print(f"[baseline] Evaluating external {eval_kind} dataset: {eval_root}")
+            ext_dataset = load_trajectory_dataset_from_preprocessed_root(dataset_root=eval_root)
+            ext_x, ext_y = ext_dataset.test_view()
+            if ext_x is None or ext_y is None:
+                print(f"[baseline] Warning: external {eval_kind} dataset has no test split; skipping.")
+                continue
+            ext_metrics = regression_metrics_from_arrays(y_true=ext_y, y_pred=model.predict(ext_x))
+            if evaluation_sets is None:
+                evaluation_sets = {}
+            evaluation_sets[eval_kind] = {
+                "dataset_root": eval_root,
+                "n_rows": int(ext_x.shape[0]),
+                "metrics": ext_metrics,
+            }
+
         write_json(
             metrics_path,
             {
@@ -133,6 +154,7 @@ def main(config) -> None:
                 "final_train_losses": None,
                 "final_val_losses": None,
                 "final_test_losses": None,
+                "evaluation_sets": evaluation_sets,
             },
         )
         timings["artifact_write_seconds"] = monotonic() - artifact_write_started

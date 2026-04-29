@@ -356,3 +356,12 @@ dirs:
   params_dir: ${hydra:runtime.cwd}/src/config/params
   init_conditions_dir: ${hydra:runtime.cwd}/src/config/ic
   dataset_dir: ${hydra:runtime.cwd}/data
+
+evaluation:
+  id:
+    root: null
+  ood:
+    root: null
+
+id_eval_root: null
+ood_eval_root: null

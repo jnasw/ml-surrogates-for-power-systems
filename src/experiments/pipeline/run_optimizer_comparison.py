@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import csv
-import json
-import statistics
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from omegaconf import OmegaConf
-
+from src.experiments.pipeline.helpers.evaluation import resolve_eval_inputs as _resolve_shared_eval_inputs
 from src.experiments.pipeline.helpers.launch_utils import (
     build_dataset_pipeline_command,
     dataset_root_from_manifest,
@@ -25,12 +21,36 @@ from src.experiments.pipeline.helpers.launch_utils import (
     upsert_run_status,
 )
 from src.experiments.pipeline.helpers.manifest import save_manifest, utc_now_iso
+from src.experiments.pipeline.helpers.reference import resolve_reference_dataset as _resolve_reference_dataset
+from src.experiments.pipeline.helpers.seeds import (
+    parse_int_list as _parse_int_list,
+    parse_label_list as _parse_label_list,
+    raw_seed_pairs,
+    seed_pairs_from_labels as _seed_pairs_from_labels,
+)
+from src.experiments.pipeline.helpers.summary import (
+    component_loss as _component_loss,
+    csv_value as _csv_value,
+    eval_metrics as _eval_metrics,
+    float_or_none as _float_or_none,
+    int_or_none as _int_or_none,
+    json_or_none as _json_or_none,
+    mean_std as _mean_std,
+    read_json_if_exists as _read_json_if_exists,
+    write_failures_json,
+    write_summary_csv,
+    write_summary_json,
+)
+from src.experiments.pipeline.helpers.wandb import (
+    default_project_for_mode,
+    group_name,
+    tags as wandb_tags_list,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-REFERENCE_INDEX_PATH = REPO_ROOT / "data" / "reference" / "index.json"
-SEED_REGISTRY_PATH = REPO_ROOT / "src" / "config" / "registry" / "seeds.yaml"
 DEFAULT_REFERENCE_ID = "main_SM4_qbc_b512_ds01"
+DEFAULT_OOD_EVAL_ID = "ood_SM4_wide_ic_b512_ds01"
 SCREENING_SEED_LABELS = ("s01",)
 FINAL_SEED_LABELS = ("s01", "s02", "s03", "s04", "s05")
 
@@ -88,6 +108,10 @@ SUMMARY_FIELDNAMES = [
     "seed_value",
     "dataset_reference_id",
     "dataset_root",
+    "id_eval_id",
+    "id_eval_root",
+    "ood_eval_id",
+    "ood_eval_root",
     "run_dir",
     "status",
     "return_code",
@@ -96,6 +120,13 @@ SUMMARY_FIELDNAMES = [
     "final_test_mse",
     "final_test_rmse",
     "final_test_mae",
+    "id_eval_mse",
+    "id_eval_rmse",
+    "id_eval_mae",
+    "ood_eval_mse",
+    "ood_eval_rmse",
+    "ood_eval_mae",
+    "id_ood_rmse_gap",
     "final_train_total_loss",
     "final_train_data_loss",
     "final_train_physics_loss",
@@ -148,38 +179,6 @@ class OptimizerRunSpec:
         ]
 
 
-def _parse_int_list(raw: str) -> list[int]:
-    values = [int(item.strip()) for item in raw.split(",") if item.strip()]
-    if not values:
-        raise ValueError("Expected at least one integer value.")
-    return values
-
-
-def _parse_label_list(raw: str) -> list[str]:
-    labels = [item.strip() for item in raw.split(",") if item.strip()]
-    if not labels:
-        raise ValueError("Expected at least one seed label.")
-    return labels
-
-
-def _load_seed_registry() -> dict[str, int]:
-    if not SEED_REGISTRY_PATH.exists():
-        raise FileNotFoundError(f"Seed registry not found: {SEED_REGISTRY_PATH}")
-    cfg = OmegaConf.load(SEED_REGISTRY_PATH)
-    return {str(key): int(value) for key, value in cfg.items()}
-
-
-def _seed_pairs_from_labels(labels: list[str]) -> list[tuple[str, int]]:
-    registry = _load_seed_registry()
-    missing = [label for label in labels if label not in registry]
-    if missing:
-        raise ValueError(
-            f"Unknown seed label(s): {', '.join(missing)}. "
-            f"Check {SEED_REGISTRY_PATH}."
-        )
-    return [(label, registry[label]) for label in labels]
-
-
 def _parse_strategies(raw: str | None, *, include_experimental: bool) -> list[str]:
     if raw:
         strategies = parse_csv_list(raw)
@@ -203,33 +202,8 @@ def _strategy_group(strategy: str) -> str:
     return "experimental" if strategy in EXPERIMENTAL_STRATEGY_SET else "core"
 
 
-def _reference_generation_message(reference_id: str) -> str:
-    return (
-        f"Reference dataset '{reference_id}' was not found in {REFERENCE_INDEX_PATH}. "
-        "Generate it with:\n"
-        f"python3 -m src.experiments.pipeline.run_reference_datasets --reference-id {reference_id}"
-    )
-
-
-def _resolve_reference_dataset(reference_id: str) -> dict[str, Any]:
-    if not REFERENCE_INDEX_PATH.exists():
-        raise FileNotFoundError(_reference_generation_message(reference_id))
-    with REFERENCE_INDEX_PATH.open("r", encoding="utf-8") as f:
-        payload = json.load(f)
-    for entry in payload.get("references", []):
-        if not isinstance(entry, dict):
-            continue
-        if str(entry.get("reference_id")) == reference_id:
-            preprocessed_root = entry.get("preprocessed_root")
-            if not preprocessed_root:
-                raise ValueError(f"Reference dataset '{reference_id}' has no preprocessed_root in {REFERENCE_INDEX_PATH}.")
-            dataset_root = Path(str(preprocessed_root)).resolve()
-            if not dataset_root.exists():
-                raise FileNotFoundError(
-                    f"Reference dataset '{reference_id}' points to a missing preprocessed_root: {dataset_root}"
-                )
-            return {**entry, "preprocessed_root": str(dataset_root)}
-    raise ValueError(_reference_generation_message(reference_id))
+def _resolve_eval_inputs(args: argparse.Namespace) -> dict[str, str | None]:
+    return _resolve_shared_eval_inputs(args, default_ood_eval_id=DEFAULT_OOD_EVAL_ID)
 
 
 def _build_optimizer_run_specs(
@@ -409,6 +383,8 @@ def _build_pinn_command(
     loss_weight_physics: float,
     loss_weight_ic: float,
     gradient_telemetry: bool,
+    id_eval_root: str | None,
+    ood_eval_root: str | None,
 ) -> list[str]:
     phase_override = _optimizer_phase_override(
         run_spec=run_spec,
@@ -435,7 +411,7 @@ def _build_pinn_command(
         f"pinn.activation={activation}",
         f"pinn.default_batch_size={int(batch_size)}",
         "pinn.supervised_sampling.enabled=false",
-        "pinn.collocation_sampling.enabled=false",
+        "pinn.collocation.sampling.enabled=false",
         f"pinn.gradient_telemetry.enabled={'true' if gradient_telemetry else 'false'}",
         f"pinn.loss_weights.data={loss_weight_data}",
         f"pinn.loss_weights.dt={loss_weight_dt}",
@@ -451,42 +427,11 @@ def _build_pinn_command(
     ]
     if wandb_entity:
         command.append(f"wandb.entity={wandb_entity}")
+    if id_eval_root:
+        command.append(f"evaluation.id.root={id_eval_root}")
+    if ood_eval_root:
+        command.append(f"evaluation.ood.root={ood_eval_root}")
     return command
-
-
-def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    with path.open("r", encoding="utf-8") as f:
-        payload = json.load(f)
-    return payload if isinstance(payload, dict) else None
-
-
-def _float_or_none(value: Any) -> float | None:
-    if value in (None, "", "None"):
-        return None
-    return float(value)
-
-
-def _int_or_none(value: Any) -> int | None:
-    if value in (None, "", "None"):
-        return None
-    return int(float(value))
-
-
-def _json_or_none(value: Any) -> Any:
-    if value in (None, "", "None"):
-        return None
-    return value
-
-
-def _component_loss(payload: dict[str, Any] | None, component_name: str) -> float | None:
-    if not payload:
-        return None
-    components = payload.get("component_losses")
-    if not isinstance(components, dict):
-        return None
-    return _float_or_none(components.get(component_name))
 
 
 def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
@@ -496,6 +441,10 @@ def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
     final_test_metrics = dict(metrics.get("final_test_metrics", {}) or {}) if metrics else {}
     final_train_losses = dict(metrics.get("final_train_losses", {}) or {}) if metrics else {}
     final_epoch = dict(metrics.get("final_epoch", {}) or {}) if metrics else {}
+    id_eval_metrics = _eval_metrics(metrics, "id")
+    ood_eval_metrics = _eval_metrics(metrics, "ood")
+    id_eval_rmse = _float_or_none(id_eval_metrics.get("rmse"))
+    ood_eval_rmse = _float_or_none(ood_eval_metrics.get("rmse"))
     strategy = str(run.get("strategy", ""))
     is_experimental = run.get("is_experimental_strategy")
     if is_experimental is None:
@@ -511,6 +460,10 @@ def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
         "seed_value": run.get("seed_value"),
         "dataset_reference_id": run.get("dataset_reference_id"),
         "dataset_root": run.get("dataset_root"),
+        "id_eval_id": run.get("id_eval_id"),
+        "id_eval_root": run.get("id_eval_root"),
+        "ood_eval_id": run.get("ood_eval_id"),
+        "ood_eval_root": run.get("ood_eval_root"),
         "run_dir": run.get("run_dir"),
         "status": run.get("status"),
         "return_code": run.get("return_code"),
@@ -519,6 +472,13 @@ def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
         "final_test_mse": _float_or_none(final_test_metrics.get("mse")),
         "final_test_rmse": _float_or_none(final_test_metrics.get("rmse")),
         "final_test_mae": _float_or_none(final_test_metrics.get("mae")),
+        "id_eval_mse": _float_or_none(id_eval_metrics.get("mse")),
+        "id_eval_rmse": id_eval_rmse,
+        "id_eval_mae": _float_or_none(id_eval_metrics.get("mae")),
+        "ood_eval_mse": _float_or_none(ood_eval_metrics.get("mse")),
+        "ood_eval_rmse": ood_eval_rmse,
+        "ood_eval_mae": _float_or_none(ood_eval_metrics.get("mae")),
+        "id_ood_rmse_gap": None if id_eval_rmse is None or ood_eval_rmse is None else ood_eval_rmse - id_eval_rmse,
         "final_train_total_loss": _float_or_none(final_train_losses.get("total_loss")),
         "final_train_data_loss": _component_loss(final_train_losses, "data"),
         "final_train_physics_loss": _component_loss(final_train_losses, "physics"),
@@ -533,21 +493,6 @@ def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
         "cumulative_wall_seconds": _float_or_none(final_epoch.get("cumulative_wall_seconds")),
         "total_seconds": _float_or_none(timings.get("total_seconds") if timings else None),
         "training_seconds": _float_or_none(timings.get("training_seconds") if timings else None),
-    }
-
-
-def _csv_value(value: Any) -> Any:
-    if isinstance(value, (dict, list)):
-        return json.dumps(value, sort_keys=True)
-    return value
-
-
-def _mean_std(values: list[float]) -> dict[str, float | None]:
-    if not values:
-        return {"mean": None, "std": None}
-    return {
-        "mean": statistics.mean(values),
-        "std": statistics.stdev(values) if len(values) > 1 else 0.0,
     }
 
 
@@ -586,11 +531,7 @@ def _write_summary_artifacts(*, output_root: Path, manifest: dict[str, Any]) -> 
     summary_json = output_root / "summary.json"
     failures_json = output_root / "failures.json"
 
-    with summary_csv.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=SUMMARY_FIELDNAMES)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({key: _csv_value(row.get(key)) for key in SUMMARY_FIELDNAMES})
+    write_summary_csv(summary_csv, rows=rows, fieldnames=SUMMARY_FIELDNAMES)
 
     failures = [
         {
@@ -614,6 +555,12 @@ def _write_summary_artifacts(*, output_root: Path, manifest: dict[str, Any]) -> 
             "root": manifest.get("artifacts", {}).get("dataset_root"),
             "reference": manifest.get("artifacts", {}).get("dataset_reference"),
         },
+        "evaluation": {
+            "id_eval_id": manifest.get("artifacts", {}).get("id_eval_id"),
+            "id_eval_root": manifest.get("artifacts", {}).get("id_eval_root"),
+            "ood_eval_id": manifest.get("artifacts", {}).get("ood_eval_id"),
+            "ood_eval_root": manifest.get("artifacts", {}).get("ood_eval_root"),
+        },
         "mode": manifest.get("experiment", {}).get("mode"),
         "strategies": manifest.get("artifacts", {}).get("strategies", []),
         "seed_labels": manifest.get("artifacts", {}).get("seed_labels", []),
@@ -621,10 +568,8 @@ def _write_summary_artifacts(*, output_root: Path, manifest: dict[str, Any]) -> 
         "rows": rows,
         "aggregates_by_strategy": _aggregate_by_strategy(rows),
     }
-    with summary_json.open("w", encoding="utf-8") as f:
-        json.dump(summary_payload, f, indent=2)
-    with failures_json.open("w", encoding="utf-8") as f:
-        json.dump({"generated_at_utc": utc_now_iso(), "failures": failures}, f, indent=2)
+    write_summary_json(summary_json, summary_payload)
+    write_failures_json(failures_json, failures)
 
     return {
         "summary_csv": str(summary_csv),
@@ -643,6 +588,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-flag", default="SM4", help="Model flag.")
     parser.add_argument("--reference-id", default=None, help=f"Reference dataset ID. Default: {DEFAULT_REFERENCE_ID}.")
     parser.add_argument("--dataset-root", default=None, help="Explicit preprocessed dataset root. Mutually exclusive with --reference-id.")
+    parser.add_argument("--id-eval-id", default=None, help="Optional ID evaluation dataset ID from data/evaluation/index.json.")
+    parser.add_argument("--ood-eval-id", default=None, help="Optional OOD evaluation dataset ID from data/evaluation/index.json.")
+    parser.add_argument("--id-eval-root", default=None, help="Optional explicit ID evaluation preprocessed dataset root.")
+    parser.add_argument("--ood-eval-root", default=None, help="Optional explicit OOD evaluation preprocessed dataset root.")
+    parser.add_argument("--no-ood-eval", action="store_true", help=f"Disable default OOD evaluation ({DEFAULT_OOD_EVAL_ID}).")
     parser.add_argument("--allow-dataset-generation", action="store_true", help="Use the old shared dataset-generation fallback instead of reference lookup.")
     parser.add_argument("--preset", default="main", help="Dataset pipeline preset used only with --allow-dataset-generation.")
     parser.add_argument("--budget", default="b512", help="Dataset budget used only with --allow-dataset-generation.")
@@ -712,7 +662,7 @@ def _resolve_seed_pairs(args: argparse.Namespace, *, mode: str) -> list[tuple[st
     if args.seed_labels:
         return _seed_pairs_from_labels(_parse_label_list(str(args.seed_labels)))
     if args.seeds:
-        return [(f"raw{seed}", int(seed)) for seed in _parse_int_list(str(args.seeds))]
+        return raw_seed_pairs(_parse_int_list(str(args.seeds)))
     if args.seed is not None:
         return [(f"raw{int(args.seed)}", int(args.seed))]
     default_labels = list(SCREENING_SEED_LABELS if mode == "screening" else FINAL_SEED_LABELS)
@@ -803,10 +753,13 @@ def main() -> None:
             include_experimental=bool(args.include_experimental_strategies),
         )
         main_epochs, adam_warmup_epochs = _resolve_epoch_controls(args, mode=mode)
+        eval_inputs = _resolve_eval_inputs(args)
     except (FileNotFoundError, ValueError) as exc:
         raise SystemExit(str(exc)) from None
-    wandb_project = args.wandb_project or (
-        "thesis-optimizer-experiment-TEST" if mode == "screening" else "thesis-optimizer-experiment"
+    wandb_project = args.wandb_project or default_project_for_mode(
+        mode=mode,
+        screening_project="thesis-optimizer-experiment-TEST",
+        final_project="thesis-optimizer-experiment",
     )
 
     stamp = args.experiment_tag or tag_stamp()
@@ -818,7 +771,7 @@ def main() -> None:
     output_root.mkdir(parents=True, exist_ok=True)
 
     experiment_id = f"optimizer_comparison_{mode}_{stamp}"
-    wandb_group = f"optimizer_comparison_{args.model_flag.lower()}_{mode}_{stamp}"
+    wandb_group = group_name("optimizer_comparison", args.model_flag.lower(), mode, stamp)
     manifest_path = output_root / "run_manifest.json"
     manifest = init_experiment_manifest(
         run_root=str(output_root),
@@ -840,6 +793,10 @@ def main() -> None:
     manifest["artifacts"]["main_epochs"] = int(main_epochs)
     manifest["artifacts"]["adam_warmup_epochs"] = int(adam_warmup_epochs)
     manifest["artifacts"]["gradient_telemetry"] = bool(args.gradient_telemetry)
+    manifest["artifacts"]["id_eval_id"] = eval_inputs["id_eval_id"]
+    manifest["artifacts"]["id_eval_root"] = eval_inputs["id_eval_root"]
+    manifest["artifacts"]["ood_eval_id"] = eval_inputs["ood_eval_id"]
+    manifest["artifacts"]["ood_eval_root"] = eval_inputs["ood_eval_root"]
     manifest["artifacts"]["training_strategies"] = ["single_optimizer", "multi_phase"]
     save_manifest(str(manifest_path), manifest)
 
@@ -847,13 +804,14 @@ def main() -> None:
         dataset_root, dataset_reference_id = _resolve_dataset(args, manifest=manifest, manifest_path=manifest_path)
     except (FileNotFoundError, ValueError) as exc:
         raise SystemExit(str(exc)) from None
-    tags_base = [
+    tags_base = wandb_tags_list(
         "optimizer_comparison",
         mode,
         args.model_flag.lower(),
-        *(["reference", dataset_reference_id] if dataset_reference_id else []),
-        *args.tag,
-    ]
+        "reference" if dataset_reference_id else None,
+        dataset_reference_id,
+        args.tag,
+    )
     run_specs = _build_optimizer_run_specs(
         strategies=strategies,
         seed_pairs=seed_pairs,
@@ -895,6 +853,8 @@ def main() -> None:
             loss_weight_physics=args.loss_weight_physics,
             loss_weight_ic=args.loss_weight_ic,
             gradient_telemetry=bool(args.gradient_telemetry),
+            id_eval_root=eval_inputs["id_eval_root"],
+            ood_eval_root=eval_inputs["ood_eval_root"],
         )
         log_path = output_root / "logs" / "runs" / f"{run_name}.log"
         run_metadata = {
@@ -909,6 +869,10 @@ def main() -> None:
             "adam_warmup_epochs": run_spec.adam_warmup_epochs,
             "dataset_reference_id": dataset_reference_id,
             "dataset_root": str(dataset_root),
+            "id_eval_id": eval_inputs["id_eval_id"],
+            "id_eval_root": eval_inputs["id_eval_root"],
+            "ood_eval_id": eval_inputs["ood_eval_id"],
+            "ood_eval_root": eval_inputs["ood_eval_root"],
         }
         upsert_run_status(
             manifest,

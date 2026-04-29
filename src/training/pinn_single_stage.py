@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+
 from src.training import trainer as trainer_impl
 
 
@@ -362,14 +364,14 @@ def train_single_stage_pinn_loop(
             train_component_grad_norms = None
             train_weighted_component_grad_norms = None
             if epoch_gradients:
-                train_total_grad_norm = float(trainer_impl.np.mean([item.total_grad_norm for item in epoch_gradients]))
+                train_total_grad_norm = float(np.mean([item.total_grad_norm for item in epoch_gradients]))
                 component_names = epoch_gradients[0].component_grad_norms.keys()
                 train_component_grad_norms = {
-                    name: float(trainer_impl.np.mean([item.component_grad_norms[name] for item in epoch_gradients]))
+                    name: float(np.mean([item.component_grad_norms[name] for item in epoch_gradients]))
                     for name in component_names
                 }
                 train_weighted_component_grad_norms = {
-                    name: float(trainer_impl.np.mean([item.weighted_component_grad_norms[name] for item in epoch_gradients]))
+                    name: float(np.mean([item.weighted_component_grad_norms[name] for item in epoch_gradients]))
                     for name in component_names
                 }
             global_epoch += 1

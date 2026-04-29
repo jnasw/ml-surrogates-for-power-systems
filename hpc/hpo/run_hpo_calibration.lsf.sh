@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-#BSUB -J hpo_calibration
-#BSUB -q gpu
+#BSUB -J hpo_calib
+#BSUB -q gpua100
 #BSUB -n 4
-#BSUB -R "rusage[mem=8192]"
+#BSUB -R "rusage[mem=8GB]"
+#BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 04:00
 #BSUB -oo hpc/logs/hpo_calibration_%J.out
 #BSUB -eo hpc/logs/hpo_calibration_%J.err
@@ -11,17 +12,13 @@ set -euo pipefail
 
 # Example submissions:
 #   PINN architecture dry-run:
-#     export STUDY=pinn_architecture DRY_RUN=true
-#     bsub < hpc/hpo/run_hpo_calibration.lsf.sh
+#     STUDY=pinn_architecture DRY_RUN=true bsub < hpc/hpo/run_hpo_calibration.lsf.sh
 #   Adam LR with selected architecture:
-#     export STUDY=adam_lr PINN_HIDDEN_DIM=64 PINN_HIDDEN_LAYERS=4
-#     bsub < hpc/hpo/run_hpo_calibration.lsf.sh
+#     STUDY=adam_lr PINN_HIDDEN_DIM=64 PINN_HIDDEN_LAYERS=4 bsub < hpc/hpo/run_hpo_calibration.lsf.sh
 #   Second-order LR subset:
-#     export STUDY=second_order_lr OPTIMIZERS=LBFGS,SSBFGS LRS=0.1,0.3,1.0
-#     bsub < hpc/hpo/run_hpo_calibration.lsf.sh
+#     STUDY=second_order_lr OPTIMIZERS=LBFGS,SSBFGS LRS=0.1,0.3,1.0 bsub < hpc/hpo/run_hpo_calibration.lsf.sh
 #   Baseline architecture:
-#     export STUDY=baseline_architecture DEVICE=cuda
-#     bsub < hpc/hpo/run_hpo_calibration.lsf.sh
+#     STUDY=baseline_architecture DEVICE=cuda bsub < hpc/hpo/run_hpo_calibration.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
@@ -32,12 +29,19 @@ else
   REPO_ROOT="${REPO_ROOT:-${LSB_SUBCWD:-$(pwd)}}"
 fi
 
+source "${REPO_ROOT}/hpc/common/lsf_defaults.sh"
+
+QUEUE="${QUEUE:-${QUEUE_GPU}}"
+WALLTIME="${WALLTIME:-04:00}"
+MEM_GB="${MEM_GB:-${DEFAULT_MEM_GB}}"
+N_CORES="${N_CORES:-${DEFAULT_N_CORES}}"
 STUDY="${STUDY:-pinn_architecture}"
 REFERENCE_ID="${REFERENCE_ID:-}"
 DATASET_ROOT="${DATASET_ROOT:-}"
 MODEL_FLAG="${MODEL_FLAG:-SM4}"
 SEED_LABELS="${SEED_LABELS:-s01}"
 DEVICE="${DEVICE:-cuda}"
+DTYPE="${DTYPE:-float64}"
 EPOCHS="${EPOCHS:-}"
 WANDB_PROJECT="${WANDB_PROJECT:-}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"
@@ -53,14 +57,20 @@ PINN_HIDDEN_LAYERS="${PINN_HIDDEN_LAYERS:-}"
 mkdir -p "${REPO_ROOT}/hpc/logs"
 
 cd "${REPO_ROOT}"
+activate_repo_venv "${REPO_ROOT}"
 
 echo "[hpc] repo_root=${REPO_ROOT}"
+echo "[hpc] queue=${QUEUE} (static #BSUB default: gpua100)"
+echo "[hpc] walltime=${WALLTIME} (static #BSUB default: 04:00)"
+echo "[hpc] mem_gb=${MEM_GB} (static #BSUB default: 8GB)"
+echo "[hpc] n_cores=${N_CORES} (static #BSUB default: 4)"
 echo "[hpc] study=${STUDY}"
 echo "[hpc] reference_id=${REFERENCE_ID:-<launcher default>}"
 echo "[hpc] dataset_root=${DATASET_ROOT:-<none>}"
 echo "[hpc] model_flag=${MODEL_FLAG}"
 echo "[hpc] seed_labels=${SEED_LABELS}"
 echo "[hpc] device=${DEVICE}"
+echo "[hpc] dtype=${DTYPE}"
 echo "[hpc] epochs=${EPOCHS:-<study default>}"
 echo "[hpc] dry_run=${DRY_RUN}"
 
@@ -76,6 +86,8 @@ cmd=(
   "${SEED_LABELS}"
   --device
   "${DEVICE}"
+  --dtype
+  "${DTYPE}"
 )
 
 if [[ -n "${REFERENCE_ID}" ]]; then

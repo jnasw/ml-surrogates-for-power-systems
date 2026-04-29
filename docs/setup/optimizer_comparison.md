@@ -130,7 +130,9 @@ The final optimizer comparison uses the persistent reference dataset:
 main_SM4_qbc_b512_ds01
 ```
 
-The experiment should be run from the repository root on the cluster. The cluster does not support `bsub -env`, so set environment variables with `export` before calling `bsub`.
+Run from the repository root. HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`; the static `#BSUB` directives remain the submitted resources. Use inline environment variables only. Do not use `bsub -env` or `export` blocks in runbook commands.
+
+PINN wrappers expose `MODEL_FLAG`, `DTYPE`, `ID_EVAL_ID`, `OOD_EVAL_ID`, and `NO_OOD_EVAL`. OOD evaluation is enabled by default using the launcher default unless `NO_OOD_EVAL=true` / `--no-ood-eval` is used. ID evaluation is optional and must be requested explicitly.
 
 ### 1. Prepare The Environment
 
@@ -147,18 +149,15 @@ Make sure `python3` resolves to the intended project environment before submitti
 First dry-run the reference dataset job:
 
 ```bash
-export REFERENCE_IDS=main_SM4_qbc_b512_ds01
-export DRY_RUN=true
-bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+REFERENCE_IDS=main_SM4_qbc_b512_ds01 DRY_RUN=true \
+  bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
 ```
 
 Then submit the real reference dataset job:
 
 ```bash
-export REFERENCE_IDS=main_SM4_qbc_b512_ds01
-export DRY_RUN=false
-export FORCE_REBUILD=false
-bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+REFERENCE_IDS=main_SM4_qbc_b512_ds01 DRY_RUN=false FORCE_REBUILD=false \
+  bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
 ```
 
 Expected reference outputs:
@@ -173,10 +172,8 @@ The `data/reference/index.json` entry for `main_SM4_qbc_b512_ds01` must contain 
 ### 3. Dry-Run The Final Optimizer Matrix
 
 ```bash
-export MODE=final
-export REFERENCE_ID=main_SM4_qbc_b512_ds01
-export DRY_RUN=true
-bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
+MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 DRY_RUN=true \
+  bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
 ```
 
 The default final matrix should include 11 core strategies and 5 seeds:
@@ -199,11 +196,8 @@ Run these only as explicitly labeled experimental follow-up runs.
 ### 4. Submit The Final Optimizer Comparison
 
 ```bash
-export MODE=final
-export REFERENCE_ID=main_SM4_qbc_b512_ds01
-export DEVICE=cuda
-export DRY_RUN=false
-bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
+MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 DEVICE=cuda DRY_RUN=false \
+  bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
 ```
 
 Final mode uses:
@@ -220,13 +214,9 @@ W&B project: thesis-optimizer-experiment
 For a smaller pre-final check:
 
 ```bash
-export MODE=screening
-export REFERENCE_ID=main_SM4_qbc_b512_ds01
-export STRATEGIES=adam,lbfgs,adam_lbfgs
-export SEED_LABELS=s01
-export DEVICE=cuda
-export DRY_RUN=false
-bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
+MODE=screening REFERENCE_ID=main_SM4_qbc_b512_ds01 \
+  STRATEGIES=adam,lbfgs,adam_lbfgs SEED_LABELS=s01 DEVICE=cuda DRY_RUN=false \
+  bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
 ```
 
 Screening mode uses 5 main epochs, 5 Adam warmup epochs, and the W&B project `thesis-optimizer-experiment-TEST`.
@@ -258,3 +248,8 @@ runs/<strategy>_<seed>/timings.json
 ```
 
 Use `summary.csv` and `summary.json` as the comparison-level result artifacts. If a job fails, inspect `failures.json` first, then the corresponding file under `logs/runs/`.
+
+Notes:
+- Smoke/compressed datasets may have a time grid that differs from external evaluation datasets. Use `NO_OOD_EVAL=true` or `--no-ood-eval` for those checks.
+- Smoke/reference smoke datasets disable validation. Normal/final datasets keep validation by default.
+- Gradient telemetry is disabled by default for optimizer comparison.

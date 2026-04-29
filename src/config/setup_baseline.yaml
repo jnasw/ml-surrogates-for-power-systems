@@ -20,5 +20,11 @@ baseline:
     enabled: false
   checkpoint_name: baseline_model.pt
 
+evaluation:
+  id:
+    root: null
+  ood:
+    root: null
+
 dirs:
   dataset_dir: ${hydra:runtime.cwd}/data

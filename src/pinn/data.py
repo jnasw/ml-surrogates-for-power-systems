@@ -213,6 +213,22 @@ def load_pinn_dataset_from_preprocessed_root(
     )
 
 
+def load_pinn_supervised_test_split_from_preprocessed_root(
+    dataset_root: str,
+    dtype: str = "float64",
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Load only the supervised test split from a preprocessed dataset root."""
+    torch_dtype = resolve_torch_dtype(dtype)
+    test_dir = os.path.join(dataset_root, TEST_SPLIT)
+    test_x = _load_h5_tensor_rows(_iter_split_files(test_dir, H5_DATA_SUFFIX), H5_X_KEYS[TEST_SPLIT], torch_dtype)
+    test_y = _load_h5_tensor_rows(_iter_split_files(test_dir, H5_DATA_SUFFIX), H5_Y_KEYS[TEST_SPLIT], torch_dtype)
+    if test_x is None or test_y is None:
+        raise ValueError(f"No supervised test HDF5 files found in {test_dir}")
+    if test_x.shape[0] != test_y.shape[0]:
+        raise ValueError(f"External evaluation x/y row count mismatch in {test_dir}")
+    return test_x, test_y
+
+
 def load_pinn_dataset_from_preprocessed(
     dataset_dir: str,
     model_flag: str,

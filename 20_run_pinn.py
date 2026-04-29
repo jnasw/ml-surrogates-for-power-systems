@@ -9,13 +9,14 @@ import hydra
 from hydra.utils import get_original_cwd
 
 from src.data.runtime_validation import validate_pinn_runtime_dataset
-from src.pinn.data import load_pinn_dataset_from_preprocessed_root
+from src.pinn.data import load_pinn_dataset_from_preprocessed_root, load_pinn_supervised_test_split_from_preprocessed_root
 from src.pinn.logging import PinnLogger
 from src.sim.ode.model_definitions import SynchronousMachineModels
 from src.training.metrics import build_run_summary, regression_metrics_for_torch_model
 from src.training.runtime import (
     build_direct_run_manifest,
     cfg_get,
+    resolve_path_from_cwd,
     resolve_dataset_root,
     resolve_run_dir,
     save_resolved_config,
@@ -23,6 +24,46 @@ from src.training.runtime import (
     write_json,
 )
 from src.training.trainer import train_pinn
+
+
+def _resolve_optional_eval_root(config, original_cwd: str, *, kind: str) -> str | None:
+    if kind not in {"id", "ood"}:
+        raise ValueError(f"Unsupported evaluation kind: {kind}")
+    root_cfg = cfg_get(config, f"evaluation.{kind}.root", None)
+    if root_cfg in (None, ""):
+        root_cfg = cfg_get(config, f"{kind}_eval_root", None)
+    if root_cfg in (None, ""):
+        return None
+    return resolve_path_from_cwd(str(root_cfg), original_cwd)
+
+
+def _evaluate_external_sets(
+    *,
+    config,
+    original_cwd: str,
+    model,
+    batch_size: int,
+) -> dict[str, dict[str, object]] | None:
+    evaluation_sets: dict[str, dict[str, object]] = {}
+    for kind in ("id", "ood"):
+        eval_root = _resolve_optional_eval_root(config, original_cwd, kind=kind)
+        if eval_root is None:
+            continue
+        eval_x, eval_y = load_pinn_supervised_test_split_from_preprocessed_root(
+            dataset_root=eval_root,
+            dtype=str(config.pinn.dtype),
+        )
+        evaluation_sets[kind] = {
+            "dataset_root": eval_root,
+            "n_rows": int(eval_x.shape[0]),
+            "metrics": regression_metrics_for_torch_model(
+                model=model,
+                x=eval_x,
+                y=eval_y,
+                batch_size=batch_size,
+            ),
+        }
+    return evaluation_sets or None
 
 
 @hydra.main(config_path="src/config", config_name="setup_pinn", version_base=None)
@@ -115,12 +156,19 @@ def main(config) -> None:
             y=dataset.test_y,
             batch_size=metric_batch_size,
         )
+        evaluation_sets = _evaluate_external_sets(
+            config=config,
+            original_cwd=original_cwd,
+            model=pinn_model.model,
+            batch_size=metric_batch_size,
+        )
         logger.write_metrics_json(
             rows,
             run_summary=run_summary,
             final_train_metrics=final_train_metrics,
             final_val_metrics=final_val_metrics,
             final_test_metrics=final_test_metrics,
+            evaluation_sets=evaluation_sets,
         )
         timings["artifact_write_seconds"] = monotonic() - artifact_write_started
         status = "completed"

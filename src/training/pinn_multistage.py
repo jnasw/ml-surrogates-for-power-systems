@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import os
 from typing import Any
 
+import numpy as np
+
+from src.pinn.residuals import compute_residual_terms as _compute_residual_terms
 from src.training import trainer as trainer_impl
+from src.training.pinn_runtime import measure_pinn_state as _measure_pinn_state
 
 
 def train_multistage_pinn_loop(
@@ -96,14 +102,16 @@ def train_multistage_pinn_loop(
     ensemble = None
     stage_start_diagnostics = None
     train_dt_weights = dataset.train_dt_weights
+    prev_stage_total_loss: float | None = None
 
     for stage_idx in range(max_stages):
+        stage_wall_start = trainer_impl.time.perf_counter()
         if stage_idx == 0:
             time_scale = 1.0
         else:
             if ensemble is None:
                 raise RuntimeError("Expected an existing ensemble before training a residual stage.")
-            residual_terms = trainer_impl.compute_residual_terms(
+            residual_terms = _compute_residual_terms(
                 model=ensemble,
                 x=analysis_x_col,
                 ode_model=ode_model,
@@ -116,6 +124,23 @@ def train_multistage_pinn_loop(
                 min_kappa=float(trainer_impl.cfg_get(config, "pinn.multistage.residual_stage.kappa_min", 1.0)),
                 max_kappa=float(trainer_impl.cfg_get(config, "pinn.multistage.residual_stage.kappa_max", 100.0)),
             )
+            if logger is not None:
+                _probe_path = os.path.join(logger.run_dir, "stage_residual_probe.json")
+                _probe_entries: list = []
+                if os.path.isfile(_probe_path):
+                    with open(_probe_path) as _f:
+                        _probe_entries = json.load(_f)
+                _probe_entries.append({
+                    "stage_idx": stage_idx,
+                    "residual_rms": float(stage_start_diagnostics.residual_rms),
+                    "residual_max": float(residual_terms.residual.abs().max().item()),
+                    "kappa_suggested": float(stage_start_diagnostics.kappa_suggested),
+                    "zero_crossings": int(stage_start_diagnostics.residual_zero_crossings),
+                    "dominant_residual_channel": int(stage_start_diagnostics.dominant_residual_channel),
+                    "probe_collocation_rows": int(analysis_x_col.shape[0]),
+                })
+                with open(_probe_path, "w") as _f:
+                    json.dump(_probe_entries, _f, indent=2)
             if stage_start_diagnostics.residual_rms <= stop_threshold:
                 break
             time_scale = stage_start_diagnostics.kappa_suggested
@@ -177,7 +202,7 @@ def train_multistage_pinn_loop(
         ensemble.set_stage_epsilon(stage_idx, initial_stage_epsilon)
         stage_loss_ref = 1.0
         if trainer_impl._multistage_loss_ref_enabled(config):
-            stage_ref_losses, _ = trainer_impl._measure_pinn_state(
+            stage_ref_losses, _ = _measure_pinn_state(
                 model=ensemble,
                 criterion=criterion,
                 ode_model=ode_model,
@@ -393,14 +418,14 @@ def train_multistage_pinn_loop(
                 train_component_grad_norms = None
                 train_weighted_component_grad_norms = None
                 if epoch_gradients:
-                    train_total_grad_norm = float(trainer_impl.np.mean([item.total_grad_norm for item in epoch_gradients]))
+                    train_total_grad_norm = float(np.mean([item.total_grad_norm for item in epoch_gradients]))
                     component_names = epoch_gradients[0].component_grad_norms.keys()
                     train_component_grad_norms = {
-                        name: float(trainer_impl.np.mean([item.component_grad_norms[name] for item in epoch_gradients]))
+                        name: float(np.mean([item.component_grad_norms[name] for item in epoch_gradients]))
                         for name in component_names
                     }
                     train_weighted_component_grad_norms = {
-                        name: float(trainer_impl.np.mean([item.weighted_component_grad_norms[name] for item in epoch_gradients]))
+                        name: float(np.mean([item.weighted_component_grad_norms[name] for item in epoch_gradients]))
                         for name in component_names
                     }
                 global_epoch += 1
@@ -530,6 +555,33 @@ def train_multistage_pinn_loop(
             )
 
         ensemble.eval()
+
+        if logger is not None and rows:
+            _last_row = rows[-1]
+            _stage_total_loss = float(_last_row.train_total_loss)
+            _stage_improvement = (prev_stage_total_loss - _stage_total_loss) if prev_stage_total_loss is not None else 0.0
+            _test_metrics = _last_row.test_metrics or {}
+            _summary_path = os.path.join(logger.run_dir, "stage_summary.json")
+            _stage_entries: list = []
+            if os.path.isfile(_summary_path):
+                with open(_summary_path) as _f:
+                    _stage_entries = json.load(_f)
+            _stage_entries.append({
+                "stage_idx": stage_idx,
+                "phase_name": f"stage{stage_idx:02d}_{stage_optimizer_phases[-1].name}",
+                "optimizer": stage_optimizer_phases[-1].optimizer,
+                "epochs": stage_total_epochs,
+                "cumulative_epoch": global_epoch,
+                "walltime_s": float(trainer_impl.time.perf_counter() - stage_wall_start),
+                "final_train_total_loss": _stage_total_loss,
+                "final_train_component_losses": dict(_last_row.train_component_losses) if _last_row.train_component_losses else {},
+                "test_rmse": float(_test_metrics["rmse"]) if "rmse" in _test_metrics else None,
+                "test_mae": float(_test_metrics["mae"]) if "mae" in _test_metrics else None,
+                "stage_improvement_delta": float(_stage_improvement),
+            })
+            with open(_summary_path, "w") as _f:
+                json.dump(_stage_entries, _f, indent=2)
+            prev_stage_total_loss = _stage_total_loss
 
     if ensemble is None:
         raise RuntimeError("Multistage PINN training did not instantiate any stages.")

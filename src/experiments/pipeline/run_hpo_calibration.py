@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
-import statistics
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-from omegaconf import OmegaConf
 
 from src.experiments.pipeline.helpers.launch_utils import (
     format_hydra_list,
@@ -22,11 +18,26 @@ from src.experiments.pipeline.helpers.launch_utils import (
     upsert_run_status,
 )
 from src.experiments.pipeline.helpers.manifest import save_manifest, utc_now_iso
+from src.experiments.pipeline.helpers.reference import resolve_reference_dataset as _resolve_reference_dataset
+from src.experiments.pipeline.helpers.seeds import (
+    parse_label_list as _parse_seed_labels,
+    seed_pairs_from_labels as _seed_pairs_from_labels,
+)
+from src.experiments.pipeline.helpers.summary import (
+    component_loss as _component_loss,
+    csv_value as _csv_value,
+    float_or_none as _float_or_none,
+    int_or_none as _int_or_none,
+    mean_std as _mean_std,
+    read_json_if_exists as _read_json_if_exists,
+    write_failures_json,
+    write_summary_csv,
+    write_summary_json,
+)
+from src.experiments.pipeline.helpers.wandb import tags as wandb_tags_list
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-REFERENCE_INDEX_PATH = REPO_ROOT / "data" / "reference" / "index.json"
-SEED_REGISTRY_PATH = REPO_ROOT / "src" / "config" / "registry" / "seeds.yaml"
 DEFAULT_REFERENCE_ID = "dev_SM4_lhs_b512_ds01"
 STUDIES = ("pinn_architecture", "adam_lr", "second_order_lr", "baseline_architecture")
 DEFAULT_WANDB_PROJECTS = {
@@ -99,57 +110,6 @@ def _parse_float_list(raw: str | None, *, default: tuple[float, ...]) -> list[fl
     if not values:
         raise ValueError("Expected at least one float value.")
     return values
-
-
-def _parse_seed_labels(raw: str) -> list[str]:
-    labels = [item.strip() for item in raw.split(",") if item.strip()]
-    if not labels:
-        raise ValueError("Expected at least one seed label.")
-    return labels
-
-
-def _load_seed_registry() -> dict[str, int]:
-    if not SEED_REGISTRY_PATH.exists():
-        raise FileNotFoundError(f"Seed registry not found: {SEED_REGISTRY_PATH}")
-    cfg = OmegaConf.load(SEED_REGISTRY_PATH)
-    return {str(key): int(value) for key, value in cfg.items()}
-
-
-def _seed_pairs_from_labels(labels: list[str]) -> list[tuple[str, int]]:
-    registry = _load_seed_registry()
-    missing = [label for label in labels if label not in registry]
-    if missing:
-        raise ValueError(f"Unknown seed label(s): {', '.join(missing)}. Check {SEED_REGISTRY_PATH}.")
-    return [(label, registry[label]) for label in labels]
-
-
-def _reference_generation_message(reference_id: str) -> str:
-    return (
-        f"Reference dataset '{reference_id}' was not found in {REFERENCE_INDEX_PATH}. "
-        "Generate it with:\n"
-        f"python3 -m src.experiments.pipeline.run_reference_datasets --reference-id {reference_id}"
-    )
-
-
-def _resolve_reference_dataset(reference_id: str) -> dict[str, Any]:
-    if not REFERENCE_INDEX_PATH.exists():
-        raise FileNotFoundError(_reference_generation_message(reference_id))
-    with REFERENCE_INDEX_PATH.open("r", encoding="utf-8") as f:
-        payload = json.load(f)
-    for entry in payload.get("references", []):
-        if not isinstance(entry, dict):
-            continue
-        if str(entry.get("reference_id")) == reference_id:
-            preprocessed_root = entry.get("preprocessed_root")
-            if not preprocessed_root:
-                raise ValueError(f"Reference dataset '{reference_id}' has no preprocessed_root in {REFERENCE_INDEX_PATH}.")
-            dataset_root = Path(str(preprocessed_root)).resolve()
-            if not dataset_root.exists():
-                raise FileNotFoundError(
-                    f"Reference dataset '{reference_id}' points to a missing preprocessed_root: {dataset_root}"
-                )
-            return {**entry, "preprocessed_root": str(dataset_root)}
-    raise FileNotFoundError(_reference_generation_message(reference_id))
 
 
 def _resolve_dataset(args: argparse.Namespace) -> tuple[Path, str | None, dict[str, Any] | None]:
@@ -253,7 +213,7 @@ def _pinn_command(
         "pinn.collocation.mode=preprocessed",
         "pinn.collocation.strategy=static",
         "pinn.supervised_sampling.enabled=false",
-        "pinn.collocation_sampling.enabled=false",
+        "pinn.collocation.sampling.enabled=false",
         "pinn.gradient_telemetry.enabled=false",
         "wandb.use=true",
         f"wandb.project={wandb_project}",
@@ -547,35 +507,6 @@ def _study_specs(
     return specs
 
 
-def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    with path.open("r", encoding="utf-8") as f:
-        payload = json.load(f)
-    return payload if isinstance(payload, dict) else None
-
-
-def _float_or_none(value: Any) -> float | None:
-    if value in (None, "", "None"):
-        return None
-    return float(value)
-
-
-def _int_or_none(value: Any) -> int | None:
-    if value in (None, "", "None"):
-        return None
-    return int(float(value))
-
-
-def _component_loss(payload: dict[str, Any] | None, component_name: str) -> float | None:
-    if not payload:
-        return None
-    components = payload.get("component_losses")
-    if not isinstance(components, dict):
-        return None
-    return _float_or_none(components.get(component_name))
-
-
 def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
     run_dir = Path(str(run.get("run_dir", "")))
     metrics = _read_json_if_exists(run_dir / "metrics.json") if run_dir else None
@@ -619,21 +550,6 @@ def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _csv_value(value: Any) -> Any:
-    if isinstance(value, (dict, list)):
-        return json.dumps(value, sort_keys=True)
-    return value
-
-
-def _mean_std(values: list[float]) -> dict[str, float | None]:
-    if not values:
-        return {"mean": None, "std": None}
-    return {
-        "mean": statistics.mean(values),
-        "std": statistics.stdev(values) if len(values) > 1 else 0.0,
-    }
-
-
 def _aggregate_by_hyperparameters(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     keys = sorted({json.dumps(row.get("hyperparameters", {}), sort_keys=True) for row in rows})
@@ -663,11 +579,7 @@ def _write_summary_artifacts(*, output_root: Path, manifest: dict[str, Any]) -> 
     summary_json = output_root / "summary.json"
     failures_json = output_root / "failures.json"
 
-    with summary_csv.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=SUMMARY_FIELDNAMES)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({key: _csv_value(row.get(key)) for key in SUMMARY_FIELDNAMES})
+    write_summary_csv(summary_csv, rows=rows, fieldnames=SUMMARY_FIELDNAMES)
 
     failures = [
         {
@@ -698,10 +610,8 @@ def _write_summary_artifacts(*, output_root: Path, manifest: dict[str, Any]) -> 
         "rows": rows,
         "aggregates_by_hyperparameters": _aggregate_by_hyperparameters(rows),
     }
-    with summary_json.open("w", encoding="utf-8") as f:
-        json.dump(summary_payload, f, indent=2)
-    with failures_json.open("w", encoding="utf-8") as f:
-        json.dump({"generated_at_utc": utc_now_iso(), "failures": failures}, f, indent=2)
+    write_summary_json(summary_json, summary_payload)
+    write_failures_json(failures_json, failures)
     return {
         "summary_csv": str(summary_csv),
         "summary_json": str(summary_json),
@@ -750,7 +660,7 @@ def main() -> None:
     output_root.mkdir(parents=True, exist_ok=True)
     wandb_project = args.wandb_project or DEFAULT_WANDB_PROJECTS[args.study]
     extra_tags = parse_csv_list(args.wandb_tags) if args.wandb_tags else []
-    base_tags = ["hpo_calibration", args.study, args.model_flag.lower(), *extra_tags]
+    base_tags = wandb_tags_list("hpo_calibration", args.study, args.model_flag.lower(), extra_tags)
     manifest_path = output_root / "run_manifest.json"
     manifest = init_experiment_manifest(
         run_root=str(output_root),

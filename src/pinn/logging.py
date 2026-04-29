@@ -262,6 +262,7 @@ class PinnLogger:
         final_train_metrics: dict[str, Any] | None = None,
         final_val_metrics: dict[str, Any] | None = None,
         final_test_metrics: dict[str, Any] | None = None,
+        evaluation_sets: dict[str, Any] | None = None,
     ) -> str | None:
         if not rows:
             return None
@@ -291,6 +292,7 @@ class PinnLogger:
             "final_train_losses": final_train_losses,
             "final_val_losses": final_val_losses,
             "final_test_losses": None,
+            "evaluation_sets": evaluation_sets,
             "epochs_recorded": int(len(rows)),
             "final_epoch": final_row,
         }
@@ -368,7 +370,7 @@ class PinnLogger:
         for name, value in (row.weighting_raw_candidate_weights or {}).items():
             payload[f"debug/weights/candidate/{name}"] = float(value)
         if row.train_total_grad_norm is not None:
-            payload["train/grad_norm/total"] = float(row.train_total_grad_norm)
+            payload["gradients/raw/total"] = float(row.train_total_grad_norm)
         if row.epoch_wall_seconds is not None:
             payload["runtime/epoch_seconds"] = float(row.epoch_wall_seconds)
         if row.cumulative_wall_seconds is not None:
@@ -391,10 +393,10 @@ class PinnLogger:
             payload["runtime/peak_gpu_memory_reserved_mb"] = float(row.peak_gpu_memory_reserved_bytes) / (1024.0 * 1024.0)
         for name, value in (row.train_component_grad_norms or {}).items():
             if value is not None:
-                payload[f"train/grad_norm/{name}"] = float(value)
+                payload[f"gradients/raw/{name}"] = float(value)
         for name, value in (row.train_weighted_component_grad_norms or {}).items():
             if value is not None:
-                payload[f"train/grad_weighted_norm/{name}"] = float(value)
+                payload[f"gradients/weighted/{name}"] = float(value)
         for name, value in (row.weighting_probe_grad_l2_norms or {}).items():
             payload[f"debug/weights/probe/l2_norm/{name}"] = float(value)
         for name, value in (row.weighting_probe_grad_mean_abs or {}).items():
