@@ -224,7 +224,7 @@ Screening mode uses 100 epochs and the W&B project `thesis-weighting-experiment-
 Cluster logs are written under:
 
 ```text
-hpc/logs/
+hpc/logs/weighting/
 ```
 
 Experiment outputs are written under:

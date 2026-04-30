@@ -226,7 +226,7 @@ Screening mode uses 5 main epochs, 5 Adam warmup epochs, and the W&B project `th
 Cluster logs are written under:
 
 ```text
-hpc/logs/
+hpc/logs/optimizer/
 ```
 
 Experiment outputs are written under:

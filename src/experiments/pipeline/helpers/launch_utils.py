@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -35,6 +36,20 @@ def format_hydra_list(items: list[str]) -> str:
 
 def parse_csv_list(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _print_log_tail(log_path: Path, *, lines: int = 80) -> None:
+    if not log_path.exists():
+        print(f"[pipeline] log_tail_unavailable={log_path}", file=sys.stderr, flush=True)
+        return
+    try:
+        tail = log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-lines:]
+    except OSError as exc:
+        print(f"[pipeline] log_tail_error={log_path}: {exc}", file=sys.stderr, flush=True)
+        return
+    print(f"[pipeline] last_{lines}_log_lines={log_path}", file=sys.stderr, flush=True)
+    for line in tail:
+        print(line, file=sys.stderr, flush=True)
 
 
 def build_dataset_pipeline_command(
@@ -130,10 +145,20 @@ def run_logged_stage(
     if extra_env:
         env.update(extra_env)
     stage_started = monotonic()
+    print(f"[{label}] starting {stage_name}; log_file={log_path}", flush=True)
     with log_path.open("w", encoding="utf-8") as logf:
         proc = subprocess.run(command, cwd=cwd, text=True, check=False, env=env, stdout=logf, stderr=subprocess.STDOUT)
 
     status = "completed" if proc.returncode == 0 else "failed"
+    if proc.returncode == 0:
+        print(f"[{label}] completed {stage_name}; log_file={log_path}", flush=True)
+    else:
+        print(
+            f"[{label}] failed {stage_name}; return_code={proc.returncode}; log_file={log_path}",
+            file=sys.stderr,
+            flush=True,
+        )
+        _print_log_tail(log_path)
     extra = {"elapsed_seconds": monotonic() - stage_started}
     set_stage_status(
         manifest,
@@ -175,9 +200,19 @@ def run_logged_command(
     if extra_env:
         env.update(extra_env)
     started = monotonic()
+    print(f"[{label}] starting; log_file={log_path}", flush=True)
     with log_path.open("w", encoding="utf-8") as logf:
         proc = subprocess.run(command, cwd=cwd, text=True, check=False, env=env, stdout=logf, stderr=subprocess.STDOUT)
     elapsed = monotonic() - started
+    if proc.returncode == 0:
+        print(f"[{label}] completed; elapsed_seconds={elapsed:.3f}; log_file={log_path}", flush=True)
+    else:
+        print(
+            f"[{label}] failed; return_code={proc.returncode}; elapsed_seconds={elapsed:.3f}; log_file={log_path}",
+            file=sys.stderr,
+            flush=True,
+        )
+        _print_log_tail(log_path)
     return {
         "status": "completed" if proc.returncode == 0 else "failed",
         "return_code": int(proc.returncode),

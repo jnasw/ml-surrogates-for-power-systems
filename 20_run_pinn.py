@@ -6,6 +6,7 @@ import os
 from time import monotonic
 
 import hydra
+import torch
 from hydra.utils import get_original_cwd
 
 from src.data.runtime_validation import validate_pinn_runtime_dataset
@@ -23,6 +24,7 @@ from src.training.runtime import (
     utc_now_iso,
     write_json,
 )
+from src.training.trainer import PinnModel
 from src.training.trainer import train_pinn
 
 
@@ -66,6 +68,80 @@ def _evaluate_external_sets(
     return evaluation_sets or None
 
 
+def _split_row_count(x) -> int | None:
+    return None if x is None else int(x.shape[0])
+
+
+def _evaluate_best_checkpoint(
+    *,
+    checkpoint_path: str,
+    config,
+    original_cwd: str,
+    dataset,
+    batch_size: int,
+) -> dict[str, object] | None:
+    if not os.path.exists(checkpoint_path):
+        return None
+    best_model = PinnModel.load_checkpoint(
+        checkpoint_path,
+        device_preference=str(cfg_get(config, "pinn.device", "auto")),
+    )
+    payload = {
+        "checkpoint_path": checkpoint_path,
+        "checkpoint_tag": "best",
+        "train": {
+            "n_rows": _split_row_count(dataset.train_x),
+            "metrics": regression_metrics_for_torch_model(
+                model=best_model.model,
+                x=dataset.train_x,
+                y=dataset.train_y,
+                batch_size=batch_size,
+            ),
+        },
+        "val": {
+            "n_rows": _split_row_count(dataset.val_x),
+            "metrics": regression_metrics_for_torch_model(
+                model=best_model.model,
+                x=dataset.val_x,
+                y=dataset.val_y,
+                batch_size=batch_size,
+            ),
+        },
+        "test": {
+            "n_rows": _split_row_count(dataset.test_x),
+            "metrics": regression_metrics_for_torch_model(
+                model=best_model.model,
+                x=dataset.test_x,
+                y=dataset.test_y,
+                batch_size=batch_size,
+            ),
+        },
+        "evaluation_sets": _evaluate_external_sets(
+            config=config,
+            original_cwd=original_cwd,
+            model=best_model.model,
+            batch_size=batch_size,
+        ),
+    }
+    try:
+        checkpoint_payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    except Exception:
+        checkpoint_payload = {}
+    if isinstance(checkpoint_payload, dict):
+        metrics = checkpoint_payload.get("metrics")
+        if metrics is not None and hasattr(metrics, "as_flat_dict"):
+            row = metrics.as_flat_dict()
+            payload["selection"] = {
+                "global_epoch": row.get("global_epoch"),
+                "phase_name": row.get("phase_name"),
+                "cumulative_wall_seconds": row.get("cumulative_wall_seconds"),
+                "val_total_loss": row.get("val_total_loss"),
+                "train_total_loss": row.get("train_total_loss"),
+                "test_data_loss": row.get("test_data_loss"),
+            }
+    return payload
+
+
 @hydra.main(config_path="src/config", config_name="setup_pinn", version_base=None)
 def main(config) -> None:
     started_at_utc = utc_now_iso()
@@ -76,6 +152,7 @@ def main(config) -> None:
     os.makedirs(run_dir, exist_ok=True)
     config_path = os.path.join(run_dir, "config.yaml")
     metrics_json_path = os.path.join(run_dir, "metrics.json")
+    epoch_metrics_csv_path = os.path.join(run_dir, "epoch_metrics.csv")
     timings_path = os.path.join(run_dir, "timings.json")
     manifest_path = os.path.join(run_dir, "run_manifest.json")
     ckpt_dir = os.path.join(run_dir, "checkpoints")
@@ -162,6 +239,13 @@ def main(config) -> None:
             model=pinn_model.model,
             batch_size=metric_batch_size,
         )
+        best_checkpoint_metrics = _evaluate_best_checkpoint(
+            checkpoint_path=os.path.join(logger.ckpt_dir, "best.pt"),
+            config=config,
+            original_cwd=original_cwd,
+            dataset=dataset,
+            batch_size=metric_batch_size,
+        )
         logger.write_metrics_json(
             rows,
             run_summary=run_summary,
@@ -169,6 +253,7 @@ def main(config) -> None:
             final_val_metrics=final_val_metrics,
             final_test_metrics=final_test_metrics,
             evaluation_sets=evaluation_sets,
+            best_checkpoint_metrics=best_checkpoint_metrics,
         )
         timings["artifact_write_seconds"] = monotonic() - artifact_write_started
         status = "completed"
@@ -200,6 +285,7 @@ def main(config) -> None:
                 artifacts={
                     "config": config_path,
                     "metrics": metrics_json_path if os.path.exists(metrics_json_path) else None,
+                    "epoch_metrics": epoch_metrics_csv_path if os.path.exists(epoch_metrics_csv_path) else None,
                     "timings": timings_path,
                     "checkpoints_dir": ckpt_dir if os.path.isdir(ckpt_dir) else None,
                 },

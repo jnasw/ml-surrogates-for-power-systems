@@ -5,8 +5,8 @@
 #BSUB -R "rusage[mem=8GB]"
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 08:00
-#BSUB -oo hpc/logs/weighting_comparison_%J.out
-#BSUB -eo hpc/logs/weighting_comparison_%J.err
+#BSUB -oo hpc/logs/weighting/weighting_comparison_%J.out
+#BSUB -eo hpc/logs/weighting/weighting_comparison_%J.err
 
 set -euo pipefail
 
@@ -60,12 +60,14 @@ STRATEGIES="${STRATEGIES:-}"
 WANDB_PROJECT="${WANDB_PROJECT:-}"
 DRY_RUN="${DRY_RUN:-false}"
 
-mkdir -p "${REPO_ROOT}/hpc/logs"
+LSF_LOG_DIR="${REPO_ROOT}/hpc/logs/weighting"
+mkdir -p "${LSF_LOG_DIR}"
 
 cd "${REPO_ROOT}"
 activate_repo_venv "${REPO_ROOT}"
 
 echo "[hpc] repo_root=${REPO_ROOT}"
+echo "[hpc] lsf_log_root=${LSF_LOG_DIR}"
 echo "[hpc] queue=${QUEUE} (static #BSUB default: gpua100)"
 echo "[hpc] walltime=${WALLTIME} (static #BSUB default: 08:00)"
 echo "[hpc] mem_gb=${MEM_GB} (static #BSUB default: 8GB)"

@@ -4,8 +4,8 @@
 #BSUB -n 4
 #BSUB -R "rusage[mem=8GB]"
 #BSUB -W 24:00
-#BSUB -oo hpc/logs/dataset_generation_comparison_%J.out
-#BSUB -eo hpc/logs/dataset_generation_comparison_%J.err
+#BSUB -oo hpc/logs/dataset_generation/dataset_generation_comparison_%J.out
+#BSUB -eo hpc/logs/dataset_generation/dataset_generation_comparison_%J.err
 
 set -euo pipefail
 
@@ -65,12 +65,14 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-}"
 CLEANUP_DATA="${CLEANUP_DATA:-false}"
 DRY_RUN="${DRY_RUN:-false}"
 
-mkdir -p "${REPO_ROOT}/hpc/logs"
+LSF_LOG_DIR="${REPO_ROOT}/hpc/logs/dataset_generation"
+mkdir -p "${LSF_LOG_DIR}"
 
 cd "${REPO_ROOT}"
 activate_repo_venv "${REPO_ROOT}"
 
 echo "[hpc] repo_root=${REPO_ROOT}"
+echo "[hpc] lsf_log_root=${LSF_LOG_DIR}"
 echo "[hpc] queue=${QUEUE} (static #BSUB default: gpua100)"
 echo "[hpc] walltime=${WALLTIME} (static #BSUB default: 24:00)"
 echo "[hpc] mem_gb=${MEM_GB} (static #BSUB default: 8GB)"

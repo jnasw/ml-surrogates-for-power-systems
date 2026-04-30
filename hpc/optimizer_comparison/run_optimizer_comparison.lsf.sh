@@ -5,8 +5,8 @@
 #BSUB -R "rusage[mem=8GB]"
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 04:00
-#BSUB -oo hpc/logs/optimizer_comparison_%J.out
-#BSUB -eo hpc/logs/optimizer_comparison_%J.err
+#BSUB -oo hpc/logs/optimizer/optimizer_comparison_%J.out
+#BSUB -eo hpc/logs/optimizer/optimizer_comparison_%J.err
 
 set -euo pipefail
 
@@ -19,6 +19,8 @@ set -euo pipefail
 #     MODE=screening DRY_RUN=true STRATEGIES=adam SEED_LABELS=s01 bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
 #   Final run:
 #     MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
+#   Final run with explicit thesis epoch budget:
+#     MODE=final TOTAL_EPOCHS=5000 ADAM_WARMUP_EPOCHS=500 REFERENCE_ID=main_SM4_qbc_b512_ds01 bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
@@ -40,6 +42,9 @@ REFERENCE_ID="${REFERENCE_ID:-}"
 MODEL_FLAG="${MODEL_FLAG:-SM4}"
 STRATEGIES="${STRATEGIES:-}"
 SEED_LABELS="${SEED_LABELS:-}"
+TOTAL_EPOCHS="${TOTAL_EPOCHS:-}"
+MAIN_EPOCHS="${MAIN_EPOCHS:-}"
+ADAM_WARMUP_EPOCHS="${ADAM_WARMUP_EPOCHS:-}"
 DEVICE="${DEVICE:-cuda}"
 DTYPE="${DTYPE:-}"
 ID_EVAL_ID="${ID_EVAL_ID:-}"
@@ -48,12 +53,14 @@ NO_OOD_EVAL="${NO_OOD_EVAL:-false}"
 WANDB_PROJECT="${WANDB_PROJECT:-}"
 DRY_RUN="${DRY_RUN:-false}"
 
-mkdir -p "${REPO_ROOT}/hpc/logs"
+LSF_LOG_DIR="${REPO_ROOT}/hpc/logs/optimizer"
+mkdir -p "${LSF_LOG_DIR}"
 
 cd "${REPO_ROOT}"
 activate_repo_venv "${REPO_ROOT}"
 
 echo "[hpc] repo_root=${REPO_ROOT}"
+echo "[hpc] lsf_log_root=${LSF_LOG_DIR}"
 echo "[hpc] queue=${QUEUE} (static #BSUB default: gpua100)"
 echo "[hpc] walltime=${WALLTIME} (static #BSUB default: 04:00)"
 echo "[hpc] mem_gb=${MEM_GB} (static #BSUB default: 8GB)"
@@ -63,6 +70,9 @@ echo "[hpc] reference_id=${REFERENCE_ID:-<launcher default>}"
 echo "[hpc] model_flag=${MODEL_FLAG}"
 echo "[hpc] strategies=${STRATEGIES:-<mode default>}"
 echo "[hpc] seed_labels=${SEED_LABELS:-<mode default>}"
+echo "[hpc] total_epochs=${TOTAL_EPOCHS:-<mode default>}"
+echo "[hpc] main_epochs=${MAIN_EPOCHS:-<launcher computed from total/warmup>}"
+echo "[hpc] adam_warmup_epochs=${ADAM_WARMUP_EPOCHS:-<mode default>}"
 echo "[hpc] device=${DEVICE}"
 echo "[hpc] dtype=${DTYPE:-<launcher default>}"
 echo "[hpc] id_eval_id=${ID_EVAL_ID:-<none>}"
@@ -93,6 +103,18 @@ fi
 
 if [[ -n "${SEED_LABELS}" ]]; then
   cmd+=(--seed-labels "${SEED_LABELS}")
+fi
+
+if [[ -n "${TOTAL_EPOCHS}" ]]; then
+  cmd+=(--total-epochs "${TOTAL_EPOCHS}")
+fi
+
+if [[ -n "${MAIN_EPOCHS}" ]]; then
+  cmd+=(--main-epochs "${MAIN_EPOCHS}")
+fi
+
+if [[ -n "${ADAM_WARMUP_EPOCHS}" ]]; then
+  cmd+=(--adam-warmup-epochs "${ADAM_WARMUP_EPOCHS}")
 fi
 
 if [[ -n "${DTYPE}" ]]; then

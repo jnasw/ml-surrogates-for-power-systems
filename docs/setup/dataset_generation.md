@@ -196,7 +196,7 @@ Each comparison run produces:
 Cluster logs are written under:
 
 ```text
-hpc/logs/
+hpc/logs/dataset_generation/
 ```
 
 ## Notes

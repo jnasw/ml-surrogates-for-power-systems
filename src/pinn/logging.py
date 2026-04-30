@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import importlib
 import json
 import os
@@ -263,10 +264,12 @@ class PinnLogger:
         final_val_metrics: dict[str, Any] | None = None,
         final_test_metrics: dict[str, Any] | None = None,
         evaluation_sets: dict[str, Any] | None = None,
+        best_checkpoint_metrics: dict[str, Any] | None = None,
     ) -> str | None:
         if not rows:
             return None
         path = os.path.join(self.run_dir, "metrics.json")
+        epoch_metrics_csv = self.write_epoch_metrics_csv(rows)
         final_row_obj = rows[-1]
         final_row = final_row_obj.as_flat_dict()
         final_train_losses = {
@@ -289,16 +292,36 @@ class PinnLogger:
             "final_train_metrics": final_train_metrics,
             "final_val_metrics": final_val_metrics,
             "final_test_metrics": final_test_metrics,
+            "best_checkpoint_metrics": best_checkpoint_metrics,
             "final_train_losses": final_train_losses,
             "final_val_losses": final_val_losses,
             "final_test_losses": None,
             "evaluation_sets": evaluation_sets,
             "epochs_recorded": int(len(rows)),
+            "epoch_metrics_csv": epoch_metrics_csv,
             "final_epoch": final_row,
         }
         os.makedirs(self.run_dir, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
+        return path
+
+    def write_epoch_metrics_csv(self, rows: list[EpochMetrics]) -> str | None:
+        """Persist per-epoch telemetry for local convergence/time analysis."""
+        if not rows:
+            return None
+        path = os.path.join(self.run_dir, "epoch_metrics.csv")
+        flat_rows = [row.as_flat_dict() for row in rows]
+        fieldnames: list[str] = []
+        for row in flat_rows:
+            for key in row:
+                if key not in fieldnames:
+                    fieldnames.append(key)
+        os.makedirs(self.run_dir, exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(flat_rows)
         return path
 
     def _should_log_epoch(self, row: EpochMetrics) -> bool:

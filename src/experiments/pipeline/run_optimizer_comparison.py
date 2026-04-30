@@ -30,7 +30,6 @@ from src.experiments.pipeline.helpers.seeds import (
 )
 from src.experiments.pipeline.helpers.summary import (
     component_loss as _component_loss,
-    csv_value as _csv_value,
     eval_metrics as _eval_metrics,
     float_or_none as _float_or_none,
     int_or_none as _int_or_none,
@@ -106,6 +105,9 @@ SUMMARY_FIELDNAMES = [
     "training_strategy",
     "seed_label",
     "seed_value",
+    "total_epochs",
+    "main_epochs",
+    "adam_warmup_epochs",
     "dataset_reference_id",
     "dataset_root",
     "id_eval_id",
@@ -117,6 +119,12 @@ SUMMARY_FIELDNAMES = [
     "return_code",
     "failure_reason",
     "log_file",
+    "final_train_mse",
+    "final_train_rmse",
+    "final_train_mae",
+    "final_val_mse",
+    "final_val_rmse",
+    "final_val_mae",
     "final_test_mse",
     "final_test_rmse",
     "final_test_mae",
@@ -127,6 +135,23 @@ SUMMARY_FIELDNAMES = [
     "ood_eval_rmse",
     "ood_eval_mae",
     "id_ood_rmse_gap",
+    "test_ood_rmse_gap",
+    "best_checkpoint_epoch",
+    "best_checkpoint_wall_seconds",
+    "best_checkpoint_phase_name",
+    "best_checkpoint_train_mse",
+    "best_checkpoint_train_rmse",
+    "best_checkpoint_train_mae",
+    "best_checkpoint_val_mse",
+    "best_checkpoint_val_rmse",
+    "best_checkpoint_val_mae",
+    "best_checkpoint_test_mse",
+    "best_checkpoint_test_rmse",
+    "best_checkpoint_test_mae",
+    "best_checkpoint_ood_eval_mse",
+    "best_checkpoint_ood_eval_rmse",
+    "best_checkpoint_ood_eval_mae",
+    "best_checkpoint_test_ood_rmse_gap",
     "final_train_total_loss",
     "final_train_data_loss",
     "final_train_physics_loss",
@@ -150,6 +175,7 @@ class OptimizerRunSpec:
     optimizer: str
     seed_label: str
     seed_value: int
+    total_epochs: int
     main_epochs: int
     adam_warmup_epochs: int
 
@@ -210,13 +236,25 @@ def _build_optimizer_run_specs(
     *,
     strategies: list[str],
     seed_pairs: list[tuple[str, int]],
-    main_epochs: int,
+    total_epochs: int,
+    main_epochs_override: int | None,
     adam_warmup_epochs: int,
 ) -> list[OptimizerRunSpec]:
     specs: list[OptimizerRunSpec] = []
     for strategy in strategies:
         optimizer = STRATEGY_TO_OPTIMIZER[strategy]
         warmup_epochs = int(adam_warmup_epochs) if strategy in WARMUP_STRATEGIES else 0
+        main_epochs = (
+            int(main_epochs_override)
+            if main_epochs_override is not None
+            else int(total_epochs) - warmup_epochs
+        )
+        if main_epochs <= 0:
+            raise ValueError(
+                f"Strategy '{strategy}' has no main optimizer epochs. "
+                "Increase --total-epochs or reduce --adam-warmup-epochs."
+            )
+        run_total_epochs = warmup_epochs + main_epochs
         for seed_label, seed_value in seed_pairs:
             specs.append(
                 OptimizerRunSpec(
@@ -224,6 +262,7 @@ def _build_optimizer_run_specs(
                     optimizer=optimizer,
                     seed_label=seed_label,
                     seed_value=int(seed_value),
+                    total_epochs=int(run_total_epochs),
                     main_epochs=int(main_epochs),
                     adam_warmup_epochs=warmup_epochs,
                 )
@@ -244,15 +283,36 @@ def _optimizer_stage(
     line_search_name: str,
     stochastic_curvature_threshold: float,
     stochastic_init_hessian_scale: float,
+    adam_scheduler: bool,
+    adam_scheduler_metric: str,
+    adam_scheduler_factor: float,
+    adam_scheduler_patience: int,
+    adam_scheduler_threshold: float,
 ) -> str:
     optimizer_kwargs = "{}"
     line_search = "null"
+    scheduler = "null"
     lr = adam_lr
     batch_size_value = str(int(batch_size))
     shuffle = "true"
     full_batch = "false"
     allow_sampling = "false"
 
+    if optimizer == "Adam" and adam_scheduler:
+        scheduler = (
+            "{"
+            "name:reduce_on_plateau,"
+            f"metric:{adam_scheduler_metric},"
+            "mode:min,"
+            f"factor:{adam_scheduler_factor},"
+            f"patience:{int(adam_scheduler_patience)},"
+            f"threshold:{adam_scheduler_threshold},"
+            "threshold_mode:rel,"
+            "cooldown:0,"
+            "min_lr:0.0,"
+            "eps:1.0e-8"
+            "}"
+        )
     if optimizer == "SOAP":
         lr = soap_lr
     elif optimizer in FULL_BATCH_OPTIMIZERS:
@@ -299,6 +359,7 @@ def _optimizer_stage(
         f"full_batch:{full_batch},"
         f"allow_sampling:{allow_sampling},"
         f"optimizer_kwargs:{optimizer_kwargs},"
+        f"scheduler:{scheduler},"
         f"line_search:{line_search},"
         "convergence:null"
         "}"
@@ -316,6 +377,11 @@ def _optimizer_phase_override(
     line_search_name: str,
     stochastic_curvature_threshold: float,
     stochastic_init_hessian_scale: float,
+    adam_scheduler: bool,
+    adam_scheduler_metric: str,
+    adam_scheduler_factor: float,
+    adam_scheduler_patience: int,
+    adam_scheduler_threshold: float,
 ) -> str:
     phases: list[str] = []
     if run_spec.adam_warmup_epochs > 0:
@@ -332,6 +398,11 @@ def _optimizer_phase_override(
                 line_search_name=line_search_name,
                 stochastic_curvature_threshold=stochastic_curvature_threshold,
                 stochastic_init_hessian_scale=stochastic_init_hessian_scale,
+                adam_scheduler=adam_scheduler,
+                adam_scheduler_metric=adam_scheduler_metric,
+                adam_scheduler_factor=adam_scheduler_factor,
+                adam_scheduler_patience=adam_scheduler_patience,
+                adam_scheduler_threshold=adam_scheduler_threshold,
             )
         )
     phases.append(
@@ -347,6 +418,11 @@ def _optimizer_phase_override(
             line_search_name=line_search_name,
             stochastic_curvature_threshold=stochastic_curvature_threshold,
             stochastic_init_hessian_scale=stochastic_init_hessian_scale,
+            adam_scheduler=adam_scheduler,
+            adam_scheduler_metric=adam_scheduler_metric,
+            adam_scheduler_factor=adam_scheduler_factor,
+            adam_scheduler_patience=adam_scheduler_patience,
+            adam_scheduler_threshold=adam_scheduler_threshold,
         )
     )
     return "pinn.optimizer_phases=[" + ",".join(phases) + "]"
@@ -377,12 +453,20 @@ def _build_pinn_command(
     line_search_name: str,
     stochastic_curvature_threshold: float,
     stochastic_init_hessian_scale: float,
+    adam_scheduler: bool,
+    adam_scheduler_metric: str,
+    adam_scheduler_factor: float,
+    adam_scheduler_patience: int,
+    adam_scheduler_threshold: float,
     log_every_epoch: int,
     loss_weight_data: float,
     loss_weight_dt: float,
     loss_weight_physics: float,
     loss_weight_ic: float,
     gradient_telemetry: bool,
+    save_best_checkpoint: bool,
+    save_last_checkpoint: bool,
+    save_init_checkpoint: bool,
     id_eval_root: str | None,
     ood_eval_root: str | None,
 ) -> list[str]:
@@ -396,6 +480,11 @@ def _build_pinn_command(
         line_search_name=line_search_name,
         stochastic_curvature_threshold=stochastic_curvature_threshold,
         stochastic_init_hessian_scale=stochastic_init_hessian_scale,
+        adam_scheduler=adam_scheduler,
+        adam_scheduler_metric=adam_scheduler_metric,
+        adam_scheduler_factor=adam_scheduler_factor,
+        adam_scheduler_patience=adam_scheduler_patience,
+        adam_scheduler_threshold=adam_scheduler_threshold,
     )
     command = [
         python_bin,
@@ -413,6 +502,11 @@ def _build_pinn_command(
         "pinn.supervised_sampling.enabled=false",
         "pinn.collocation.sampling.enabled=false",
         f"pinn.gradient_telemetry.enabled={'true' if gradient_telemetry else 'false'}",
+        f"pinn.checkpointing.enabled={'true' if save_best_checkpoint or save_last_checkpoint or save_init_checkpoint else 'false'}",
+        f"pinn.checkpointing.save_best={'true' if save_best_checkpoint else 'false'}",
+        f"pinn.checkpointing.save_last={'true' if save_last_checkpoint else 'false'}",
+        f"pinn.checkpointing.save_init={'true' if save_init_checkpoint else 'false'}",
+        "pinn.checkpointing.epoch_fractions=[]",
         f"pinn.loss_weights.data={loss_weight_data}",
         f"pinn.loss_weights.dt={loss_weight_dt}",
         f"pinn.loss_weights.physics={loss_weight_physics}",
@@ -434,17 +528,66 @@ def _build_pinn_command(
     return command
 
 
+def _best_checkpoint_split_metrics(metrics: dict[str, Any] | None, split: str) -> dict[str, Any]:
+    if not metrics:
+        return {}
+    best = metrics.get("best_checkpoint_metrics")
+    if not isinstance(best, dict):
+        return {}
+    entry = best.get(split)
+    if not isinstance(entry, dict):
+        return {}
+    values = entry.get("metrics")
+    return dict(values) if isinstance(values, dict) else {}
+
+
+def _best_checkpoint_eval_metrics(metrics: dict[str, Any] | None, kind: str) -> dict[str, Any]:
+    if not metrics:
+        return {}
+    best = metrics.get("best_checkpoint_metrics")
+    if not isinstance(best, dict):
+        return {}
+    evaluation_sets = best.get("evaluation_sets")
+    if not isinstance(evaluation_sets, dict):
+        return {}
+    entry = evaluation_sets.get(kind)
+    if not isinstance(entry, dict):
+        return {}
+    values = entry.get("metrics")
+    return dict(values) if isinstance(values, dict) else {}
+
+
+def _best_checkpoint_selection(metrics: dict[str, Any] | None) -> dict[str, Any]:
+    if not metrics:
+        return {}
+    best = metrics.get("best_checkpoint_metrics")
+    if not isinstance(best, dict):
+        return {}
+    selection = best.get("selection")
+    return dict(selection) if isinstance(selection, dict) else {}
+
+
 def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
     run_dir = Path(str(run.get("run_dir", "")))
     metrics = _read_json_if_exists(run_dir / "metrics.json") if run_dir else None
     timings = _read_json_if_exists(run_dir / "timings.json") if run_dir else None
+    final_train_metrics = dict(metrics.get("final_train_metrics", {}) or {}) if metrics else {}
+    final_val_metrics = dict(metrics.get("final_val_metrics", {}) or {}) if metrics else {}
     final_test_metrics = dict(metrics.get("final_test_metrics", {}) or {}) if metrics else {}
     final_train_losses = dict(metrics.get("final_train_losses", {}) or {}) if metrics else {}
     final_epoch = dict(metrics.get("final_epoch", {}) or {}) if metrics else {}
     id_eval_metrics = _eval_metrics(metrics, "id")
     ood_eval_metrics = _eval_metrics(metrics, "ood")
+    best_selection = _best_checkpoint_selection(metrics)
+    best_train_metrics = _best_checkpoint_split_metrics(metrics, "train")
+    best_val_metrics = _best_checkpoint_split_metrics(metrics, "val")
+    best_test_metrics = _best_checkpoint_split_metrics(metrics, "test")
+    best_ood_eval_metrics = _best_checkpoint_eval_metrics(metrics, "ood")
     id_eval_rmse = _float_or_none(id_eval_metrics.get("rmse"))
     ood_eval_rmse = _float_or_none(ood_eval_metrics.get("rmse"))
+    final_test_rmse = _float_or_none(final_test_metrics.get("rmse"))
+    best_test_rmse = _float_or_none(best_test_metrics.get("rmse"))
+    best_ood_eval_rmse = _float_or_none(best_ood_eval_metrics.get("rmse"))
     strategy = str(run.get("strategy", ""))
     is_experimental = run.get("is_experimental_strategy")
     if is_experimental is None:
@@ -458,6 +601,9 @@ def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
         "training_strategy": run.get("training_strategy"),
         "seed_label": run.get("seed_label"),
         "seed_value": run.get("seed_value"),
+        "total_epochs": _int_or_none(run.get("total_epochs")),
+        "main_epochs": _int_or_none(run.get("main_epochs")),
+        "adam_warmup_epochs": _int_or_none(run.get("adam_warmup_epochs")),
         "dataset_reference_id": run.get("dataset_reference_id"),
         "dataset_root": run.get("dataset_root"),
         "id_eval_id": run.get("id_eval_id"),
@@ -469,8 +615,14 @@ def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
         "return_code": run.get("return_code"),
         "failure_reason": run.get("error"),
         "log_file": run.get("log_file"),
+        "final_train_mse": _float_or_none(final_train_metrics.get("mse")),
+        "final_train_rmse": _float_or_none(final_train_metrics.get("rmse")),
+        "final_train_mae": _float_or_none(final_train_metrics.get("mae")),
+        "final_val_mse": _float_or_none(final_val_metrics.get("mse")),
+        "final_val_rmse": _float_or_none(final_val_metrics.get("rmse")),
+        "final_val_mae": _float_or_none(final_val_metrics.get("mae")),
         "final_test_mse": _float_or_none(final_test_metrics.get("mse")),
-        "final_test_rmse": _float_or_none(final_test_metrics.get("rmse")),
+        "final_test_rmse": final_test_rmse,
         "final_test_mae": _float_or_none(final_test_metrics.get("mae")),
         "id_eval_mse": _float_or_none(id_eval_metrics.get("mse")),
         "id_eval_rmse": id_eval_rmse,
@@ -479,6 +631,25 @@ def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
         "ood_eval_rmse": ood_eval_rmse,
         "ood_eval_mae": _float_or_none(ood_eval_metrics.get("mae")),
         "id_ood_rmse_gap": None if id_eval_rmse is None or ood_eval_rmse is None else ood_eval_rmse - id_eval_rmse,
+        "test_ood_rmse_gap": None if final_test_rmse is None or ood_eval_rmse is None else ood_eval_rmse - final_test_rmse,
+        "best_checkpoint_epoch": _int_or_none(best_selection.get("global_epoch")),
+        "best_checkpoint_wall_seconds": _float_or_none(best_selection.get("cumulative_wall_seconds")),
+        "best_checkpoint_phase_name": best_selection.get("phase_name"),
+        "best_checkpoint_train_mse": _float_or_none(best_train_metrics.get("mse")),
+        "best_checkpoint_train_rmse": _float_or_none(best_train_metrics.get("rmse")),
+        "best_checkpoint_train_mae": _float_or_none(best_train_metrics.get("mae")),
+        "best_checkpoint_val_mse": _float_or_none(best_val_metrics.get("mse")),
+        "best_checkpoint_val_rmse": _float_or_none(best_val_metrics.get("rmse")),
+        "best_checkpoint_val_mae": _float_or_none(best_val_metrics.get("mae")),
+        "best_checkpoint_test_mse": _float_or_none(best_test_metrics.get("mse")),
+        "best_checkpoint_test_rmse": best_test_rmse,
+        "best_checkpoint_test_mae": _float_or_none(best_test_metrics.get("mae")),
+        "best_checkpoint_ood_eval_mse": _float_or_none(best_ood_eval_metrics.get("mse")),
+        "best_checkpoint_ood_eval_rmse": best_ood_eval_rmse,
+        "best_checkpoint_ood_eval_mae": _float_or_none(best_ood_eval_metrics.get("mae")),
+        "best_checkpoint_test_ood_rmse_gap": None
+        if best_test_rmse is None or best_ood_eval_rmse is None
+        else best_ood_eval_rmse - best_test_rmse,
         "final_train_total_loss": _float_or_none(final_train_losses.get("total_loss")),
         "final_train_data_loss": _component_loss(final_train_losses, "data"),
         "final_train_physics_loss": _component_loss(final_train_losses, "physics"),
@@ -628,8 +799,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=1024, help="Mini-batch size for Adam/SOAP/stochastic phases.")
     parser.add_argument("--adam-lr", type=float, default=1e-3, help="Adam learning rate.")
     parser.add_argument("--soap-lr", type=float, default=1e-3, help="SOAP learning rate.")
-    parser.add_argument("--main-epochs", type=int, default=None, help="Epochs for each strategy's main optimizer phase. Defaults: screening=5, final=100.")
-    parser.add_argument("--adam-warmup-epochs", type=int, default=None, help="Adam warm-up epochs for Adam -> optimizer strategies. Defaults: screening=5, final=100.")
+    parser.add_argument(
+        "--total-epochs",
+        type=int,
+        default=None,
+        help=(
+            "Preferred epoch control: total epochs per run. Single-optimizer runs use all epochs; "
+            "Adam -> optimizer runs use --adam-warmup-epochs plus the remaining epochs. "
+            "Defaults: screening=10, final=5000."
+        ),
+    )
+    parser.add_argument(
+        "--main-epochs",
+        type=int,
+        default=None,
+        help=(
+            "Compatibility override for each strategy's main optimizer phase. "
+            "If set, multi-phase total epochs become --adam-warmup-epochs + --main-epochs."
+        ),
+    )
+    parser.add_argument("--adam-warmup-epochs", type=int, default=None, help="Adam warm-up epochs for Adam -> optimizer strategies. Defaults: screening=5, final=500.")
+    parser.add_argument("--adam-scheduler", action=argparse.BooleanOptionalAction, default=True, help="Use ReduceLROnPlateau on Adam phases.")
+    parser.add_argument("--adam-scheduler-metric", default="train_total_loss", choices=["train_total_loss", "val_total_loss"], help="Metric for Adam ReduceLROnPlateau.")
+    parser.add_argument("--adam-scheduler-factor", type=float, default=0.5, help="Adam scheduler reduction factor.")
+    parser.add_argument("--adam-scheduler-patience", type=int, default=100, help="Adam scheduler patience in epochs.")
+    parser.add_argument("--adam-scheduler-threshold", type=float, default=1.0e-4, help="Adam scheduler relative threshold.")
     parser.add_argument("--quasi-newton-lr", type=float, default=1.0, help="Learning rate for full-batch quasi-Newton phases.")
     parser.add_argument("--stochastic-qn-lr", type=float, default=5.0e-2, help="Learning rate for stochastic quasi-Newton phases.")
     parser.add_argument("--line-search", default="strong_wolfe", choices=["strong_wolfe", "backtracking"], help="Line-search method for BFGS-family phases.")
@@ -642,6 +836,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--loss-weight-physics", type=float, default=1.0e-4, help="Static physics loss weight.")
     parser.add_argument("--loss-weight-ic", type=float, default=1.0e-3, help="Static IC loss weight.")
     parser.add_argument("--gradient-telemetry", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--save-best-checkpoint", action=argparse.BooleanOptionalAction, default=True, help="Write best.pt for each run.")
+    parser.add_argument("--save-last-checkpoint", action=argparse.BooleanOptionalAction, default=False, help="Write/overwrite last.pt for each run.")
+    parser.add_argument("--save-init-checkpoint", action=argparse.BooleanOptionalAction, default=False, help="Write init.pt for each run.")
     parser.add_argument("--log-every-epoch", type=int, default=1, help="Metric/W&B logging cadence.")
     parser.add_argument("--tag", action="append", default=[], help="Optional extra W&B tag. Can be passed multiple times.")
     parser.add_argument("--stage1-override", action="append", default=[], help="Extra stage-1 override for --allow-dataset-generation.")
@@ -669,13 +866,21 @@ def _resolve_seed_pairs(args: argparse.Namespace, *, mode: str) -> list[tuple[st
     return _seed_pairs_from_labels(default_labels)
 
 
-def _resolve_epoch_controls(args: argparse.Namespace, *, mode: str) -> tuple[int, int]:
-    default_epochs = 5 if mode == "screening" else 100
-    main_epochs = default_epochs if args.main_epochs is None else int(args.main_epochs)
-    adam_warmup_epochs = default_epochs if args.adam_warmup_epochs is None else int(args.adam_warmup_epochs)
-    if main_epochs < 0 or adam_warmup_epochs < 0:
-        raise ValueError("--main-epochs and --adam-warmup-epochs must be non-negative.")
-    return main_epochs, adam_warmup_epochs
+def _resolve_epoch_controls(args: argparse.Namespace, *, mode: str) -> tuple[int, int | None, int]:
+    default_total_epochs = 10 if mode == "screening" else 5000
+    default_warmup_epochs = 5 if mode == "screening" else 500
+    total_epochs = default_total_epochs if args.total_epochs is None else int(args.total_epochs)
+    main_epochs_override = None if args.main_epochs is None else int(args.main_epochs)
+    adam_warmup_epochs = default_warmup_epochs if args.adam_warmup_epochs is None else int(args.adam_warmup_epochs)
+    if total_epochs <= 0:
+        raise ValueError("--total-epochs must be positive.")
+    if main_epochs_override is not None and main_epochs_override <= 0:
+        raise ValueError("--main-epochs must be positive when provided.")
+    if adam_warmup_epochs < 0:
+        raise ValueError("--adam-warmup-epochs must be non-negative.")
+    if main_epochs_override is None and adam_warmup_epochs >= total_epochs:
+        raise ValueError("--adam-warmup-epochs must be smaller than --total-epochs.")
+    return total_epochs, main_epochs_override, adam_warmup_epochs
 
 
 def _resolve_dataset(args: argparse.Namespace, *, manifest: dict[str, Any], manifest_path: Path) -> tuple[Path, str | None]:
@@ -752,7 +957,7 @@ def main() -> None:
             args.strategies,
             include_experimental=bool(args.include_experimental_strategies),
         )
-        main_epochs, adam_warmup_epochs = _resolve_epoch_controls(args, mode=mode)
+        total_epochs, main_epochs_override, adam_warmup_epochs = _resolve_epoch_controls(args, mode=mode)
         eval_inputs = _resolve_eval_inputs(args)
     except (FileNotFoundError, ValueError) as exc:
         raise SystemExit(str(exc)) from None
@@ -790,9 +995,18 @@ def main() -> None:
     manifest["artifacts"]["include_experimental_strategies"] = bool(args.include_experimental_strategies)
     manifest["artifacts"]["seed_labels"] = [label for label, _ in seed_pairs]
     manifest["artifacts"]["seed_values"] = [value for _, value in seed_pairs]
-    manifest["artifacts"]["main_epochs"] = int(main_epochs)
+    manifest["artifacts"]["total_epochs"] = int(total_epochs)
+    manifest["artifacts"]["main_epochs_override"] = main_epochs_override
     manifest["artifacts"]["adam_warmup_epochs"] = int(adam_warmup_epochs)
+    manifest["artifacts"]["adam_scheduler"] = bool(args.adam_scheduler)
+    manifest["artifacts"]["adam_scheduler_metric"] = args.adam_scheduler_metric
+    manifest["artifacts"]["adam_scheduler_factor"] = float(args.adam_scheduler_factor)
+    manifest["artifacts"]["adam_scheduler_patience"] = int(args.adam_scheduler_patience)
+    manifest["artifacts"]["adam_scheduler_threshold"] = float(args.adam_scheduler_threshold)
     manifest["artifacts"]["gradient_telemetry"] = bool(args.gradient_telemetry)
+    manifest["artifacts"]["save_best_checkpoint"] = bool(args.save_best_checkpoint)
+    manifest["artifacts"]["save_last_checkpoint"] = bool(args.save_last_checkpoint)
+    manifest["artifacts"]["save_init_checkpoint"] = bool(args.save_init_checkpoint)
     manifest["artifacts"]["id_eval_id"] = eval_inputs["id_eval_id"]
     manifest["artifacts"]["id_eval_root"] = eval_inputs["id_eval_root"]
     manifest["artifacts"]["ood_eval_id"] = eval_inputs["ood_eval_id"]
@@ -815,7 +1029,8 @@ def main() -> None:
     run_specs = _build_optimizer_run_specs(
         strategies=strategies,
         seed_pairs=seed_pairs,
-        main_epochs=int(main_epochs),
+        total_epochs=int(total_epochs),
+        main_epochs_override=main_epochs_override,
         adam_warmup_epochs=int(adam_warmup_epochs),
     )
 
@@ -847,12 +1062,20 @@ def main() -> None:
             line_search_name=args.line_search,
             stochastic_curvature_threshold=args.stochastic_curvature_threshold,
             stochastic_init_hessian_scale=args.stochastic_init_hessian_scale,
+            adam_scheduler=bool(args.adam_scheduler),
+            adam_scheduler_metric=args.adam_scheduler_metric,
+            adam_scheduler_factor=float(args.adam_scheduler_factor),
+            adam_scheduler_patience=int(args.adam_scheduler_patience),
+            adam_scheduler_threshold=float(args.adam_scheduler_threshold),
             log_every_epoch=args.log_every_epoch,
             loss_weight_data=args.loss_weight_data,
             loss_weight_dt=args.loss_weight_dt,
             loss_weight_physics=args.loss_weight_physics,
             loss_weight_ic=args.loss_weight_ic,
             gradient_telemetry=bool(args.gradient_telemetry),
+            save_best_checkpoint=bool(args.save_best_checkpoint),
+            save_last_checkpoint=bool(args.save_last_checkpoint),
+            save_init_checkpoint=bool(args.save_init_checkpoint),
             id_eval_root=eval_inputs["id_eval_root"],
             ood_eval_root=eval_inputs["ood_eval_root"],
         )
@@ -865,6 +1088,7 @@ def main() -> None:
             "training_strategy": run_spec.training_strategy,
             "seed_label": run_spec.seed_label,
             "seed_value": run_spec.seed_value,
+            "total_epochs": run_spec.total_epochs,
             "main_epochs": run_spec.main_epochs,
             "adam_warmup_epochs": run_spec.adam_warmup_epochs,
             "dataset_reference_id": dataset_reference_id,
