@@ -25,7 +25,7 @@ The goal is to isolate optimizer effects while keeping all other components fixe
 - Dtype: float64
 - Loss weighting: fixed static weights
 - Collocation: fixed strategy and budget
-- Evaluation: fixed in-distribution train/test split
+- Evaluation: fixed internal train/validation/test split plus optional external ID/OOD evaluation
 - Execution: controlled experiment matrix (no sweeps)
 
 ## Optimizer Groups
@@ -69,6 +69,63 @@ All runs share:
 - same architecture
 - same collocation setup
 - same loss configuration
+- same calibrated optimizer hyperparameters
+
+Default final matrix:
+
+```text
+11 core strategies x 5 seeds = 55 runs
+```
+
+Experimental stochastic self-scaled strategies are excluded by default and must be requested explicitly.
+
+## Calibrated Optimizer Hyperparameters
+
+Optimizer learning rates are fixed from the calibration stage before running the final controlled comparison.
+
+| Optimizer | Default LR |
+|-----------|------------|
+| Adam | 0.003 |
+| SOAP | 0.05 |
+| LBFGS | 0.1 |
+| BFGS | 1.0 |
+| SSBFGS | 0.3 |
+| SSBroyden | 1.0 |
+
+The launcher exposes per-optimizer overrides:
+
+```text
+--adam-lr
+--soap-lr
+--lbfgs-lr
+--bfgs-lr
+--ssbfgs-lr
+--ssbroyden-lr
+```
+
+`--quasi-newton-lr` is retained as a compatibility override that applies one shared learning rate to all full-batch quasi-Newton phases. It should not be used for the final thesis matrix unless intentionally testing a shared-LR variant.
+
+Adam phases use a `ReduceLROnPlateau` scheduler by default. In final mode, the metric is `val_total_loss` when validation exists. The scheduler reduces the Adam learning rate by a fixed factor after plateauing, which makes long Adam phases less sensitive to the initial calibrated LR.
+
+## Epoch Budget
+
+The final comparison uses the same total epoch budget for single-optimizer and multi-phase strategies:
+
+```text
+total epochs per run: 5000
+Adam warmup for Adam -> optimizer strategies: 500
+second optimizer phase: 4500
+```
+
+Single-optimizer strategies use all 5000 epochs. Multi-phase strategies use 500 Adam warmup epochs plus 4500 epochs of the second optimizer, not 500 + 5000.
+
+Screening mode uses a compressed budget:
+
+```text
+total epochs per run: 10
+Adam warmup: 5
+second optimizer phase: 5
+```
 
 ## Controlled Variables
 The following are fixed across all runs:
@@ -109,6 +166,9 @@ The following are fixed across all runs:
   - final accuracy
   - convergence behavior
   - computational cost
+- OOD evaluation is enabled by default using `ood_SM4_wide_ic_b512_ds01`
+- ID evaluation is optional and must be requested explicitly
+- Best checkpoint metrics are selected by the lowest validation loss when validation exists
 
 ## Potential Outputs
 - Loss vs epoch
@@ -204,8 +264,9 @@ Final mode uses:
 
 ```text
 seed labels: s01,s02,s03,s04,s05
-main optimizer epochs: 100
-Adam warmup epochs: 100
+total epochs per run: 5000
+Adam warmup epochs: 500
+second optimizer epochs for Adam -> optimizer strategies: 4500
 W&B project: thesis-optimizer-experiment
 ```
 
@@ -219,7 +280,7 @@ MODE=screening REFERENCE_ID=main_SM4_qbc_b512_ds01 \
   bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
 ```
 
-Screening mode uses 5 main epochs, 5 Adam warmup epochs, and the W&B project `thesis-optimizer-experiment-TEST`.
+Screening mode uses 10 total epochs, 5 Adam warmup epochs for multi-phase strategies, and the W&B project `thesis-optimizer-experiment-TEST`.
 
 ### 6. Inspect Outputs
 
@@ -245,6 +306,8 @@ failures.json
 logs/runs/*.log
 runs/<strategy>_<seed>/metrics.json
 runs/<strategy>_<seed>/timings.json
+runs/<strategy>_<seed>/epoch_metrics.csv
+runs/<strategy>_<seed>/checkpoints/best.pt
 ```
 
 Use `summary.csv` and `summary.json` as the comparison-level result artifacts. If a job fails, inspect `failures.json` first, then the corresponding file under `logs/runs/`.

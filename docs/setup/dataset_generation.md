@@ -25,8 +25,10 @@ Evaluate how different trajectory sampling strategies affect downstream surrogat
 
 - Compare dataset generation strategies across fixed trajectory budgets.
 - Use identical preprocessing for all datasets.
-- Train a baseline data-driven surrogate, not a PINN.
-- Fixed training setup: architecture, optimizer, and training protocol.
+- Train one fixed downstream surrogate per generated dataset.
+- Default downstream model: `trajectory_baseline`, the legacy IC-to-trajectory supervised baseline.
+- Optional downstream model: `pinn_data_only`, which uses the PINN architecture with only supervised data loss active.
+- Fixed downstream setup: architecture, optimizer, and training protocol.
 - Evaluation uses fixed external ID and OOD datasets.
 - Generated datasets are ephemeral and may be deleted after use when cleanup is enabled.
 
@@ -52,17 +54,17 @@ Evaluate how different trajectory sampling strategies affect downstream surrogat
 Each run is defined by:
 
 ```text
-sampling_strategy × trajectory_budget × dataset_seed × baseline_seed
+sampling_strategy × trajectory_budget × dataset_seed × model_seed
 ```
 
 Planned matrix:
 
 ```text
-4 strategies × 5 budgets × 5 dataset seeds × 3 baseline seeds = 300 downstream training runs
+4 strategies × 5 budgets × 5 dataset seeds × 3 model seeds = 300 downstream training runs
 ```
 
 - Dataset generation runs once per `strategy × budget × dataset_seed`.
-- Each generated dataset is reused for 3 baseline seeds (`bs01`, `bs02`, `bs03`).
+- Each generated dataset is reused for 3 downstream model seeds (`bs01`, `bs02`, `bs03`).
 - Dataset seeds: `ds01`–`ds05`.
 
 ## Evaluation
@@ -98,6 +100,19 @@ Planned matrix:
 ## Storage Strategy
 
 Generated datasets can become large on HPC. The pipeline supports a cleanup mode (`--cleanup-data`) that deletes large generated data artifacts — specifically `data/`, `qbc/rounds/`, and `qbc/checkpoints/` — after downstream baseline runs complete. Metrics, manifests, logs, configs, and summary files are always retained. `data/reference` and `data/evaluation` are never touched. Cleanup is disabled by default.
+
+## Downstream Model Choices
+
+The launcher supports two downstream models:
+
+| Value | Meaning | Use |
+|-------|---------|-----|
+| `trajectory_baseline` | Legacy supervised network mapping ICs to flattened trajectories | Default, keeps historical baseline behavior |
+| `pinn_data_only` | `20_run_pinn.py` with data loss active and physics/dt/IC weights set to zero | PINN-shaped data-driven comparison |
+
+`pinn_data_only` is useful when the dataset-generation study should use the same input/output formulation as the PINN experiments while removing physics supervision. It does not change simulator data or preprocessing.
+
+The `pinn_data_only` path exposes `DEVICE`, `DTYPE`, `BATCH_SIZE`, and `ADAM_LR`. The current calibrated Adam LR is `0.003`.
 
 ## How to Run
 
@@ -139,6 +154,22 @@ python3 -m src.experiments.pipeline.run_dataset_generation_comparison \
   --baseline-seeds bs01,bs02,bs03
 ```
 
+### PINN-shaped data-only downstream model (local)
+
+```bash
+python3 -m src.experiments.pipeline.run_dataset_generation_comparison \
+  --mode final \
+  --model-flag SM4 \
+  --methods lhs_static \
+  --budgets b256 \
+  --dataset-seeds ds01 \
+  --baseline-seeds bs01,bs02,bs03 \
+  --downstream-model pinn_data_only \
+  --device cuda \
+  --dtype float64 \
+  --adam-lr 0.003
+```
+
 ### With cleanup (local)
 
 ```bash
@@ -152,6 +183,13 @@ python3 -m src.experiments.pipeline.run_dataset_generation_comparison \
 
 ```bash
 MODE=final MODEL_FLAG=SM4 \
+  bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+```
+
+### Full run with PINN-shaped data-only downstream model (HPC)
+
+```bash
+MODE=final MODEL_FLAG=SM4 DOWNSTREAM_MODEL=pinn_data_only DEVICE=cuda DTYPE=float64 ADAM_LR=0.003 \
   bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 ```
 
@@ -191,7 +229,7 @@ Each comparison run produces:
 - `summary.json` — same data as `summary.csv` in JSON format
 - `failures.json` — details of any failed cells
 
-`summary.csv` columns include: `method`, `budget`, `dataset_seed`, `baseline_seed`, internal test metrics, `id_eval` metrics, `ood_eval` metrics, `id_ood_rmse_gap`, and timing fields where available.
+`summary.csv` columns include: `method`, `budget`, `dataset_seed`, `baseline_seed`, downstream model, internal test metrics, `id_eval` metrics, `ood_eval` metrics, `id_ood_rmse_gap`, and timing fields where available.
 
 Cluster logs are written under:
 

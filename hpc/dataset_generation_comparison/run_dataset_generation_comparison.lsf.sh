@@ -34,6 +34,11 @@ set -euo pipefail
 #     MODE=final MODEL_FLAG=SM4 METHODS=lhs_static BUDGETS=b256 \
 #       DATASET_SEEDS=ds01 BASELINE_SEEDS=bs01 CLEANUP_DATA=true \
 #       bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+#
+#   Final run with PINN-formulation data-only downstream model:
+#     MODE=final MODEL_FLAG=SM4 DOWNSTREAM_MODEL=pinn_data_only \
+#       METHODS=lhs_static BUDGETS=b256 DATASET_SEEDS=ds01 BASELINE_SEEDS=bs01 ADAM_LR=0.003 \
+#       bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
@@ -56,6 +61,11 @@ BUDGETS="${BUDGETS:-}"
 DATASET_SEEDS="${DATASET_SEEDS:-}"
 BASELINE_SEEDS="${BASELINE_SEEDS:-}"
 MODEL_FLAG="${MODEL_FLAG:-SM4}"
+DOWNSTREAM_MODEL="${DOWNSTREAM_MODEL:-}"
+DEVICE="${DEVICE:-}"
+DTYPE="${DTYPE:-}"
+BATCH_SIZE="${BATCH_SIZE:-}"
+ADAM_LR="${ADAM_LR:-}"
 ID_EVAL_ID="${ID_EVAL_ID:-}"
 OOD_EVAL_ID="${OOD_EVAL_ID:-}"
 NO_ID_EVAL="${NO_ID_EVAL:-false}"
@@ -83,6 +93,11 @@ echo "[hpc] budgets=${BUDGETS:-<mode default>}"
 echo "[hpc] dataset_seeds=${DATASET_SEEDS:-<mode default>}"
 echo "[hpc] baseline_seeds=${BASELINE_SEEDS:-<mode default>}"
 echo "[hpc] model_flag=${MODEL_FLAG}"
+echo "[hpc] downstream_model=${DOWNSTREAM_MODEL:-<launcher default>}"
+echo "[hpc] device=${DEVICE:-<launcher default>}"
+echo "[hpc] dtype=${DTYPE:-<launcher default>}"
+echo "[hpc] batch_size=${BATCH_SIZE:-<launcher default>}"
+echo "[hpc] adam_lr=${ADAM_LR:-<launcher default>}"
 echo "[hpc] id_eval_id=${ID_EVAL_ID:-<model-aware default>}"
 echo "[hpc] ood_eval_id=${OOD_EVAL_ID:-<model-aware default>}"
 echo "[hpc] no_id_eval=${NO_ID_EVAL}"
@@ -116,6 +131,26 @@ fi
 
 if [[ -n "${BASELINE_SEEDS}" ]]; then
   cmd+=(--baseline-seeds "${BASELINE_SEEDS}")
+fi
+
+if [[ -n "${DOWNSTREAM_MODEL}" ]]; then
+  cmd+=(--downstream-model "${DOWNSTREAM_MODEL}")
+fi
+
+if [[ -n "${DEVICE}" ]]; then
+  cmd+=(--device "${DEVICE}")
+fi
+
+if [[ -n "${DTYPE}" ]]; then
+  cmd+=(--dtype "${DTYPE}")
+fi
+
+if [[ -n "${BATCH_SIZE}" ]]; then
+  cmd+=(--batch-size "${BATCH_SIZE}")
+fi
+
+if [[ -n "${ADAM_LR}" ]]; then
+  cmd+=(--adam-lr "${ADAM_LR}")
 fi
 
 if [[ -n "${ID_EVAL_ID}" ]]; then

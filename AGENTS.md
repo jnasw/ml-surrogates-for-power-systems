@@ -33,11 +33,14 @@ Do not optimize for framework complexity or speculative extensibility.
 
 ## Source of Truth
 Before making significant changes, read:
+- docs/setup/*.md
 - docs/experiments/*.md
 - docs/refactor/plan.md
 - docs/refactor/requirements_map.md
 
-These documents define what the repository must support.  
+`docs/setup/*.md` contains the current runnable experiment runbooks. `docs/experiments/*.md` contains higher-level experiment contracts. `docs/refactor/*.md` is historical/design context unless a setup doc explicitly points to it.
+
+These documents define what the repository must support.
 If implementation details conflict with an experiment contract, surface the conflict explicitly.
 
 ---
@@ -56,7 +59,13 @@ Current core entrypoints include:
 - 10_run_baseline.py for the data-driven NN baseline
 - 20_run_pinn.py for PINN training
 
-There are also experiment-specific scripts in tools/pinn/, but avoid expanding ad hoc script sprawl further.
+Canonical experiment entrypoints live in:
+- `src/experiments/pipeline/run_*.py`
+
+Canonical HPC wrappers live in:
+- `hpc/`
+
+The `tools/` tree is legacy/ad hoc/analysis utility space. Do not add new canonical experiment workflows under `tools/`.
 
 ---
 

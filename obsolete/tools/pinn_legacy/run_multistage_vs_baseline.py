@@ -208,7 +208,8 @@ def _build_dataset_command(
     dataset_run_root = run_root / "dataset_pipeline"
     command = [
         python_bin,
-        "src/pipeline/run_experiment.py",
+        "-m",
+        "src.experiments.pipeline.run_experiment",
         "--method",
         "qbc_deep_ensemble",
         "--budget",

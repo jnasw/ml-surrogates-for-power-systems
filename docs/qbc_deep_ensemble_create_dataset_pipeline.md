@@ -94,16 +94,16 @@ Key functions:
 
 ### Adaptive QBC loop and acquisition
 
-- `src/methods/loop.py`
+- `src/data/active_learning/loop.py`
   - `QBCConfig.from_runtime`
   - `run_qbc_loop`
-- `src/methods/ensemble.py`
+- `src/data/active_learning/ensemble.py`
   - `train_ensemble`, `DeepEnsemble.predict_all/predict_mean`
-- `src/train/trainer.py`
+- `src/training/trainer.py`
   - `train_surrogate` (each committee member)
-- `src/methods/disagreement.py`
+- `src/data/active_learning/disagreement.py`
   - `score_disagreement`
-- `src/methods/acquisition.py`
+- `src/data/active_learning/acquisition.py`
   - `acquire_topk`, `acquire_diverse`, `select_qbc_marker_hybrid`
 
 ### Simulation and data container
@@ -115,7 +115,7 @@ Key functions:
 
 ### Logging/checkpointing and final metadata
 
-- `src/methods/logger.py` (`ExperimentLogger`)
+- `src/data/active_learning/logger.py` (`ExperimentLogger`)
 - `src/data/generate/adaptive_metadata.py` (`build_qbc_metadata`)
 - `src/data/contracts/data_contract.py` (raw dataset serialization contract validation)
 

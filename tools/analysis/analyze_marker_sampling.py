@@ -20,13 +20,13 @@ import numpy as np
 from omegaconf import OmegaConf
 from scipy.spatial.distance import cdist
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.methods.marker_features import compute_marker_matrix
+from src.data.active_learning.marker_utils import compute_marker_matrix
 from src.data.loaders.raw_trajectory_loader import load_trajectory_dataset_from_raw
-from src.train.baseline import BaselineConfig, evaluate_baseline, train_baseline_surrogate
+from src.training.baseline import BaselineConfig, evaluate_baseline, train_baseline_surrogate
 
 
 def _parse_dataset_item(text: str) -> tuple[str, Path]:

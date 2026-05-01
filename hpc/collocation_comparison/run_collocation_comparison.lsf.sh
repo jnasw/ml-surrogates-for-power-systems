@@ -48,6 +48,7 @@ ID_EVAL_ID="${ID_EVAL_ID:-}"
 OOD_EVAL_ID="${OOD_EVAL_ID:-}"
 NO_OOD_EVAL="${NO_OOD_EVAL:-false}"
 EPOCHS="${EPOCHS:-}"
+ADAM_LR="${ADAM_LR:-}"
 STRATEGIES="${STRATEGIES:-}"
 DENSITIES="${DENSITIES:-}"
 CADENCES="${CADENCES:-}"
@@ -78,6 +79,7 @@ echo "[hpc] id_eval_id=${ID_EVAL_ID:-<none>}"
 echo "[hpc] ood_eval_id=${OOD_EVAL_ID:-<launcher default>}"
 echo "[hpc] no_ood_eval=${NO_OOD_EVAL}"
 echo "[hpc] epochs=${EPOCHS:-<mode default>}"
+echo "[hpc] adam_lr=${ADAM_LR:-<launcher default>}"
 echo "[hpc] strategies=${STRATEGIES:-<default>}"
 echo "[hpc] densities=${DENSITIES:-<mode default>}"
 echo "[hpc] cadences=${CADENCES:-<mode/default single cadence>}"
@@ -127,6 +129,10 @@ fi
 
 if [[ -n "${EPOCHS}" ]]; then
   cmd+=(--epochs "${EPOCHS}")
+fi
+
+if [[ -n "${ADAM_LR}" ]]; then
+  cmd+=(--adam-lr "${ADAM_LR}")
 fi
 
 if [[ -n "${STRATEGIES}" ]]; then

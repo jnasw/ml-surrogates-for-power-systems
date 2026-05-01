@@ -1,3 +1,7 @@
+# Historical Refactor Note
+
+This document records the requirement mapping used during the broad thesis refactor. Treat it as historical context. For current runnable experiment instructions, use `docs/setup/*.md`; for current Python entrypoints, use `src/experiments/pipeline/run_*.py`; for current HPC wrappers, use `hpc/`.
+
 # Requirements Map
 
 ## Purpose

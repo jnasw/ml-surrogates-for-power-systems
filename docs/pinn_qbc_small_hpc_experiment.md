@@ -1,3 +1,7 @@
+# Historical Legacy Workflow Note
+
+This document describes an older QBC/PINN HPC workflow archived under `obsolete/tools/pinn_legacy`. It is kept for historical context only. For current runnable experiment instructions, use `docs/setup/*.md`; for current Python entrypoints, use `src/experiments/pipeline/run_*.py`; for current HPC wrappers, use `hpc/`.
+
 # Small QBC-to-PINN HPC Experiment
 
 This experiment runs the following pipeline for each model order:
@@ -15,8 +19,8 @@ The default model set is:
 
 ## Files
 
-- Orchestrator: [tools/pinn/run_qbc_small_experiment.py](/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/tools/pinn/run_qbc_small_experiment.py)
-- HPC job script: [tools/pinn/jobs/run_qbc_small_experiment.lsf.sh](/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/tools/pinn/jobs/run_qbc_small_experiment.lsf.sh)
+- Archived orchestrator: [obsolete/tools/pinn_legacy/run_qbc_small_experiment.py](/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/obsolete/tools/pinn_legacy/run_qbc_small_experiment.py)
+- Archived HPC job script: [obsolete/tools/pinn_legacy/jobs/run_qbc_small_experiment.lsf.sh](/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/obsolete/tools/pinn_legacy/jobs/run_qbc_small_experiment.lsf.sh)
 
 ## Default setup
 
@@ -51,7 +55,7 @@ export WANDB_ENTITY=...
 Then submit the job:
 
 ```bash
-bsub < tools/pinn/jobs/run_qbc_small_experiment.lsf.sh
+bsub < obsolete/tools/pinn_legacy/jobs/run_qbc_small_experiment.lsf.sh
 ```
 
 ## Common overrides
@@ -70,7 +74,7 @@ PINN_EPOCHS=300 \
 PINN_DEVICE=cuda \
 WANDB_PROJECT=sm-surrogates-pinn \
 WANDB_ENTITY=your_entity \
-bsub < tools/pinn/jobs/run_qbc_small_experiment.lsf.sh
+bsub < obsolete/tools/pinn_legacy/jobs/run_qbc_small_experiment.lsf.sh
 ```
 
 Useful variables:
@@ -140,13 +144,13 @@ Default run names are:
 To inspect the exact commands before submitting:
 
 ```bash
-DRY_RUN=true bsub < tools/pinn/jobs/run_qbc_small_experiment.lsf.sh
+DRY_RUN=true bsub < obsolete/tools/pinn_legacy/jobs/run_qbc_small_experiment.lsf.sh
 ```
 
 Or locally:
 
 ```bash
-python tools/pinn/run_qbc_small_experiment.py \
+python obsolete/tools/pinn_legacy/run_qbc_small_experiment.py \
   --experiment-tag smoke_qbc_small \
   --output-root /tmp/qbc_small_pinn_smoke \
   --models SM4 \

@@ -50,6 +50,15 @@ from src.experiments.pipeline.helpers.wandb import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_REFERENCE_ID = "main_SM4_qbc_b512_ds01"
 DEFAULT_OOD_EVAL_ID = "ood_SM4_wide_ic_b512_ds01"
+DEFAULT_ADAM_LR = 3.0e-3
+CALIBRATED_OPTIMIZER_LRS = {
+    "Adam": DEFAULT_ADAM_LR,
+    "SOAP": 5.0e-2,
+    "LBFGS": 1.0e-1,
+    "BFGS": 1.0,
+    "SSBFGS": 3.0e-1,
+    "SSBroyden": 1.0,
+}
 SCREENING_SEED_LABELS = ("s01",)
 FINAL_SEED_LABELS = ("s01", "s02", "s03", "s04", "s05")
 
@@ -108,6 +117,9 @@ SUMMARY_FIELDNAMES = [
     "total_epochs",
     "main_epochs",
     "adam_warmup_epochs",
+    "adam_lr",
+    "main_lr",
+    "lr_source",
     "dataset_reference_id",
     "dataset_root",
     "id_eval_id",
@@ -270,15 +282,53 @@ def _build_optimizer_run_specs(
     return specs
 
 
+def _optimizer_lr(
+    *,
+    optimizer: str,
+    adam_lr: float,
+    soap_lr: float,
+    lbfgs_lr: float,
+    bfgs_lr: float,
+    ssbfgs_lr: float,
+    ssbroyden_lr: float,
+    quasi_newton_lr: float | None,
+    stochastic_qn_lr: float,
+) -> float:
+    if optimizer == "Adam":
+        return float(adam_lr)
+    if optimizer == "SOAP":
+        return float(soap_lr)
+    if optimizer in FULL_BATCH_OPTIMIZERS and quasi_newton_lr is not None:
+        return float(quasi_newton_lr)
+    if optimizer == "LBFGS":
+        return float(lbfgs_lr)
+    if optimizer == "BFGS":
+        return float(bfgs_lr)
+    if optimizer == "SSBFGS":
+        return float(ssbfgs_lr)
+    if optimizer == "SSBroyden":
+        return float(ssbroyden_lr)
+    if optimizer in STOCHASTIC_QN_OPTIMIZERS:
+        return float(stochastic_qn_lr)
+    return float(adam_lr)
+
+
+def _optimizer_lr_source(*, optimizer: str, quasi_newton_lr: float | None) -> str:
+    if optimizer in FULL_BATCH_OPTIMIZERS and quasi_newton_lr is not None:
+        return "quasi_newton_override"
+    if optimizer in CALIBRATED_OPTIMIZER_LRS:
+        return "calibrated_default"
+    if optimizer in STOCHASTIC_QN_OPTIMIZERS:
+        return "stochastic_qn_default"
+    return "explicit_or_default"
+
+
 def _optimizer_stage(
     *,
     optimizer: str,
     name: str,
     epochs: int,
-    adam_lr: float,
-    soap_lr: float,
-    quasi_newton_lr: float,
-    stochastic_qn_lr: float,
+    lr: float,
     batch_size: int,
     line_search_name: str,
     stochastic_curvature_threshold: float,
@@ -292,7 +342,6 @@ def _optimizer_stage(
     optimizer_kwargs = "{}"
     line_search = "null"
     scheduler = "null"
-    lr = adam_lr
     batch_size_value = str(int(batch_size))
     shuffle = "true"
     full_batch = "false"
@@ -313,10 +362,7 @@ def _optimizer_stage(
             "eps:1.0e-8"
             "}"
         )
-    if optimizer == "SOAP":
-        lr = soap_lr
-    elif optimizer in FULL_BATCH_OPTIMIZERS:
-        lr = quasi_newton_lr
+    if optimizer in FULL_BATCH_OPTIMIZERS:
         batch_size_value = "null"
         shuffle = "false"
         full_batch = "true"
@@ -330,7 +376,6 @@ def _optimizer_stage(
         elif optimizer == "SSBroyden":
             optimizer_kwargs = "{tau_strategy:paper_default,phi_strategy:paper_default}"
     elif optimizer in STOCHASTIC_QN_OPTIMIZERS:
-        lr = stochastic_qn_lr
         if optimizer == "sSSBFGS":
             optimizer_kwargs = (
                 "{"
@@ -371,7 +416,11 @@ def _optimizer_phase_override(
     run_spec: OptimizerRunSpec,
     adam_lr: float,
     soap_lr: float,
-    quasi_newton_lr: float,
+    lbfgs_lr: float,
+    bfgs_lr: float,
+    ssbfgs_lr: float,
+    ssbroyden_lr: float,
+    quasi_newton_lr: float | None,
     stochastic_qn_lr: float,
     batch_size: int,
     line_search_name: str,
@@ -390,10 +439,17 @@ def _optimizer_phase_override(
                 optimizer="Adam",
                 name="adam_warmup",
                 epochs=run_spec.adam_warmup_epochs,
-                adam_lr=adam_lr,
-                soap_lr=soap_lr,
-                quasi_newton_lr=quasi_newton_lr,
-                stochastic_qn_lr=stochastic_qn_lr,
+                lr=_optimizer_lr(
+                    optimizer="Adam",
+                    adam_lr=adam_lr,
+                    soap_lr=soap_lr,
+                    lbfgs_lr=lbfgs_lr,
+                    bfgs_lr=bfgs_lr,
+                    ssbfgs_lr=ssbfgs_lr,
+                    ssbroyden_lr=ssbroyden_lr,
+                    quasi_newton_lr=quasi_newton_lr,
+                    stochastic_qn_lr=stochastic_qn_lr,
+                ),
                 batch_size=batch_size,
                 line_search_name=line_search_name,
                 stochastic_curvature_threshold=stochastic_curvature_threshold,
@@ -410,10 +466,17 @@ def _optimizer_phase_override(
             optimizer=run_spec.optimizer,
             name=run_spec.strategy,
             epochs=run_spec.main_epochs,
-            adam_lr=adam_lr,
-            soap_lr=soap_lr,
-            quasi_newton_lr=quasi_newton_lr,
-            stochastic_qn_lr=stochastic_qn_lr,
+            lr=_optimizer_lr(
+                optimizer=run_spec.optimizer,
+                adam_lr=adam_lr,
+                soap_lr=soap_lr,
+                lbfgs_lr=lbfgs_lr,
+                bfgs_lr=bfgs_lr,
+                ssbfgs_lr=ssbfgs_lr,
+                ssbroyden_lr=ssbroyden_lr,
+                quasi_newton_lr=quasi_newton_lr,
+                stochastic_qn_lr=stochastic_qn_lr,
+            ),
             batch_size=batch_size,
             line_search_name=line_search_name,
             stochastic_curvature_threshold=stochastic_curvature_threshold,
@@ -447,7 +510,11 @@ def _build_pinn_command(
     batch_size: int,
     adam_lr: float,
     soap_lr: float,
-    quasi_newton_lr: float,
+    lbfgs_lr: float,
+    bfgs_lr: float,
+    ssbfgs_lr: float,
+    ssbroyden_lr: float,
+    quasi_newton_lr: float | None,
     stochastic_qn_lr: float,
     run_spec: OptimizerRunSpec,
     line_search_name: str,
@@ -474,6 +541,10 @@ def _build_pinn_command(
         run_spec=run_spec,
         adam_lr=adam_lr,
         soap_lr=soap_lr,
+        lbfgs_lr=lbfgs_lr,
+        bfgs_lr=bfgs_lr,
+        ssbfgs_lr=ssbfgs_lr,
+        ssbroyden_lr=ssbroyden_lr,
         quasi_newton_lr=quasi_newton_lr,
         stochastic_qn_lr=stochastic_qn_lr,
         batch_size=batch_size,
@@ -604,6 +675,9 @@ def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
         "total_epochs": _int_or_none(run.get("total_epochs")),
         "main_epochs": _int_or_none(run.get("main_epochs")),
         "adam_warmup_epochs": _int_or_none(run.get("adam_warmup_epochs")),
+        "adam_lr": _float_or_none(run.get("adam_lr")),
+        "main_lr": _float_or_none(run.get("main_lr")),
+        "lr_source": run.get("lr_source"),
         "dataset_reference_id": run.get("dataset_reference_id"),
         "dataset_root": run.get("dataset_root"),
         "id_eval_id": run.get("id_eval_id"),
@@ -797,8 +871,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--activation", default="tanh", help="PINN activation.")
     parser.add_argument("--dtype", default="float64", help="PINN dtype.")
     parser.add_argument("--batch-size", type=int, default=1024, help="Mini-batch size for Adam/SOAP/stochastic phases.")
-    parser.add_argument("--adam-lr", type=float, default=1e-3, help="Adam learning rate.")
-    parser.add_argument("--soap-lr", type=float, default=1e-3, help="SOAP learning rate.")
+    parser.add_argument("--adam-lr", type=float, default=DEFAULT_ADAM_LR, help="Adam learning rate.")
+    parser.add_argument("--soap-lr", type=float, default=CALIBRATED_OPTIMIZER_LRS["SOAP"], help="SOAP learning rate.")
     parser.add_argument(
         "--total-epochs",
         type=int,
@@ -824,7 +898,36 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--adam-scheduler-factor", type=float, default=0.5, help="Adam scheduler reduction factor.")
     parser.add_argument("--adam-scheduler-patience", type=int, default=100, help="Adam scheduler patience in epochs.")
     parser.add_argument("--adam-scheduler-threshold", type=float, default=1.0e-4, help="Adam scheduler relative threshold.")
-    parser.add_argument("--quasi-newton-lr", type=float, default=1.0, help="Learning rate for full-batch quasi-Newton phases.")
+    parser.add_argument(
+        "--lbfgs-lr",
+        type=float,
+        default=CALIBRATED_OPTIMIZER_LRS["LBFGS"],
+        help="LBFGS learning rate.",
+    )
+    parser.add_argument(
+        "--bfgs-lr",
+        type=float,
+        default=CALIBRATED_OPTIMIZER_LRS["BFGS"],
+        help="BFGS learning rate.",
+    )
+    parser.add_argument(
+        "--ssbfgs-lr",
+        type=float,
+        default=CALIBRATED_OPTIMIZER_LRS["SSBFGS"],
+        help="SSBFGS learning rate.",
+    )
+    parser.add_argument(
+        "--ssbroyden-lr",
+        type=float,
+        default=CALIBRATED_OPTIMIZER_LRS["SSBroyden"],
+        help="SSBroyden learning rate.",
+    )
+    parser.add_argument(
+        "--quasi-newton-lr",
+        type=float,
+        default=None,
+        help="Optional compatibility override applied to all full-batch quasi-Newton phases.",
+    )
     parser.add_argument("--stochastic-qn-lr", type=float, default=5.0e-2, help="Learning rate for stochastic quasi-Newton phases.")
     parser.add_argument("--line-search", default="strong_wolfe", choices=["strong_wolfe", "backtracking"], help="Line-search method for BFGS-family phases.")
     parser.add_argument("--stochastic-curvature-threshold", type=float, default=1.0e-6)
@@ -1003,6 +1106,17 @@ def main() -> None:
     manifest["artifacts"]["adam_scheduler_factor"] = float(args.adam_scheduler_factor)
     manifest["artifacts"]["adam_scheduler_patience"] = int(args.adam_scheduler_patience)
     manifest["artifacts"]["adam_scheduler_threshold"] = float(args.adam_scheduler_threshold)
+    manifest["artifacts"]["optimizer_lr_defaults"] = dict(CALIBRATED_OPTIMIZER_LRS)
+    manifest["artifacts"]["adam_lr"] = float(args.adam_lr)
+    manifest["artifacts"]["soap_lr"] = float(args.soap_lr)
+    manifest["artifacts"]["lbfgs_lr"] = float(args.lbfgs_lr)
+    manifest["artifacts"]["bfgs_lr"] = float(args.bfgs_lr)
+    manifest["artifacts"]["ssbfgs_lr"] = float(args.ssbfgs_lr)
+    manifest["artifacts"]["ssbroyden_lr"] = float(args.ssbroyden_lr)
+    manifest["artifacts"]["quasi_newton_lr_override"] = (
+        None if args.quasi_newton_lr is None else float(args.quasi_newton_lr)
+    )
+    manifest["artifacts"]["stochastic_qn_lr"] = float(args.stochastic_qn_lr)
     manifest["artifacts"]["gradient_telemetry"] = bool(args.gradient_telemetry)
     manifest["artifacts"]["save_best_checkpoint"] = bool(args.save_best_checkpoint)
     manifest["artifacts"]["save_last_checkpoint"] = bool(args.save_last_checkpoint)
@@ -1038,6 +1152,21 @@ def main() -> None:
         run_name = run_spec.run_name
         run_dir = output_root / "runs" / run_name
         wandb_tags = [*tags_base, *run_spec.wandb_tags()]
+        main_lr = _optimizer_lr(
+            optimizer=run_spec.optimizer,
+            adam_lr=float(args.adam_lr),
+            soap_lr=float(args.soap_lr),
+            lbfgs_lr=float(args.lbfgs_lr),
+            bfgs_lr=float(args.bfgs_lr),
+            ssbfgs_lr=float(args.ssbfgs_lr),
+            ssbroyden_lr=float(args.ssbroyden_lr),
+            quasi_newton_lr=args.quasi_newton_lr,
+            stochastic_qn_lr=float(args.stochastic_qn_lr),
+        )
+        lr_source = _optimizer_lr_source(
+            optimizer=run_spec.optimizer,
+            quasi_newton_lr=args.quasi_newton_lr,
+        )
         command = _build_pinn_command(
             python_bin=args.python_bin,
             model_flag=args.model_flag,
@@ -1056,6 +1185,10 @@ def main() -> None:
             batch_size=args.batch_size,
             adam_lr=args.adam_lr,
             soap_lr=args.soap_lr,
+            lbfgs_lr=args.lbfgs_lr,
+            bfgs_lr=args.bfgs_lr,
+            ssbfgs_lr=args.ssbfgs_lr,
+            ssbroyden_lr=args.ssbroyden_lr,
             quasi_newton_lr=args.quasi_newton_lr,
             stochastic_qn_lr=args.stochastic_qn_lr,
             run_spec=run_spec,
@@ -1091,6 +1224,9 @@ def main() -> None:
             "total_epochs": run_spec.total_epochs,
             "main_epochs": run_spec.main_epochs,
             "adam_warmup_epochs": run_spec.adam_warmup_epochs,
+            "adam_lr": float(args.adam_lr),
+            "main_lr": main_lr,
+            "lr_source": lr_source,
             "dataset_reference_id": dataset_reference_id,
             "dataset_root": str(dataset_root),
             "id_eval_id": eval_inputs["id_eval_id"],

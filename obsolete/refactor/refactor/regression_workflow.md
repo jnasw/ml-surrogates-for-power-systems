@@ -1,3 +1,7 @@
+# Historical Refactor Note
+
+This document records regression targets used while stabilizing the refactor. Treat it as historical context. For current runnable experiment instructions, use `docs/setup/*.md`; for current Python entrypoints, use `src/experiments/pipeline/run_*.py`; for current HPC wrappers, use `hpc/`.
+
 # Canonical Regression Workflow
 
 This is the lightweight regression workflow to use after refactor or trainer/runtime changes.

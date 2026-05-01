@@ -1,3 +1,7 @@
+# Historical Legacy Workflow Note
+
+This document describes the older HPO workflow design archived under `obsolete/tools/hpo_workflow_legacy`. It is kept for historical context only. For the current calibration launcher, use `docs/setup/hpo_calibration.md`, `src/experiments/pipeline/run_hpo_calibration.py`, and `hpc/hpo/run_hpo_calibration.lsf.sh`.
+
 # HPO Workflow Design
 
 This document defines the HPO workflow contract used in this repository.
@@ -429,8 +433,8 @@ Recommended execution order:
 
 The workflow runner should be launched through one generic cluster script:
 
-- `tools/hpo_workflow/jobs/run_hpo_workflow.lsf.sh`
-- recommended submit wrapper: `tools/hpo_workflow/jobs/submit_workflow.sh`
+- `obsolete/tools/hpo_workflow_legacy/jobs/run_hpo_workflow.lsf.sh`
+- recommended submit wrapper: `obsolete/tools/hpo_workflow_legacy/jobs/submit_workflow.sh`
 
 Required environment variable:
 
@@ -453,7 +457,7 @@ Optional environment variables:
 Example:
 
 ```bash
-tools/hpo_workflow/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
+obsolete/tools/hpo_workflow_legacy/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
 ```
 
 Resume only the later stages:
@@ -461,21 +465,21 @@ Resume only the later stages:
 ```bash
 export HPO_FROM_STAGE=refine
 export HPO_RESUME=true
-tools/hpo_workflow/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
+obsolete/tools/hpo_workflow_legacy/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
 ```
 
 Plan-only matrix materialization:
 
 ```bash
 export HPO_PLAN_ONLY=true
-tools/hpo_workflow/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
+obsolete/tools/hpo_workflow_legacy/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
 ```
 
 Skip the expensive benchmark-budget confirmation stage:
 
 ```bash
 export HPO_SKIP_CONFIRM=true
-tools/hpo_workflow/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
+obsolete/tools/hpo_workflow_legacy/jobs/submit_workflow.sh src/config/hpo_workflow/qbc_deep_ensemble/sm4.yaml
 ```
 
 The submit wrapper derives a more specific job name from the config path:

@@ -19,7 +19,7 @@ dataset:
 pinn:
   mode: single_stage # single_stage | multistage
   hidden_dim: 64
-  hidden_layers: 4
+  hidden_layers: 3
   activation: tanh
   dtype: float64
   device: auto # auto | cuda | mps | cpu
@@ -222,7 +222,7 @@ pinn:
       optimizer_phases:
         - name: adam_residual
           optimizer: Adam
-          lr: 0.001
+          lr: 0.003
           epochs: 300
           batch_size: 1024
           shuffle: true
@@ -235,7 +235,7 @@ pinn:
   optimizer_phases:
     - name: adam
       optimizer: Adam
-      lr: 0.001
+      lr: 0.003
       epochs: 100
       batch_size: 1024
       shuffle: true

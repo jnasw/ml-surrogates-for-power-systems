@@ -22,10 +22,10 @@ Presets live in `src/config/preset/` and provide runtime/output defaults.
 
 - Entry + dispatch: `00_create_dataset.py`
 - Orchestration + builder + writer: `src/data/generate/dataset_functions.py`
-- QBC + marker loops: `src/methods/loop.py`
-- Acquisition utilities (regular + hybrid): `src/methods/acquisition.py`
-- Marker features/selection utils: `src/methods/marker_utils.py`
-- Adaptive logging/checkpoints: `src/methods/logger.py`
+- QBC + marker loops: `src/data/active_learning/loop.py`
+- Acquisition utilities (regular + hybrid): `src/data/active_learning/acquisition.py`
+- Marker features/selection utils: `src/data/active_learning/marker_utils.py`
+- Adaptive logging/checkpoints: `src/data/active_learning/logger.py`
 - ODE simulation utility: `src/sim/simulator.py`
 - Adaptive metadata assembly: `src/data/generate/adaptive_metadata.py`
 - Dataset state container: `src/data/loaders/trajectory_dataset.py`

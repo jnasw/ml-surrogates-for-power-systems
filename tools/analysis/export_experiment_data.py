@@ -12,7 +12,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.pipeline.experiment_manifest_tables import load_baseline_table, load_dataset_table, load_round_table
+from src.experiments.pipeline.helpers.experiment_manifest_tables import (
+    load_baseline_table,
+    load_dataset_table,
+    load_round_table,
+)
 
 
 def _write_csv(rows: list[dict[str, Any]], out_path: str) -> None:

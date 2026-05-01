@@ -95,13 +95,13 @@ Core functions:
 
 ### Marker loop and selection logic
 
-- `src/methods/loop.py`
+- `src/data/active_learning/loop.py`
   - `run_marker_loop`
-- `src/methods/marker_utils.py`
+- `src/data/active_learning/marker_utils.py`
   - `compute_marker_matrix`, `fit_pca`, `pca_transform`, `normalize01`, `greedy_select`
-- `src/methods/ensemble.py`
+- `src/data/active_learning/ensemble.py`
   - `train_ensemble` (used only for optional held-out evaluation)
-- `src/train/trainer.py`
+- `src/training/trainer.py`
   - `train_surrogate` (evaluation ensemble members)
 
 ### Simulation, dataset state, and IC sampling
@@ -113,7 +113,7 @@ Core functions:
 
 ### Logging, metadata, and raw contract
 
-- `src/methods/logger.py` (`ExperimentLogger`)
+- `src/data/active_learning/logger.py` (`ExperimentLogger`)
 - `src/data/generate/adaptive_metadata.py` (`build_marker_metadata`)
 - `src/data/contracts/data_contract.py` (raw trajectory contract validation)
 

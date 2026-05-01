@@ -22,8 +22,8 @@ from src.pinn.landscape import evaluate_landscape_1d, evaluate_landscape_2d
 from src.pinn.landscape.io import write_landscape_artifacts_1d, write_landscape_artifacts_2d
 from src.pinn.losses import LossWeights
 from src.sim.ode.model_definitions import SynchronousMachineModels
-from src.train.runtime import cfg_get, resolve_dataset_root
-from src.train.trainer import PinnModel
+from src.training.runtime import cfg_get, resolve_dataset_root
+from src.training.trainer import PinnModel
 
 
 def _parse_args() -> argparse.Namespace:

@@ -1,3 +1,7 @@
+# Historical Refactor Note
+
+This document records the refactor plan and design rationale that led to the current canonical structure. Treat it as historical context. For current runnable experiment instructions, use `docs/setup/*.md`; for current Python entrypoints, use `src/experiments/pipeline/run_*.py`; for current HPC wrappers, use `hpc/`.
+
 # Refactor Plan
 
 ## Goal
@@ -212,7 +216,7 @@ Current status:
 - `outputs/` vs `results/` boundary is enforced more clearly
 - per-run PINN `metrics.csv` has been removed in favor of canonical `metrics.json`
 - tiny trusted smoke paths have been verified for:
-  - dataset -> preprocess -> baseline via `src.pipeline.run_experiment`
+  - dataset -> preprocess -> baseline via `src.experiments.pipeline.run_experiment`
   - direct `20_run_pinn.py` on a tiny preprocessed dataset
 
 ---

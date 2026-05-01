@@ -8,6 +8,7 @@ from time import monotonic
 import hydra
 import torch
 from hydra.utils import get_original_cwd
+from omegaconf import OmegaConf
 
 from src.data.runtime_validation import validate_pinn_runtime_dataset
 from src.pinn.data import load_pinn_dataset_from_preprocessed_root, load_pinn_supervised_test_split_from_preprocessed_root
@@ -26,6 +27,50 @@ from src.training.runtime import (
 )
 from src.training.trainer import PinnModel
 from src.training.trainer import train_pinn
+
+
+def _format_example_values(values, *, max_items: int = 8) -> list[float]:
+    return [round(float(value), 6) for value in values[:max_items]]
+
+
+def _model_io_names(config) -> tuple[list[str], list[str]]:
+    guide_path = os.path.join(str(config.dirs.init_conditions_dir), "modellings_guide.yaml")
+    guide = OmegaConf.load(guide_path)
+    for model in guide:
+        if str(model.get("name")) == str(config.model.model_flag):
+            state_names = [str(value) for value in (model.get("keys") or [])]
+            extra_names = [str(value) for value in (model.get("keys_ext") or [])]
+            return ["time"] + state_names + extra_names, state_names
+    return [], []
+
+
+def _print_pinn_io_example(config, dataset) -> None:
+    input_names, output_names = _model_io_names(config)
+    train_x0 = dataset.train_x[0].detach().cpu()
+    train_y0 = dataset.train_y[0].detach().cpu()
+    print("[pinn] Input/output definition:")
+    print(f"[pinn] input = row-wise [time, initial-condition/features...] {input_names}")
+    print(f"[pinn] output = dynamic target state row {output_names}")
+    print(
+        "[pinn] example supervised row | "
+        f"x_shape={tuple(train_x0.shape)} x={_format_example_values(train_x0)} "
+        f"y_shape={tuple(train_y0.shape)} y={_format_example_values(train_y0)}"
+    )
+    if dataset.train_col_x is not None and int(dataset.train_col_x.shape[0]) > 0:
+        col_x0 = dataset.train_col_x[0].detach().cpu()
+        print(
+            "[pinn] example collocation input | "
+            f"x_shape={tuple(col_x0.shape)} x={_format_example_values(col_x0)} "
+            "(no supervised y; physics residual target is implicit)"
+        )
+    if dataset.train_init_x is not None and int(dataset.train_init_x.shape[0]) > 0:
+        init_x0 = dataset.train_init_x[0].detach().cpu()
+        init_y0 = dataset.train_init_y[0].detach().cpu()
+        print(
+            "[pinn] example initial-condition row | "
+            f"x_shape={tuple(init_x0.shape)} x={_format_example_values(init_x0)} "
+            f"y_shape={tuple(init_y0.shape)} y={_format_example_values(init_y0)}"
+        )
 
 
 def _resolve_optional_eval_root(config, original_cwd: str, *, kind: str) -> str | None:
@@ -191,6 +236,8 @@ def main(config) -> None:
             f"val_rows={0 if dataset.val_x is None else dataset.val_x.shape[0]} "
             f"test_rows={0 if dataset.test_x is None else dataset.test_x.shape[0]}"
         )
+        if bool(cfg_get(config, "debug.print_io_example", False)):
+            _print_pinn_io_example(config, dataset)
 
         ode_model = SynchronousMachineModels(config)
         save_resolved_config(config=config, run_dir=run_dir)

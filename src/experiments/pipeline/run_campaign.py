@@ -158,7 +158,8 @@ def main() -> None:
 
         shared_cmd = [
             sys.executable,
-            "tools/benchmark/run_experiment.py",
+            "-m",
+            "src.experiments.pipeline.run_experiment",
             "--method",
             st_method,
             "--budget",

@@ -7,6 +7,7 @@ from time import monotonic
 
 import hydra
 from hydra.utils import get_original_cwd
+from omegaconf import OmegaConf
 
 from src.data.loaders.preprocessed_trajectory_loader import load_trajectory_dataset_from_preprocessed_root
 from src.data.runtime_validation import validate_baseline_runtime_dataset
@@ -21,6 +22,46 @@ from src.training.runtime import (
     utc_now_iso,
     write_json,
 )
+
+
+def _format_example_values(values, *, max_items: int = 8) -> list[float]:
+    return [round(float(value), 6) for value in values[:max_items]]
+
+
+def _model_io_names(config) -> tuple[list[str], list[str]]:
+    guide_path = os.path.join(str(config.dirs.init_conditions_dir), "modellings_guide.yaml")
+    guide = OmegaConf.load(guide_path)
+    for model in guide:
+        if str(model.get("name")) == str(config.model.model_flag):
+            state_names = [str(value) for value in (model.get("keys") or [])]
+            extra_names = [str(value) for value in (model.get("keys_ext") or [])]
+            return state_names + extra_names, state_names
+    return [], []
+
+
+def _print_baseline_io_example(config, dataset) -> None:
+    input_names, output_state_names = _model_io_names(config)
+    train_x, train_y = dataset.training_view()
+    print("[baseline] Input/output definition:")
+    print(f"[baseline] input = initial-condition/features {input_names}")
+    print(f"[baseline] output = full trajectory over time for states {output_state_names}")
+    print(
+        "[baseline] example train input | "
+        f"shape={train_x[0].shape} values={_format_example_values(train_x[0])}"
+    )
+    print(
+        "[baseline] example train output | "
+        f"trajectory_shape={train_y[0].shape} flattened_dim={train_y[0].reshape(-1).shape[0]}"
+    )
+    if dataset.time_grid is not None and train_y.shape[1] > 0:
+        print(
+            "[baseline] example output first step | "
+            f"t={round(float(dataset.time_grid[0]), 6)} values={_format_example_values(train_y[0, 0])}"
+        )
+        print(
+            "[baseline] example output last step | "
+            f"t={round(float(dataset.time_grid[-1]), 6)} values={_format_example_values(train_y[0, -1])}"
+        )
 
 
 @hydra.main(config_path="src/config", config_name="setup_baseline", version_base=None)
@@ -59,6 +100,8 @@ def main(config) -> None:
         )
         timings["dataset_load_seconds"] = monotonic() - dataset_load_started
         print(f"[baseline] Dataset loaded | n_train={dataset.n_train} n_test={dataset.n_test}")
+        if bool(cfg_get(config, "debug.print_io_example", False)):
+            _print_baseline_io_example(config, dataset)
 
         bcfg = BaselineConfig(
             hidden_dim=int(config.baseline.hidden_dim),
@@ -79,6 +122,17 @@ def main(config) -> None:
         train_started = monotonic()
         model = train_baseline_surrogate(dataset=dataset, seed=int(config.model.seed), cfg=bcfg)
         timings["training_seconds"] = monotonic() - train_started
+        if bool(cfg_get(config, "debug.print_architecture", False)):
+            n_params = sum(p.numel() for p in model.model.parameters())
+            n_trainable = sum(p.numel() for p in model.model.parameters() if p.requires_grad)
+            print("[baseline] Architecture:")
+            print(model.model)
+            print(
+                "[baseline] Architecture summary | "
+                f"input_dim={model.input_dim} output_dim={model.output_dim} "
+                f"hidden_dim={model.hidden_dim} hidden_layers={model.hidden_layers} dropout={bcfg.dropout} "
+                f"device={model.device} parameters={n_params} trainable_parameters={n_trainable}"
+            )
 
         eval_started = monotonic()
         metrics = evaluate_baseline(model=model, dataset=dataset)

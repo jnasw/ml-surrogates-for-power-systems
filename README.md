@@ -1,127 +1,134 @@
 # ml-surrogates-for-power-systems
-MSc thesis on surrogate modelling of synchronous machine dynamics using machine learning @DTU Wind and Energy Systems.
 
-## Dataset pipeline
+Master's thesis repository for surrogate modeling of power-system dynamics using data-driven and physics-informed neural networks.
 
-The project uses a two-stage data pipeline:
+The repository is organized around reproducible experiment execution rather than a general-purpose framework. Canonical workflows live under `src/experiments/`, cluster wrappers live under `hpc/`, and full run artifacts are written to `outputs/`.
 
-1. Stage-1 raw simulation dataset creation:
-   - Entry point: `create_dataset.py`
-   - Output contract: `data/<MODEL>/dataset_vN/raw/file*.pkl` + `data/<MODEL>/dataset_vN/info.txt`
-2. Stage-2 preprocessing:
-   - Entry point: `preprocess_dataset.py`
-   - Consumes the stage-1 contract and writes train/val/test HDF5 files.
-   - Supports fair-comparison mode with a shared external test set.
-3. Baseline training/evaluation:
-   - Entry point: `run_baseline.py`
-   - Consumes stage-2 HDF5 output (not raw `pkl` files).
+## Canonical Structure
 
-For end-to-end execution, use:
-- `tools/benchmark/run_experiment.py` (stage-1 -> stage-2 -> repeated baseline subruns in one command, with dataset manifest).
+- `src/config/` contains Hydra configuration, registries, model setup, budgets, seeds, and IC bounds.
+- `src/data/` contains dataset loading, preprocessing helpers, active-learning and sampling utilities.
+- `src/training/` contains supervised baseline and shared training components.
+- `src/pinn/` contains PINN runtime data loading, losses, logging, checkpointing, collocation, and weighting logic.
+- `src/experiments/` contains canonical Python experiment workflows.
+- `src/experiments/pipeline/run_*.py` are the runnable experiment entrypoints.
+- `src/experiments/pipeline/helpers/` contains shared pipeline helpers for references, evaluation sets, seeds, summaries, manifests, W&B metadata, and launch utilities.
+- `src/sim/` contains simulator/model code.
+- `hpc/` contains canonical LSF job wrappers.
+- `tools/` is legacy/ad hoc/analysis utility space, not the main workflow surface.
+- `obsolete/` contains archived legacy wrappers.
+- `data/reference/` stores persistent reusable training reference datasets.
+- `data/evaluation/` stores persistent reusable ID/OOD evaluation datasets.
 
-### Sampling modes in stage-1
+## Core Entry Points
 
-Configure `model.ic_generation_method` in `src/config/setup_dataset.yaml`:
-
-- `full_factorial`: per-variable sampling with cartesian product.
-- `joint_lhs`: D-dimensional LHS over the full IC vector.
-- `adaptive_iterative`: QBC-based adaptive sampling loop.
-
-For `adaptive_iterative`, stage-1 uses QBC controls from the same config:
-`qbc_n0`, `qbc_n_test`, `qbc_M`, `qbc_P`, `qbc_K`, `qbc_T`, plus `active.*`.
-
-Optional logging/checkpointing during stage-1 adaptive generation:
-- `qbc_enable_logging: true` enables per-round history/checkpoints (disabled by default).
-- `qbc_run_dir` sets output directory (defaults to `outputs/qbc/run_<timestamp>` when logging is enabled).
-- `qbc_resume_from_round` and `qbc_resume_stage` support resuming interrupted adaptive runs.
-
-### QBC logging and resume
-
-`create_dataset.py` is the single stage-1 entrypoint for both static and adaptive generation.
-For adaptive runs, optional per-round logging/checkpointing/resume is available via the
-`qbc_enable_logging`, `qbc_run_dir`, `qbc_resume_from_round`, and `qbc_resume_stage` settings.
-
-### Metadata in `info.txt`
-
-All stage-1 datasets include:
-
-- `IC generation method`
-- `IC per-variable sampling method`
-- `IC joint sample count override`
-
-Adaptive (QBC) datasets additionally include QBC-specific metadata (candidate method, committee size, rounds, selected-per-round, final train size, etc.).
-
-### Fair comparison in preprocess (paired common test set)
-
-To compare LHS vs adaptive fairly without creating an extra dataset, preprocess both datasets in mirrored
-`paired_common_from_datasets` mode:
-
-```yaml
-dataset:
-  test_split_mode: paired_common_from_datasets
-  paired_other_dataset_number: <other dataset number>
-  ic_key_decimals: 8
-```
-
-Behavior:
-- Builds a shared/common test set from the union of both datasets' internal test portions.
-- Removes those ICs from train/val of the current dataset to prevent leakage.
-- Running preprocess for both datasets with mirrored `paired_other_dataset_number` yields an identical common test split.
-
-Then run `run_baseline.py` once per dataset version and compare the saved metrics in
-`outputs/baseline/.../metrics.json`.
-
-## One-command experiments
-
-Run a full pipeline experiment:
-
-```bash
-python tools/benchmark/run_experiment.py \
-  --method qbc_marker_hybrid \
-  --budget b256 \
-  --dataset-seed ds01 \
-  --baseline-seed bs01 \
-  --baseline-seed bs02 \
-  --experiment-id thesis_sm4_local
-```
-
-Artifacts are stored under:
+The low-level data and training entrypoints are:
 
 ```text
-outputs/experiments/<experiment-id>/<preset>/<method>/<budget>/<dataset-seed>/
+00_create_dataset.py
+01_preprocess_dataset.py
+10_run_baseline.py
+20_run_pinn.py
 ```
 
-Key files:
-- `dataset_manifest.json` (single source of truth for config, stage status, artifacts, metrics)
-- `logs/stage*.log` (stage logs)
-- `data/<MODEL>/dataset_vN` (raw + preprocessed)
-- `qbc/` (adaptive round history/checkpoints when applicable)
-- `baseline/<baseline-seed>/metrics.json` (per-baseline-run results)
-- `baseline/summary.json` (aggregate baseline stats across baseline seeds)
+The thesis experiment entrypoints are:
 
-Aggregate all run manifests:
+```text
+python3 -m src.experiments.pipeline.run_reference_datasets
+python3 -m src.experiments.pipeline.run_evaluation_datasets
+python3 -m src.experiments.pipeline.run_optimizer_comparison
+python3 -m src.experiments.pipeline.run_weighting_comparison
+python3 -m src.experiments.pipeline.run_collocation_comparison
+python3 -m src.experiments.pipeline.run_multistage_comparison
+python3 -m src.experiments.pipeline.run_dataset_generation_comparison
+python3 -m src.experiments.pipeline.run_hpo_calibration
+```
+
+Use the Python entrypoints locally. Use the matching `hpc/**/*.lsf.sh` wrappers on the cluster.
+
+## Reference And Evaluation Datasets
+
+Persistent training datasets are generated once and reused by PINN comparison experiments:
 
 ```bash
-python tools/analysis/summarize_experiments.py --root outputs/experiments --out outputs/experiments_summary.csv
+python3 -m src.experiments.pipeline.run_reference_datasets \
+  --reference-id main_SM4_qbc_b512_ds01
 ```
 
-Run a declarative campaign matrix from YAML:
+External evaluation datasets are generated independently of training datasets:
 
 ```bash
-python tools/benchmark/run_campaign.py --config src/config/campaign/local_smoke.yaml
+python3 -m src.experiments.pipeline.run_evaluation_datasets \
+  --evaluation-id id_SM4_lhs_b512_ds01
+
+python3 -m src.experiments.pipeline.run_evaluation_datasets \
+  --evaluation-id ood_SM4_wide_ic_b512_ds01
 ```
 
-Campaigns can optionally bootstrap a shared/common test source dataset automatically
-via a `shared_test` block (see `src/config/campaign/local.yaml`).
+Indexes:
 
-Dry-run the campaign (print commands only):
+```text
+data/reference/index.json
+data/evaluation/index.json
+```
+
+PINN comparison launchers enable OOD evaluation by default using the model-aware OOD evaluation dataset. ID evaluation is opt-in.
+
+## Running Experiments
+
+Example local dry-run:
 
 ```bash
-python tools/benchmark/run_campaign.py --config src/config/campaign/local_smoke.yaml --dry-run
+python3 -m src.experiments.pipeline.run_optimizer_comparison \
+  --mode screening \
+  --reference-id smoke_SM4_lhs_b256_ds01 \
+  --strategies adam \
+  --seed-labels s01 \
+  --device cpu \
+  --no-ood-eval \
+  --dry-run
 ```
 
-Export experiment tables (dataset-level + baseline-level + round-level):
+Example HPC submission:
 
 ```bash
-python tools/analysis/export_experiment_data.py --root outputs/experiments --out-dir outputs/dashboard
+MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 \
+STRATEGIES=adam SEED_LABELS=s01 DEVICE=cpu NO_OOD_EVAL=true \
+bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
 ```
+
+HPC wrappers:
+
+- source shared defaults from `hpc/common/lsf_defaults.sh`
+- activate `.venv` or `venv` if present
+- write cluster logs under `hpc/logs/<workflow>/`
+- use inline environment variables in examples
+- do not rely on `bsub -env`
+
+The static `#BSUB` directives in each wrapper are the actual submitted resources on clusters that do not expand shell variables in directives.
+
+## Outputs And Results
+
+`outputs/` contains full run artifacts for reproducibility and debugging:
+
+```text
+run_manifest.json
+summary.csv
+summary.json
+failures.json
+logs/
+runs/<run_name>/metrics.json
+runs/<run_name>/timings.json
+runs/<run_name>/epoch_metrics.csv
+runs/<run_name>/checkpoints/best.pt
+```
+
+`results/` is reserved for lightweight, thesis-ready exports and plot-ready summaries. Do not treat `results/` as the default dump location for normal run artifacts.
+
+## Documentation
+
+- `docs/setup/` contains current runbooks for thesis experiments.
+- `docs/experiments/` contains higher-level experiment design notes.
+- `docs/refactor/` contains refactor and architecture notes, including historical context.
+
+When behavior changes, update the relevant `docs/setup/*.md` file first.

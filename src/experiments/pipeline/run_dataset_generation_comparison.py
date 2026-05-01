@@ -1,11 +1,12 @@
-"""Thesis dataset generation comparison: baseline surrogate training data source evaluation.
+"""Thesis dataset generation comparison: downstream surrogate data source evaluation.
 
 Compares dataset generation methods (lhs_static, qbc_deep_ensemble, etc.) as training
-data sources for a fixed baseline surrogate, evaluated on fixed external ID/OOD datasets.
+data sources for a fixed downstream surrogate, evaluated on fixed external ID/OOD datasets.
 
 Experiment matrix: method × budget × dataset_seed × baseline_seed.
 Dataset generation and preprocessing run once per method × budget × dataset_seed.
-Baseline seeds (bs01, bs02, bs03) are trained on each generated dataset.
+Model seeds (historically named baseline seeds: bs01, bs02, bs03) are trained
+on each generated dataset.
 """
 
 from __future__ import annotations
@@ -65,6 +66,9 @@ FINAL_BUDGETS = ALL_BUDGETS
 FINAL_DATASET_SEEDS = ("ds01", "ds02", "ds03", "ds04", "ds05")
 FINAL_BASELINE_SEEDS = ("bs01", "bs02", "bs03")
 FINAL_PRESET = "main"
+DOWNSTREAM_MODELS = ("trajectory_baseline", "pinn_data_only")
+DEFAULT_PINN_DATA_ONLY_EPOCHS = 300
+DEFAULT_ADAM_LR = 3.0e-3
 
 DEFAULT_ID_EVAL_IDS: dict[str, str] = {
     "SM4": "id_SM4_lhs_b512_ds01",
@@ -83,12 +87,16 @@ SUMMARY_FIELDNAMES = [
     "budget",
     "dataset_seed_label",
     "dataset_seed_value",
+    "downstream_model",
+    "model_seed_label",
+    "model_seed_value",
     "baseline_seed_label",
     "baseline_seed_value",
     "dataset_run_root",
     "dataset_root",
     "preprocessed_root",
     "baseline_run_dir",
+    "downstream_run_dir",
     "id_eval_id",
     "id_eval_root",
     "ood_eval_id",
@@ -191,6 +199,7 @@ def _build_run_experiment_command(
     baseline_epochs: int | None,
     id_eval_root: str | None,
     ood_eval_root: str | None,
+    skip_baseline: bool = False,
     stage1_overrides: tuple[str, ...] = (),
     stage2_overrides: tuple[str, ...] = (),
     dataset_run_index: int | None = None,
@@ -210,6 +219,8 @@ def _build_run_experiment_command(
     ]
     for seed in baseline_seeds:
         cmd.extend(["--baseline-seed", seed])
+    if skip_baseline:
+        cmd.append("--skip-baseline")
     if baseline_epochs is not None:
         cmd.extend(["--baseline-epochs", str(int(baseline_epochs))])
     if dataset_run_index is not None and dataset_run_total is not None:
@@ -224,6 +235,60 @@ def _build_run_experiment_command(
     if ood_eval_root:
         cmd.extend(["--stage3-override", f"evaluation.ood.root={ood_eval_root}"])
     return cmd
+
+
+def _build_pinn_data_only_command(
+    *,
+    python_bin: str,
+    model_flag: str,
+    seed_value: int,
+    dataset_root: Path,
+    run_dir: Path,
+    epochs: int,
+    adam_lr: float,
+    device: str,
+    dtype: str,
+    batch_size: int,
+    id_eval_root: str | None,
+    ood_eval_root: str | None,
+) -> list[str]:
+    command = [
+        python_bin,
+        "20_run_pinn.py",
+        f"model.model_flag={model_flag}",
+        f"model.seed={int(seed_value)}",
+        f"dataset.root={dataset_root}",
+        f"pinn.run_dir={run_dir}",
+        f"pinn.device={device}",
+        f"pinn.dtype={dtype}",
+        f"pinn.default_batch_size={int(batch_size)}",
+        "pinn.weighting.scheme=static",
+        "pinn.loss_weights.data=1.0",
+        "pinn.loss_weights.dt=0.0",
+        "pinn.loss_weights.physics=0.0",
+        "pinn.loss_weights.ic=0.0",
+        "pinn.collocation.mode=preprocessed",
+        "pinn.collocation.strategy=static",
+        "pinn.supervised_sampling.enabled=false",
+        "pinn.collocation.sampling.enabled=false",
+        "pinn.gradient_telemetry.enabled=false",
+        "pinn.checkpointing.enabled=false",
+        "wandb.use=false",
+        "logging.log_every_epoch=1",
+        (
+            "pinn.optimizer_phases=["
+            f"{{name:adam,optimizer:Adam,lr:{float(adam_lr)},"
+            f"epochs:{int(epochs)},batch_size:{int(batch_size)},shuffle:true,"
+            "full_batch:false,allow_sampling:false,optimizer_kwargs:{},"
+            "scheduler:null,line_search:null,convergence:null}"
+            "]"
+        ),
+    ]
+    if id_eval_root:
+        command.append(f"evaluation.id.root={id_eval_root}")
+    if ood_eval_root:
+        command.append(f"evaluation.ood.root={ood_eval_root}")
+    return command
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +311,7 @@ def _summary_rows_for_dataset_run(
     *,
     baseline_seed_labels: list[str],
     seed_registry: dict[str, int],
+    downstream_model: str,
     id_eval_id: str | None,
     id_eval_root: str | None,
     ood_eval_id: str | None,
@@ -282,11 +348,16 @@ def _summary_rows_for_dataset_run(
     baseline_runs: dict[str, Any] = dict(
         dataset_manifest.get("baseline_runs", {})
     ) if dataset_manifest else {}
+    downstream_runs: dict[str, Any] = dict(dataset_run.get("downstream_runs", {}) or {})
 
     rows: list[dict[str, Any]] = []
     for seed_label in baseline_seed_labels:
         run_name = f"{method}_{budget}_{dataset_seed_label}_{seed_label}"
-        baseline_run = dict(baseline_runs.get(seed_label, {}))
+        baseline_run = (
+            dict(baseline_runs.get(seed_label, {}))
+            if downstream_model == "trajectory_baseline"
+            else dict(downstream_runs.get(seed_label, {}))
+        )
 
         if not baseline_run and dataset_run_status not in ("completed", "dry_run"):
             status = dataset_run_status or "failed"
@@ -300,14 +371,33 @@ def _summary_rows_for_dataset_run(
             status = baseline_run.get("status") or "not_started"
             failure_reason = baseline_run.get("error")
             return_code = baseline_run.get("return_code")
-            baseline_seed_value = baseline_run.get("baseline_seed_value") or seed_registry.get(seed_label)
-            baseline_root = baseline_run.get("baseline_root")
+            baseline_seed_value = (
+                baseline_run.get("baseline_seed_value")
+                or baseline_run.get("model_seed_value")
+                or seed_registry.get(seed_label)
+            )
+            baseline_root = baseline_run.get("baseline_root") or baseline_run.get("run_dir")
             raw_payload = baseline_run.get("metrics_payload")
             metrics_payload = dict(raw_payload) if isinstance(raw_payload, dict) else None
-            baseline_training_seconds = _iso_elapsed_seconds(
-                baseline_run.get("started_at_utc"),
-                baseline_run.get("completed_at_utc"),
-            )
+            if downstream_model == "trajectory_baseline":
+                baseline_training_seconds = _iso_elapsed_seconds(
+                    baseline_run.get("started_at_utc"),
+                    baseline_run.get("completed_at_utc"),
+                )
+            else:
+                timings_payload = (
+                    _read_json_if_exists(Path(str(baseline_root)) / "timings.json")
+                    if baseline_root
+                    else None
+                )
+                baseline_training_seconds = (
+                    _float_or_none(timings_payload.get("training_seconds"))
+                    if timings_payload
+                    else _iso_elapsed_seconds(
+                        baseline_run.get("started_at_utc"),
+                        baseline_run.get("completed_at_utc"),
+                    )
+                )
 
         final_test_metrics = dict(metrics_payload.get("final_test_metrics") or {}) if metrics_payload else {}
         id_eval_m = _eval_metrics_from_payload(metrics_payload, "id")
@@ -321,12 +411,16 @@ def _summary_rows_for_dataset_run(
             "budget": budget,
             "dataset_seed_label": dataset_seed_label,
             "dataset_seed_value": dataset_seed_value,
+            "downstream_model": downstream_model,
+            "model_seed_label": seed_label,
+            "model_seed_value": baseline_seed_value,
             "baseline_seed_label": seed_label,
             "baseline_seed_value": baseline_seed_value,
             "dataset_run_root": str(run_root) if run_root else None,
             "dataset_root": dataset_root,
             "preprocessed_root": preprocessed_root,
             "baseline_run_dir": baseline_root,
+            "downstream_run_dir": baseline_root,
             "id_eval_id": id_eval_id,
             "id_eval_root": id_eval_root,
             "ood_eval_id": ood_eval_id,
@@ -395,6 +489,7 @@ def _write_summary_artifacts(
     manifest: dict[str, Any],
     baseline_seed_labels: list[str],
     seed_registry: dict[str, int],
+    downstream_model: str,
     id_eval_id: str | None,
     id_eval_root: str | None,
     ood_eval_id: str | None,
@@ -406,6 +501,7 @@ def _write_summary_artifacts(
             dict(dataset_run),
             baseline_seed_labels=baseline_seed_labels,
             seed_registry=seed_registry,
+            downstream_model=downstream_model,
             id_eval_id=id_eval_id,
             id_eval_root=id_eval_root,
             ood_eval_id=ood_eval_id,
@@ -424,6 +520,7 @@ def _write_summary_artifacts(
             k: row.get(k)
             for k in (
                 "method", "budget", "dataset_seed_label", "baseline_seed_label",
+                "downstream_model",
                 "status", "return_code", "failure_reason", "log_file", "dataset_run_root",
             )
         }
@@ -441,6 +538,7 @@ def _write_summary_artifacts(
         "budgets": exp.get("budgets", []),
         "dataset_seeds": exp.get("dataset_seeds", []),
         "baseline_seeds": exp.get("baseline_seeds", []),
+        "downstream_model": downstream_model,
         "id_eval_id": id_eval_id,
         "id_eval_root": id_eval_root,
         "ood_eval_id": ood_eval_id,
@@ -603,9 +701,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Training
     parser.add_argument(
-        "--baseline-epochs", type=int, default=None,
-        help="Override baseline training epochs. Smoke default: 1. Final: use config default.",
+        "--downstream-model",
+        default="trajectory_baseline",
+        choices=DOWNSTREAM_MODELS,
+        help=(
+            "Downstream model trained on each generated dataset. "
+            "trajectory_baseline keeps the legacy IC-to-trajectory baseline; "
+            "pinn_data_only uses 20_run_pinn.py with only supervised data loss active."
+        ),
     )
+    parser.add_argument(
+        "--baseline-epochs", type=int, default=None,
+        help=(
+            "Override downstream training epochs. Smoke default: 1. "
+            "For trajectory_baseline final mode uses config default; "
+            f"for pinn_data_only final default is {DEFAULT_PINN_DATA_ONLY_EPOCHS}."
+        ),
+    )
+    parser.add_argument("--device", default="auto", help="Device for pinn_data_only downstream runs.")
+    parser.add_argument("--dtype", default="float64", help="Dtype for pinn_data_only downstream runs.")
+    parser.add_argument("--batch-size", type=int, default=1024, help="Batch size for pinn_data_only downstream runs.")
+    parser.add_argument("--adam-lr", type=float, default=DEFAULT_ADAM_LR, help="Adam learning rate for pinn_data_only downstream runs.")
     parser.add_argument("--preset", default=None, help="Config preset. Defaults by --mode.")
 
     # External evaluation
@@ -658,6 +774,7 @@ def main() -> None:
 
     mode = str(args.mode)
     model_flag = str(args.model_flag)
+    downstream_model = str(args.downstream_model)
     cleanup_data = bool(args.cleanup_data)
 
     # Resolve matrix from mode defaults + CLI overrides
@@ -681,7 +798,13 @@ def main() -> None:
     baseline_epochs: int | None = (
         int(args.baseline_epochs)
         if args.baseline_epochs is not None
-        else (SMOKE_BASELINE_EPOCHS if mode == "smoke" else None)
+        else (
+            SMOKE_BASELINE_EPOCHS
+            if mode == "smoke"
+            else DEFAULT_PINN_DATA_ONLY_EPOCHS
+            if downstream_model == "pinn_data_only"
+            else None
+        )
     )
 
     # Validate methods
@@ -734,8 +857,11 @@ def main() -> None:
             "budgets": budgets,
             "dataset_seeds": dataset_seed_labels,
             "baseline_seeds": baseline_seed_labels,
+            "downstream_model": downstream_model,
             "preset": preset,
             "baseline_epochs": baseline_epochs,
+            "downstream_epochs": baseline_epochs,
+            "adam_lr": float(args.adam_lr),
             "cleanup_data": cleanup_data,
         },
     )
@@ -754,9 +880,15 @@ def main() -> None:
     print(f"[dataset-gen-comparison] methods={methods}")
     print(f"[dataset-gen-comparison] budgets={budgets}")
     print(f"[dataset-gen-comparison] dataset_seeds={dataset_seed_labels}")
+    print(f"[dataset-gen-comparison] downstream_model={downstream_model}")
     print(f"[dataset-gen-comparison] baseline_seeds={baseline_seed_labels}")
     print(f"[dataset-gen-comparison] preset={preset}")
-    print(f"[dataset-gen-comparison] baseline_epochs={baseline_epochs or '<config default>'}")
+    print(f"[dataset-gen-comparison] downstream_epochs={baseline_epochs or '<config default>'}")
+    print(f"[dataset-gen-comparison] adam_lr={float(args.adam_lr)}")
+    if downstream_model == "pinn_data_only":
+        print(f"[dataset-gen-comparison] pinn_data_only_device={args.device}")
+        print(f"[dataset-gen-comparison] pinn_data_only_dtype={args.dtype}")
+        print(f"[dataset-gen-comparison] pinn_data_only_batch_size={args.batch_size}")
     print(f"[dataset-gen-comparison] id_eval_id={id_eval_id or '<none>'}")
     print(f"[dataset-gen-comparison] id_eval_root={id_eval_root or '<none>'}")
     print(f"[dataset-gen-comparison] ood_eval_id={ood_eval_id or '<none>'}")
@@ -787,6 +919,7 @@ def main() -> None:
                     baseline_epochs=baseline_epochs,
                     id_eval_root=id_eval_root,
                     ood_eval_root=ood_eval_root,
+                    skip_baseline=downstream_model == "pinn_data_only",
                     stage1_overrides=SMOKE_STAGE1_OVERRIDES if mode == "smoke" else (),
                     stage2_overrides=SMOKE_STAGE2_OVERRIDES if mode == "smoke" else (),
                     dataset_run_index=dataset_run_idx,
@@ -844,6 +977,98 @@ def main() -> None:
                 )
                 save_manifest(str(manifest_path), manifest)
 
+                if int(result["return_code"]) == 0 and downstream_model == "pinn_data_only":
+                    dataset_manifest_path = dataset_run_root / "dataset_manifest.json"
+                    dataset_manifest = _read_json_if_exists(dataset_manifest_path)
+                    artifacts = dict(dataset_manifest.get("artifacts", {}) or {}) if dataset_manifest else {}
+                    preprocessed_root = artifacts.get("preprocessed_root") or artifacts.get("dataset_root")
+                    if args.dry_run and not preprocessed_root:
+                        preprocessed_root = str(dataset_run_root / "data" / model_flag / "dataset_v1")
+                    if not preprocessed_root:
+                        raise SystemExit(
+                            f"Dataset run '{run_name}' completed but no preprocessed_root was found in "
+                            f"{dataset_manifest_path}."
+                        )
+                    downstream_runs: dict[str, Any] = {}
+                    for seed_idx, seed_label in enumerate(baseline_seed_labels, start=1):
+                        seed_value = int(seed_registry[seed_label])
+                        pinn_run_name = f"{run_name}_{seed_label}"
+                        pinn_run_dir = dataset_run_root / "pinn_data_only" / seed_label
+                        pinn_log_path = output_root / "logs" / f"{pinn_run_name}_pinn_data_only.log"
+                        pinn_command = _build_pinn_data_only_command(
+                            python_bin=args.python_bin,
+                            model_flag=model_flag,
+                            seed_value=seed_value,
+                            dataset_root=Path(str(preprocessed_root)),
+                            run_dir=pinn_run_dir,
+                            epochs=int(baseline_epochs or DEFAULT_PINN_DATA_ONLY_EPOCHS),
+                            adam_lr=float(args.adam_lr),
+                            device=str(args.device),
+                            dtype=str(args.dtype),
+                            batch_size=int(args.batch_size),
+                            id_eval_root=id_eval_root,
+                            ood_eval_root=ood_eval_root,
+                        )
+                        print(
+                            f"[dataset-gen-comparison] pinn_data_only subrun "
+                            f"{seed_idx}/{len(baseline_seed_labels)} seed={seed_label} starting",
+                            flush=True,
+                        )
+                        pinn_result = run_logged_command(
+                            label="dataset-gen-comparison:pinn_data_only",
+                            command=pinn_command,
+                            log_path=pinn_log_path,
+                            dry_run=bool(args.dry_run),
+                            cwd=REPO_ROOT,
+                        )
+                        metrics_path = pinn_run_dir / "metrics.json"
+                        metrics_payload = (
+                            _read_json_if_exists(metrics_path)
+                            if metrics_path.exists()
+                            else None
+                        )
+                        downstream_runs[seed_label] = {
+                            "model_seed_label": seed_label,
+                            "model_seed_value": seed_value,
+                            "baseline_seed_label": seed_label,
+                            "baseline_seed_value": seed_value,
+                            "run_dir": str(pinn_run_dir),
+                            "baseline_root": str(pinn_run_dir),
+                            "status": str(pinn_result["status"]),
+                            "return_code": int(pinn_result["return_code"]),
+                            "error": (
+                                None
+                                if int(pinn_result["return_code"]) == 0
+                                else f"pinn_data_only subrun failed. See {pinn_log_path}"
+                            ),
+                            "log_file": str(pinn_log_path),
+                            "started_at_utc": str(pinn_result["started_at_utc"]),
+                            "completed_at_utc": str(pinn_result["completed_at_utc"]),
+                            "metrics_path": str(metrics_path) if metrics_path.exists() else None,
+                            "metrics_payload": metrics_payload,
+                        }
+                        if int(pinn_result["return_code"]) != 0:
+                            upsert_run_status(
+                                manifest,
+                                run_name=run_name,
+                                run_dir=str(dataset_run_root),
+                                run_metadata={},
+                                status="failed",
+                                error=f"pinn_data_only subrun '{seed_label}' failed. See {pinn_log_path}",
+                                extra_fields={"downstream_runs": downstream_runs},
+                            )
+                            save_manifest(str(manifest_path), manifest)
+                            raise SystemExit(int(pinn_result["return_code"]))
+                    upsert_run_status(
+                        manifest,
+                        run_name=run_name,
+                        run_dir=str(dataset_run_root),
+                        run_metadata={},
+                        status="completed" if not args.dry_run else "dry_run",
+                        extra_fields={"downstream_runs": downstream_runs},
+                    )
+                    save_manifest(str(manifest_path), manifest)
+
                 # Cleanup: run after every cell (success or failure path below), but
                 # only when --cleanup-data is set. In dry-run, show planned deletions.
                 if cleanup_data and (int(result["return_code"]) == 0 or args.dry_run):
@@ -876,6 +1101,7 @@ def main() -> None:
                             manifest=manifest,
                             baseline_seed_labels=baseline_seed_labels,
                             seed_registry=seed_registry,
+                            downstream_model=downstream_model,
                             id_eval_id=id_eval_id,
                             id_eval_root=id_eval_root,
                             ood_eval_id=ood_eval_id,
@@ -892,6 +1118,7 @@ def main() -> None:
             manifest=manifest,
             baseline_seed_labels=baseline_seed_labels,
             seed_registry=seed_registry,
+            downstream_model=downstream_model,
             id_eval_id=id_eval_id,
             id_eval_root=id_eval_root,
             ood_eval_id=ood_eval_id,

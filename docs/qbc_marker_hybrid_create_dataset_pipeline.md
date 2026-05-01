@@ -100,18 +100,18 @@ Core functions:
 
 ### QBC loop + hybrid acquisition
 
-- `src/methods/loop.py`
+- `src/data/active_learning/loop.py`
   - `QBCConfig.from_runtime`
   - `run_qbc_loop` (branch: `acquisition_strategy == qbc_marker_hybrid`)
-- `src/methods/ensemble.py`
+- `src/data/active_learning/ensemble.py`
   - `train_ensemble`, `DeepEnsemble.predict_all/predict_mean`
-- `src/train/trainer.py`
+- `src/training/trainer.py`
   - `train_surrogate`
-- `src/methods/disagreement.py`
+- `src/data/active_learning/disagreement.py`
   - `score_disagreement`
-- `src/methods/acquisition.py`
+- `src/data/active_learning/acquisition.py`
   - `select_qbc_marker_hybrid`
-- `src/methods/marker_utils.py`
+- `src/data/active_learning/marker_utils.py`
   - marker matrix construction, standardization, PCA, greedy selection
 
 ### Simulation, IC sampling, and dataset state
@@ -123,7 +123,7 @@ Core functions:
 
 ### Logging, metadata, and raw contract
 
-- `src/methods/logger.py` (`ExperimentLogger`)
+- `src/data/active_learning/logger.py` (`ExperimentLogger`)
 - `src/data/generate/adaptive_metadata.py` (`build_qbc_metadata`)
 - `src/data/contracts/data_contract.py` (trajectory contract validation)
 

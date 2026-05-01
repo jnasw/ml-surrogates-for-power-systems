@@ -38,9 +38,10 @@ from src.experiments.pipeline.helpers.seeds import (
     seed_pairs_from_labels as _seed_pairs_from_labels,
 )
 from src.experiments.pipeline.helpers.summary import (
+    STANDARD_PINN_SUMMARY_FIELDNAMES,
+    aggregate_standard_pinn_metrics as _aggregate_standard_pinn_metrics,
     component_loss as _component_loss,
-    csv_value as _csv_value,
-    eval_metrics as _eval_metrics,
+    extract_standard_pinn_summary_fields as _extract_standard_pinn_summary_fields,
     float_or_none as _float_or_none,
     int_or_none as _int_or_none,
     mean_std as _mean_std,
@@ -59,6 +60,7 @@ from src.experiments.pipeline.helpers.wandb import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_REFERENCE_ID = "main_SM4_qbc_b512_ds01"
 DEFAULT_OOD_EVAL_ID = "ood_SM4_wide_ic_b512_ds01"
+DEFAULT_ADAM_LR = 3.0e-3
 
 SCREENING_SEED_LABELS = ("s01",)
 FINAL_SEED_LABELS = ("s01", "s02", "s03", "s04", "s05")
@@ -116,16 +118,7 @@ SUMMARY_FIELDNAMES = [
     "return_code",
     "failure_reason",
     "log_file",
-    "final_test_mse",
-    "final_test_rmse",
-    "final_test_mae",
-    "id_eval_mse",
-    "id_eval_rmse",
-    "id_eval_mae",
-    "ood_eval_mse",
-    "ood_eval_rmse",
-    "ood_eval_mae",
-    "id_ood_rmse_gap",
+    *STANDARD_PINN_SUMMARY_FIELDNAMES,
     "final_train_total_loss",
     "final_train_data_loss",
     "final_train_physics_loss",
@@ -472,6 +465,11 @@ def _build_pinn_command(
         "pinn.weighting.scheme=static",
         "pinn.supervised_sampling.enabled=false",
         "pinn.gradient_telemetry.enabled=false",
+        "pinn.checkpointing.enabled=true",
+        "pinn.checkpointing.save_best=true",
+        "pinn.checkpointing.save_last=false",
+        "pinn.checkpointing.save_init=false",
+        "pinn.checkpointing.epoch_fractions=[]",
         f"logging.log_every_epoch={int(log_every_epoch)}",
         "wandb.use=true",
         f"wandb.project={wandb_project}",
@@ -495,13 +493,9 @@ def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
     run_dir = Path(str(run.get("run_dir", ""))) if run.get("run_dir") else None
     metrics = _read_json_if_exists(run_dir / "metrics.json") if run_dir else None
     timings = _read_json_if_exists(run_dir / "timings.json") if run_dir else None
-    final_test_metrics = dict(metrics.get("final_test_metrics", {}) or {}) if metrics else {}
     final_train_losses = dict(metrics.get("final_train_losses", {}) or {}) if metrics else {}
     final_epoch = dict(metrics.get("final_epoch", {}) or {}) if metrics else {}
-    id_eval_metrics = _eval_metrics(metrics, "id")
-    ood_eval_metrics = _eval_metrics(metrics, "ood")
-    id_eval_rmse = _float_or_none(id_eval_metrics.get("rmse"))
-    ood_eval_rmse = _float_or_none(ood_eval_metrics.get("rmse"))
+    standard_metrics = _extract_standard_pinn_summary_fields(metrics=metrics, run_dir=run_dir)
     return {
         "run_name": run.get("run_name"),
         "strategy": run.get("strategy"),
@@ -525,16 +519,7 @@ def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
         "return_code": run.get("return_code"),
         "failure_reason": run.get("error"),
         "log_file": run.get("log_file"),
-        "final_test_mse": _float_or_none(final_test_metrics.get("mse")),
-        "final_test_rmse": _float_or_none(final_test_metrics.get("rmse")),
-        "final_test_mae": _float_or_none(final_test_metrics.get("mae")),
-        "id_eval_mse": _float_or_none(id_eval_metrics.get("mse")),
-        "id_eval_rmse": id_eval_rmse,
-        "id_eval_mae": _float_or_none(id_eval_metrics.get("mae")),
-        "ood_eval_mse": _float_or_none(ood_eval_metrics.get("mse")),
-        "ood_eval_rmse": ood_eval_rmse,
-        "ood_eval_mae": _float_or_none(ood_eval_metrics.get("mae")),
-        "id_ood_rmse_gap": None if id_eval_rmse is None or ood_eval_rmse is None else ood_eval_rmse - id_eval_rmse,
+        **standard_metrics,
         "final_train_total_loss": _float_or_none(final_train_losses.get("total_loss")),
         "final_train_data_loss": _component_loss(final_train_losses, "data"),
         "final_train_physics_loss": _component_loss(final_train_losses, "physics"),
@@ -584,6 +569,7 @@ def _aggregate_by_strategy_density_cadence(rows: list[dict[str, Any]]) -> dict[s
             "training_seconds_mean": timing_stats["mean"],
             "training_seconds_std": timing_stats["std"],
         }
+        out[group_key].update(_aggregate_standard_pinn_metrics(successful))
     return out
 
 
@@ -721,7 +707,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Adam epochs. Defaults: cadence={CADENCE_DEFAULT_EPOCHS}, screening={SCREENING_DEFAULT_EPOCHS}, final={FINAL_DEFAULT_EPOCHS}.",
     )
     parser.add_argument("--batch-size", type=int, default=1024, help="Adam mini-batch size.")
-    parser.add_argument("--adam-lr", type=float, default=1e-3, help="Adam learning rate.")
+    parser.add_argument("--adam-lr", type=float, default=DEFAULT_ADAM_LR, help="Adam learning rate.")
 
     # Collocation parameters
     parser.add_argument(

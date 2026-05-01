@@ -50,6 +50,17 @@ def train_single_stage_pinn_loop(
         hidden_layers=hidden_layers,
         activation=activation,
     ).to(device=device, dtype=dtype)
+    if bool(trainer_impl.cfg_get(config, "debug.print_architecture", False)):
+        n_params = sum(p.numel() for p in model.parameters())
+        n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print("[pinn] Architecture:")
+        print(model)
+        print(
+            "[pinn] Architecture summary | "
+            f"input_dim={dataset.input_dim} output_dim={dataset.output_dim} "
+            f"hidden_dim={hidden_dim} hidden_layers={hidden_layers} activation={activation} "
+            f"dtype={dtype} device={device} parameters={n_params} trainable_parameters={n_trainable}"
+        )
 
     dataset = trainer_impl.move_pinn_training_data_to_device(dataset, device=device, dtype=dtype)
     collocation_manager = trainer_impl.build_collocation_manager(

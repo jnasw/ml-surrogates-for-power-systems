@@ -45,6 +45,7 @@ SEED_LABELS="${SEED_LABELS:-}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-}"
 MAIN_EPOCHS="${MAIN_EPOCHS:-}"
 ADAM_WARMUP_EPOCHS="${ADAM_WARMUP_EPOCHS:-}"
+ADAM_LR="${ADAM_LR:-}"
 DEVICE="${DEVICE:-cuda}"
 DTYPE="${DTYPE:-}"
 ID_EVAL_ID="${ID_EVAL_ID:-}"
@@ -73,6 +74,7 @@ echo "[hpc] seed_labels=${SEED_LABELS:-<mode default>}"
 echo "[hpc] total_epochs=${TOTAL_EPOCHS:-<mode default>}"
 echo "[hpc] main_epochs=${MAIN_EPOCHS:-<launcher computed from total/warmup>}"
 echo "[hpc] adam_warmup_epochs=${ADAM_WARMUP_EPOCHS:-<mode default>}"
+echo "[hpc] adam_lr=${ADAM_LR:-<launcher default>}"
 echo "[hpc] device=${DEVICE}"
 echo "[hpc] dtype=${DTYPE:-<launcher default>}"
 echo "[hpc] id_eval_id=${ID_EVAL_ID:-<none>}"
@@ -115,6 +117,10 @@ fi
 
 if [[ -n "${ADAM_WARMUP_EPOCHS}" ]]; then
   cmd+=(--adam-warmup-epochs "${ADAM_WARMUP_EPOCHS}")
+fi
+
+if [[ -n "${ADAM_LR}" ]]; then
+  cmd+=(--adam-lr "${ADAM_LR}")
 fi
 
 if [[ -n "${DTYPE}" ]]; then
