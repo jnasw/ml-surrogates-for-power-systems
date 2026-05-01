@@ -51,6 +51,7 @@ _PROTECTED_ROOTS: tuple[Path, ...] = (
 
 ALL_METHODS = ("lhs_static", "qbc_deep_ensemble", "marker_directed", "qbc_marker_hybrid")
 ALL_BUDGETS = ("b256", "b512", "b1024", "b2048", "b4096")
+DEFAULT_OUTPUT_BASE = REPO_ROOT / "outputs" / "experiments" / "dataset_generation_comparison"
 
 SMOKE_METHODS = ("lhs_static",)
 SMOKE_BUDGETS = ("b256",)
@@ -131,6 +132,51 @@ def _validate_seed_labels(labels: list[str], registry: dict[str, int]) -> None:
         raise ValueError(
             f"Unknown seed label(s): {', '.join(missing)}. Check {SEED_REGISTRY_PATH}."
         )
+
+
+def _safe_path_token(value: str) -> str:
+    out: list[str] = []
+    for char in value.strip().lower():
+        if char.isalnum() or char in ("_", "-"):
+            out.append(char)
+        elif char in (",", "+", ".", " "):
+            out.append("_")
+    token = "".join(out).strip("_")
+    return token or "run"
+
+
+def _axis_label(
+    *,
+    values: list[str],
+    default_values: tuple[str, ...],
+    many_label: str,
+) -> str | None:
+    if len(values) == 1:
+        return _safe_path_token(values[0])
+    if tuple(values) == default_values:
+        return None
+    return f"{many_label}{len(values)}"
+
+
+def _default_shard_label(
+    *,
+    mode: str,
+    methods: list[str],
+    budgets: list[str],
+    dataset_seed_labels: list[str],
+    baseline_seed_labels: list[str],
+) -> str:
+    default_methods = SMOKE_METHODS if mode == "smoke" else FINAL_METHODS
+    default_budgets = SMOKE_BUDGETS if mode == "smoke" else FINAL_BUDGETS
+    default_dataset_seeds = SMOKE_DATASET_SEEDS if mode == "smoke" else FINAL_DATASET_SEEDS
+    default_baseline_seeds = SMOKE_BASELINE_SEEDS if mode == "smoke" else FINAL_BASELINE_SEEDS
+    tokens = [
+        _axis_label(values=methods, default_values=default_methods, many_label="methods"),
+        _axis_label(values=budgets, default_values=default_budgets, many_label="budgets"),
+        _axis_label(values=dataset_seed_labels, default_values=default_dataset_seeds, many_label="dataset_seeds"),
+        _axis_label(values=baseline_seed_labels, default_values=default_baseline_seeds, many_label="model_seeds"),
+    ]
+    return "_".join(token for token in tokens if token) or "full"
 
 
 # ---------------------------------------------------------------------------
@@ -673,6 +719,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output directory tag suffix. Default: timestamp.",
     )
     parser.add_argument(
+        "--campaign-tag",
+        default=None,
+        help=(
+            "Group split submissions under one campaign directory. "
+            "When set without --output-root, outputs go to "
+            "outputs/experiments/dataset_generation_comparison/<campaign-tag>/<shard-label>."
+        ),
+    )
+    parser.add_argument(
+        "--shard-label",
+        default=None,
+        help="Human-readable label for this split submission. Default: inferred from the selected matrix subset.",
+    )
+    parser.add_argument(
         "--output-root", default=None,
         help="Explicit output root. Default: outputs/experiments/dataset_generation_comparison/<tag>.",
     )
@@ -835,22 +895,38 @@ def main() -> None:
     ood_eval_id = eval_inputs["ood_eval_id"]
     ood_eval_root = eval_inputs["ood_eval_root"]
 
-    # Output root
+    # Output root. A campaign groups independently submitted shards under one
+    # directory while keeping each shard manifest self-contained.
     stamp = args.experiment_tag or tag_stamp()
-    output_root = (
-        Path(args.output_root).resolve()
-        if args.output_root
-        else (REPO_ROOT / "outputs" / "experiments" / "dataset_generation_comparison" / stamp).resolve()
+    campaign_tag = _safe_path_token(str(args.campaign_tag)) if args.campaign_tag else None
+    shard_label = _safe_path_token(str(args.shard_label)) if args.shard_label else _default_shard_label(
+        mode=mode,
+        methods=methods,
+        budgets=budgets,
+        dataset_seed_labels=dataset_seed_labels,
+        baseline_seed_labels=baseline_seed_labels,
     )
+    if args.output_root:
+        output_root = Path(args.output_root).resolve()
+    elif campaign_tag:
+        output_root = (DEFAULT_OUTPUT_BASE / campaign_tag / shard_label).resolve()
+    else:
+        output_root = (DEFAULT_OUTPUT_BASE / stamp).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
 
-    experiment_id = f"dataset_generation_comparison_{mode}_{stamp}"
+    experiment_id = (
+        f"dataset_generation_comparison_{mode}_{campaign_tag}_{shard_label}"
+        if campaign_tag
+        else f"dataset_generation_comparison_{mode}_{stamp}"
+    )
     manifest_path = output_root / "run_manifest.json"
     manifest = init_experiment_manifest(
         run_root=str(output_root),
         experiment={
             "id": experiment_id,
             "tag": stamp,
+            "campaign_tag": campaign_tag,
+            "shard_label": shard_label,
             "mode": mode,
             "model_flag": model_flag,
             "methods": methods,
@@ -877,6 +953,8 @@ def main() -> None:
     print(f"[dataset-gen-comparison] repo_root={REPO_ROOT}")
     print(f"[dataset-gen-comparison] mode={mode}")
     print(f"[dataset-gen-comparison] model_flag={model_flag}")
+    print(f"[dataset-gen-comparison] campaign_tag={campaign_tag or '<none>'}")
+    print(f"[dataset-gen-comparison] shard_label={shard_label}")
     print(f"[dataset-gen-comparison] methods={methods}")
     print(f"[dataset-gen-comparison] budgets={budgets}")
     print(f"[dataset-gen-comparison] dataset_seeds={dataset_seed_labels}")

@@ -200,6 +200,53 @@ MODE=final MODEL_FLAG=SM4 CLEANUP_DATA=true \
   bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 ```
 
+### Split Final Matrix Into Cluster Jobs
+
+For the full final matrix, prefer splitting by dataset-generation cell groups instead of submitting one very large sequential job. Use a shared `CAMPAIGN_TAG` so all split outputs are grouped under:
+
+```text
+outputs/experiments/dataset_generation_comparison/<campaign-tag>/<shard-label>/
+```
+
+If `SHARD_LABEL` is omitted, the launcher infers one from the selected subset, e.g. `lhs_static`, `lhs_static_b256`, or `qbc_deep_ensemble_b2048_ds01`.
+
+One job per method:
+
+```bash
+CAMPAIGN_TAG=dataset_final_sm4 MODE=final MODEL_FLAG=SM4 \
+  METHODS=lhs_static \
+  DATASET_SEEDS=ds01,ds02,ds03,ds04,ds05 \
+  BASELINE_SEEDS=bs01,bs02,bs03 \
+  CLEANUP_DATA=true \
+  bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+```
+
+One job per method and budget:
+
+```bash
+CAMPAIGN_TAG=dataset_final_sm4 MODE=final MODEL_FLAG=SM4 \
+  METHODS=qbc_deep_ensemble \
+  BUDGETS=b512 \
+  DATASET_SEEDS=ds01,ds02,ds03,ds04,ds05 \
+  BASELINE_SEEDS=bs01,bs02,bs03 \
+  CLEANUP_DATA=true \
+  bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+```
+
+One job per expensive adaptive dataset seed:
+
+```bash
+CAMPAIGN_TAG=dataset_final_sm4 MODE=final MODEL_FLAG=SM4 \
+  METHODS=qbc_marker_hybrid \
+  BUDGETS=b2048 \
+  DATASET_SEEDS=ds01 \
+  BASELINE_SEEDS=bs01,bs02,bs03 \
+  CLEANUP_DATA=true \
+  bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+```
+
+Keep all model seeds for a generated dataset in the same shard when possible, because the launcher generates and preprocesses one dataset per `method × budget × dataset_seed` and then trains all `BASELINE_SEEDS` against it. Splitting by `BASELINE_SEEDS` causes repeated dataset generation.
+
 ### Dry-run check (HPC)
 
 ```bash

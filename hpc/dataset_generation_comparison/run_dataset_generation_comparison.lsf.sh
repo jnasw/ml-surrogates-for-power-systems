@@ -2,6 +2,7 @@
 #BSUB -J data_cmp
 #BSUB -q gpua100
 #BSUB -n 4
+#BSUB -R "span[hosts=1]"
 #BSUB -R "rusage[mem=8GB]"
 #BSUB -W 24:00
 #BSUB -oo hpc/logs/dataset_generation/dataset_generation_comparison_%J.out
@@ -20,7 +21,7 @@ set -euo pipefail
 #       bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 #
 #   Final run, lhs_static subset:
-#     MODE=final MODEL_FLAG=SM4 METHODS=lhs_static BUDGETS=b256,b512 \
+#     CAMPAIGN_TAG=dataset_final_sm4 MODE=final MODEL_FLAG=SM4 METHODS=lhs_static BUDGETS=b256,b512 \
 #       DATASET_SEEDS=ds01 BASELINE_SEEDS=bs01,bs02 \
 #       bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 #
@@ -56,6 +57,8 @@ WALLTIME="${WALLTIME:-24:00}"
 MEM_GB="${MEM_GB:-${DEFAULT_MEM_GB}}"
 N_CORES="${N_CORES:-${DEFAULT_N_CORES}}"
 MODE="${MODE:-smoke}"
+CAMPAIGN_TAG="${CAMPAIGN_TAG:-}"
+SHARD_LABEL="${SHARD_LABEL:-}"
 METHODS="${METHODS:-}"
 BUDGETS="${BUDGETS:-}"
 DATASET_SEEDS="${DATASET_SEEDS:-}"
@@ -88,6 +91,8 @@ echo "[hpc] walltime=${WALLTIME} (static #BSUB default: 24:00)"
 echo "[hpc] mem_gb=${MEM_GB} (static #BSUB default: 8GB)"
 echo "[hpc] n_cores=${N_CORES} (static #BSUB default: 4)"
 echo "[hpc] mode=${MODE}"
+echo "[hpc] campaign_tag=${CAMPAIGN_TAG:-<none>}"
+echo "[hpc] shard_label=${SHARD_LABEL:-<auto>}"
 echo "[hpc] methods=${METHODS:-<mode default>}"
 echo "[hpc] budgets=${BUDGETS:-<mode default>}"
 echo "[hpc] dataset_seeds=${DATASET_SEEDS:-<mode default>}"
@@ -116,6 +121,14 @@ cmd=(
   --model-flag
   "${MODEL_FLAG}"
 )
+
+if [[ -n "${CAMPAIGN_TAG}" ]]; then
+  cmd+=(--campaign-tag "${CAMPAIGN_TAG}")
+fi
+
+if [[ -n "${SHARD_LABEL}" ]]; then
+  cmd+=(--shard-label "${SHARD_LABEL}")
+fi
 
 if [[ -n "${METHODS}" ]]; then
   cmd+=(--methods "${METHODS}")

@@ -2,6 +2,7 @@
 #BSUB -J eval_data
 #BSUB -q gpua100
 #BSUB -n 4
+#BSUB -R "span[hosts=1]"
 #BSUB -R "rusage[mem=8GB]"
 #BSUB -W 04:00
 #BSUB -oo hpc/logs/evaluation/evaluation_datasets_%J.out

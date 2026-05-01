@@ -2,6 +2,7 @@
 #BSUB -J opt_cmp
 #BSUB -q gpua100
 #BSUB -n 4
+#BSUB -R "span[hosts=1]"
 #BSUB -R "rusage[mem=8GB]"
 #BSUB -gpu "num=1:mode=exclusive_process"
 #BSUB -W 04:00
