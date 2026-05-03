@@ -11,25 +11,24 @@
 
 set -euo pipefail
 
-# Example submissions:
+# Example submissions (use bsub -env to pass variables; inline VAR=val does not
+# propagate to the batch environment on this cluster):
 #
-#   Screening run with default reference dataset and default strategies:
-#     MODE=screening bsub < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
+#   Dry-run:
+#     bsub -env "MODE=screening,DRY_RUN=true,STRATEGIES=static_tuned,SEED_LABELS=s01" \
+#       < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
 #
-#   Screening run with specific strategies and seed:
-#     MODE=screening STRATEGIES=static_tuned,ma,id SEED_LABELS=s01 bsub < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
-#
-#   Dry-run (prints commands, no training):
-#     MODE=screening DRY_RUN=true STRATEGIES=static_tuned SEED_LABELS=s01 bsub < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
+#   Screening run with specific strategies (commas in values — use export + bsub -env all):
+#     (export MODE=screening STRATEGIES=static_tuned,ma,id SEED_LABELS=s01 && \
+#       bsub -env "all" < hpc/weighting_comparison/run_weighting_comparison.lsf.sh)
 #
 #   Final run with all core strategies and 5 seeds:
-#     MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 bsub < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
+#     bsub -env "MODE=final,REFERENCE_ID=main_SM4_qbc_b512_ds01" \
+#       < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
 #
-#   Final run with explicit dataset root (bypasses reference lookup):
-#     MODE=final DATASET_ROOT=/path/to/preprocessed bsub < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
-#
-#   Custom epoch budget:
-#     MODE=final EPOCHS=5000 REFERENCE_ID=main_SM4_qbc_b512_ds01 bsub < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
+#   Final run with custom epoch budget:
+#     bsub -env "MODE=final,EPOCHS=5000,REFERENCE_ID=main_SM4_qbc_b512_ds01" \
+#       < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -d "${SCRIPT_DIR}/../../src" ]]; then

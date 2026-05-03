@@ -201,33 +201,33 @@ python3 -m src.experiments.pipeline.run_collocation_comparison \
 
 ### 4. HPC Runs
 
-HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`; the static `#BSUB` directives remain the submitted resources. Use inline environment variables only. Do not use `bsub -env` or `export` blocks in runbook commands.
+HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`; the static `#BSUB` directives remain the submitted resources. Use `bsub -env` to pass environment variables — inline `VAR=val bsub` does not propagate to the batch environment on this cluster. When a variable value contains commas (e.g. `SEED_LABELS=s01,s02`), use the subshell form `(export VAR=val ... && bsub -env "all" < script)` instead.
 
 PINN wrappers expose `MODEL_FLAG`, `DTYPE`, `ID_EVAL_ID`, `OOD_EVAL_ID`, and `NO_OOD_EVAL`. OOD evaluation is enabled by default using the launcher default unless `NO_OOD_EVAL=true` / `--no-ood-eval` is used. ID evaluation is optional and must be requested explicitly.
 
 Cadence:
 
 ```bash
-MODE=cadence REFERENCE_ID=smoke_SM4_lhs_b256_ds01 \
-bsub < hpc/collocation_comparison/run_collocation_comparison.lsf.sh
+bsub -env "MODE=cadence,REFERENCE_ID=smoke_SM4_lhs_b256_ds01" \
+  < hpc/collocation_comparison/run_collocation_comparison.lsf.sh
 ```
 
-Main:
+Main (values contain commas — use subshell form):
 
 ```bash
-MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 \
-STRATEGIES=uniform_lhs,random_resampling,rad,rar_d \
-DENSITIES=d10,d25,d50,d100 \
-SEED_LABELS=s01,s02,s03,s04,s05 \
-REFRESH_PERIOD_EPOCHS=1000 \
-bsub < hpc/collocation_comparison/run_collocation_comparison.lsf.sh
+(export MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 \
+  STRATEGIES=uniform_lhs,random_resampling,rad,rar_d \
+  DENSITIES=d10,d25,d50,d100 \
+  SEED_LABELS=s01,s02,s03,s04,s05 \
+  REFRESH_PERIOD_EPOCHS=1000 && \
+  bsub -env "all" < hpc/collocation_comparison/run_collocation_comparison.lsf.sh)
 ```
 
 Optional dry-run:
 
 ```bash
-MODE=cadence REFERENCE_ID=smoke_SM4_lhs_b256_ds01 DEVICE=cpu DRY_RUN=true \
-bsub < hpc/collocation_comparison/run_collocation_comparison.lsf.sh
+bsub -env "MODE=cadence,REFERENCE_ID=smoke_SM4_lhs_b256_ds01,DEVICE=cpu,DRY_RUN=true" \
+  < hpc/collocation_comparison/run_collocation_comparison.lsf.sh
 ```
 
 ## Outputs

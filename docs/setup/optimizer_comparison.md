@@ -190,7 +190,7 @@ The final optimizer comparison uses the persistent reference dataset:
 main_SM4_qbc_b512_ds01
 ```
 
-Run from the repository root. HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`; the static `#BSUB` directives remain the submitted resources. Use inline environment variables only. Do not use `bsub -env` or `export` blocks in runbook commands.
+Run from the repository root. HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`; the static `#BSUB` directives remain the submitted resources. Use `bsub -env` to pass environment variables — inline `VAR=val bsub` does not propagate to the batch environment on this cluster. When a variable value contains commas (e.g. `STRATEGIES=adam,lbfgs`), use the subshell form `(export VAR=val ... && bsub -env "all" < script)` instead.
 
 PINN wrappers expose `MODEL_FLAG`, `DTYPE`, `ID_EVAL_ID`, `OOD_EVAL_ID`, and `NO_OOD_EVAL`. OOD evaluation is enabled by default using the launcher default unless `NO_OOD_EVAL=true` / `--no-ood-eval` is used. ID evaluation is optional and must be requested explicitly.
 
@@ -209,15 +209,15 @@ Make sure `python3` resolves to the intended project environment before submitti
 First dry-run the reference dataset job:
 
 ```bash
-REFERENCE_IDS=main_SM4_qbc_b512_ds01 DRY_RUN=true \
-  bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+bsub -env "REFERENCE_IDS=main_SM4_qbc_b512_ds01,DRY_RUN=true" \
+  < hpc/reference_datasets/generate_reference_datasets.lsf.sh
 ```
 
 Then submit the real reference dataset job:
 
 ```bash
-REFERENCE_IDS=main_SM4_qbc_b512_ds01 DRY_RUN=false FORCE_REBUILD=false \
-  bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+bsub -env "REFERENCE_IDS=main_SM4_qbc_b512_ds01,DRY_RUN=false,FORCE_REBUILD=false" \
+  < hpc/reference_datasets/generate_reference_datasets.lsf.sh
 ```
 
 Expected reference outputs:
@@ -232,8 +232,8 @@ The `data/reference/index.json` entry for `main_SM4_qbc_b512_ds01` must contain 
 ### 3. Dry-Run The Final Optimizer Matrix
 
 ```bash
-MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 DRY_RUN=true \
-  bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
+bsub -env "MODE=final,REFERENCE_ID=main_SM4_qbc_b512_ds01,DRY_RUN=true" \
+  < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
 ```
 
 The default final matrix should include 11 core strategies and 5 seeds:
@@ -256,8 +256,8 @@ Run these only as explicitly labeled experimental follow-up runs.
 ### 4. Submit The Final Optimizer Comparison
 
 ```bash
-MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 DEVICE=cuda DRY_RUN=false \
-  bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
+bsub -env "MODE=final,REFERENCE_ID=main_SM4_qbc_b512_ds01,DEVICE=cuda" \
+  < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
 ```
 
 Final mode uses:
@@ -272,12 +272,12 @@ W&B project: thesis-optimizer-experiment
 
 ### 5. Optional Screening Run
 
-For a smaller pre-final check:
+For a smaller pre-final check (values contain commas — use subshell form):
 
 ```bash
-MODE=screening REFERENCE_ID=main_SM4_qbc_b512_ds01 \
-  STRATEGIES=adam,lbfgs,adam_lbfgs SEED_LABELS=s01 DEVICE=cuda DRY_RUN=false \
-  bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
+(export MODE=screening REFERENCE_ID=main_SM4_qbc_b512_ds01 \
+  STRATEGIES=adam,lbfgs,adam_lbfgs SEED_LABELS=s01 DEVICE=cuda && \
+  bsub -env "all" < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh)
 ```
 
 Screening mode uses 10 total epochs, 5 Adam warmup epochs for multi-phase strategies, and the W&B project `thesis-optimizer-experiment-TEST`.

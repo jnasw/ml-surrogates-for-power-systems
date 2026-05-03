@@ -11,15 +11,22 @@
 
 set -euo pipefail
 
-# Example submissions:
+# Example submissions (use bsub -env to pass variables; inline VAR=val does not
+# propagate to the batch environment on this cluster):
+#
 #   PINN architecture dry-run:
-#     STUDY=pinn_architecture DRY_RUN=true bsub < hpc/hpo/run_hpo_calibration.lsf.sh
+#     bsub -env "STUDY=pinn_architecture,DRY_RUN=true" < hpc/hpo/run_hpo_calibration.lsf.sh
+#
 #   Adam LR with selected architecture:
-#     STUDY=adam_lr PINN_HIDDEN_DIM=64 PINN_HIDDEN_LAYERS=4 bsub < hpc/hpo/run_hpo_calibration.lsf.sh
-#   Second-order LR subset:
-#     STUDY=second_order_lr OPTIMIZERS=LBFGS,SSBFGS LRS=0.1,0.3,1.0 bsub < hpc/hpo/run_hpo_calibration.lsf.sh
+#     bsub -env "STUDY=adam_lr,PINN_HIDDEN_DIM=64,PINN_HIDDEN_LAYERS=3" \
+#       < hpc/hpo/run_hpo_calibration.lsf.sh
+#
+#   Second-order LR subset (commas in values — use export + bsub -env all):
+#     (export STUDY=second_order_lr OPTIMIZERS=LBFGS,SSBFGS LRS=0.1,0.3,1.0 && \
+#       bsub -env "all" < hpc/hpo/run_hpo_calibration.lsf.sh)
+#
 #   Baseline architecture:
-#     STUDY=baseline_architecture DEVICE=cuda bsub < hpc/hpo/run_hpo_calibration.lsf.sh
+#     bsub -env "STUDY=baseline_architecture,DEVICE=cuda" < hpc/hpo/run_hpo_calibration.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -d "${SCRIPT_DIR}/../../src" ]]; then

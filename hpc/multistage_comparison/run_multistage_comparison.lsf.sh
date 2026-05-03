@@ -11,22 +11,23 @@
 
 set -euo pipefail
 
-# Example submissions:
+# Example submissions (use bsub -env to pass variables; inline VAR=val does not
+# propagate to the batch environment on this cluster):
 #
 #   Dry-run screening on smoke reference dataset:
-#     MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 DEVICE=cpu DRY_RUN=true \
-#       bsub < hpc/multistage_comparison/run_multistage_comparison.lsf.sh
+#     bsub -env "MODE=screening,REFERENCE_ID=smoke_SM4_lhs_b256_ds01,DEVICE=cpu,DRY_RUN=true" \
+#       < hpc/multistage_comparison/run_multistage_comparison.lsf.sh
 #
-#   Screening run with a strategy subset:
-#     MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 \
-#       STRATEGIES=adam_30000,adam_ssbroyden_2stage SEED_LABELS=s01 DEVICE=cpu \
-#       bsub < hpc/multistage_comparison/run_multistage_comparison.lsf.sh
+#   Screening run with a strategy subset (commas in values — use export + bsub -env all):
+#     (export MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 \
+#       STRATEGIES=adam_30000,adam_ssbroyden_2stage SEED_LABELS=s01 DEVICE=cpu && \
+#       bsub -env "all" < hpc/multistage_comparison/run_multistage_comparison.lsf.sh)
 #
 #   Final run with all strategies and 5 seeds:
-#     MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 \
+#     (export MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 \
 #       STRATEGIES=adam_30000,adam_ssbroyden_2stage,adam_ssbroyden_3stage,adam_ssbroyden_4stage,adam_ssbroyden_5stage \
-#       SEED_LABELS=s01,s02,s03,s04,s05 \
-#       bsub < hpc/multistage_comparison/run_multistage_comparison.lsf.sh
+#       SEED_LABELS=s01,s02,s03,s04,s05 && \
+#       bsub -env "all" < hpc/multistage_comparison/run_multistage_comparison.lsf.sh)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -d "${SCRIPT_DIR}/../../src" ]]; then

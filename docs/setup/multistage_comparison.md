@@ -97,7 +97,7 @@ Both files index entries by `stage_idx`. Runs may complete fewer stages than pla
 
 Run commands from the repository root.
 
-HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`; the static `#BSUB` directives remain the submitted resources. Use inline environment variables only. Do not use `bsub -env` or `export` blocks in runbook commands.
+HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`; the static `#BSUB` directives remain the submitted resources. Use `bsub -env` to pass environment variables — inline `VAR=val bsub` does not propagate to the batch environment on this cluster. When a variable value contains commas (e.g. `STRATEGIES=adam_30000,adam_ssbroyden_2stage`), use the subshell form `(export VAR=val ... && bsub -env "all" < script)` instead.
 
 PINN wrappers expose `MODEL_FLAG`, `DTYPE`, `ID_EVAL_ID`, `OOD_EVAL_ID`, and `NO_OOD_EVAL`. OOD evaluation is enabled by default using the launcher default unless `NO_OOD_EVAL=true` / `--no-ood-eval` is used. ID evaluation is optional and must be requested explicitly.
 
@@ -136,25 +136,25 @@ python3 -m src.experiments.pipeline.run_multistage_comparison \
 ### Screening (HPC)
 
 ```bash
-MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 \
-  STRATEGIES=adam_30000,adam_ssbroyden_2stage SEED_LABELS=s01 DEVICE=cpu \
-  bsub < hpc/multistage_comparison/run_multistage_comparison.lsf.sh
+(export MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 \
+  STRATEGIES=adam_30000,adam_ssbroyden_2stage SEED_LABELS=s01 DEVICE=cpu && \
+  bsub -env "all" < hpc/multistage_comparison/run_multistage_comparison.lsf.sh)
 ```
 
 ### Full final experiment (HPC)
 
 ```bash
-MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 \
+(export MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 \
   STRATEGIES=adam_30000,adam_ssbroyden_2stage,adam_ssbroyden_3stage,adam_ssbroyden_4stage,adam_ssbroyden_5stage \
-  SEED_LABELS=s01,s02,s03,s04,s05 \
-  bsub < hpc/multistage_comparison/run_multistage_comparison.lsf.sh
+  SEED_LABELS=s01,s02,s03,s04,s05 && \
+  bsub -env "all" < hpc/multistage_comparison/run_multistage_comparison.lsf.sh)
 ```
 
 ### Dry-run check (HPC)
 
 ```bash
-MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 DEVICE=cpu DRY_RUN=true \
-  bsub < hpc/multistage_comparison/run_multistage_comparison.lsf.sh
+bsub -env "MODE=screening,REFERENCE_ID=smoke_SM4_lhs_b256_ds01,DEVICE=cpu,DRY_RUN=true" \
+  < hpc/multistage_comparison/run_multistage_comparison.lsf.sh
 ```
 
 ## Outputs

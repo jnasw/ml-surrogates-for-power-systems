@@ -117,7 +117,7 @@ Hypothesis: dynamic weighting improves Adam significantly, but LBFGS refinement 
 
 ## How to Run
 
-Run from the repository root. HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`; the static `#BSUB` directives remain the submitted resources. Use inline environment variables only. Do not use `bsub -env` or `export` blocks in runbook commands.
+Run from the repository root. HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`; the static `#BSUB` directives remain the submitted resources. Use `bsub -env` to pass environment variables — inline `VAR=val bsub` does not propagate to the batch environment on this cluster. When a variable value contains commas (e.g. `STRATEGIES=static_tuned,ma`), use the subshell form `(export VAR=val ... && bsub -env "all" < script)` instead.
 
 PINN wrappers expose `MODEL_FLAG`, `DTYPE`, `ID_EVAL_ID`, `OOD_EVAL_ID`, and `NO_OOD_EVAL`. OOD evaluation is enabled by default using the launcher default unless `NO_OOD_EVAL=true` / `--no-ood-eval` is used. ID evaluation is optional and must be requested explicitly.
 
@@ -136,15 +136,15 @@ Make sure `python3` resolves to the intended project environment before submitti
 Dry-run first:
 
 ```bash
-REFERENCE_IDS=main_SM4_qbc_b512_ds01 DRY_RUN=true \
-  bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+bsub -env "REFERENCE_IDS=main_SM4_qbc_b512_ds01,DRY_RUN=true" \
+  < hpc/reference_datasets/generate_reference_datasets.lsf.sh
 ```
 
 Then submit the real job:
 
 ```bash
-REFERENCE_IDS=main_SM4_qbc_b512_ds01 DRY_RUN=false FORCE_REBUILD=false \
-  bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+bsub -env "REFERENCE_IDS=main_SM4_qbc_b512_ds01,DRY_RUN=false,FORCE_REBUILD=false" \
+  < hpc/reference_datasets/generate_reference_datasets.lsf.sh
 ```
 
 Expected reference outputs:
@@ -171,8 +171,8 @@ python3 -m src.experiments.pipeline.run_weighting_comparison \
 ### 4. Dry-Run The Final Matrix
 
 ```bash
-MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 DRY_RUN=true \
-  bsub < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
+bsub -env "MODE=final,REFERENCE_ID=main_SM4_qbc_b512_ds01,DRY_RUN=true" \
+  < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
 ```
 
 The default final matrix uses 9 core strategies and 5 seeds:
@@ -184,8 +184,8 @@ The default final matrix uses 9 core strategies and 5 seeds:
 ### 5. Submit The Final Comparison
 
 ```bash
-MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 DEVICE=cuda DRY_RUN=false \
-  bsub < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
+bsub -env "MODE=final,REFERENCE_ID=main_SM4_qbc_b512_ds01,DEVICE=cuda" \
+  < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
 ```
 
 Final mode uses:
@@ -209,12 +209,12 @@ python3 -m src.experiments.pipeline.run_weighting_comparison \
 
 ### 6. Optional Screening Run On The Cluster
 
-For a smaller pre-final check:
+For a smaller pre-final check (values contain commas — use subshell form):
 
 ```bash
-MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 \
-  STRATEGIES=static_tuned,ma,ntk SEED_LABELS=s01 DEVICE=cuda DRY_RUN=false \
-  bsub < hpc/weighting_comparison/run_weighting_comparison.lsf.sh
+(export MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 \
+  STRATEGIES=static_tuned,ma,ntk SEED_LABELS=s01 DEVICE=cuda && \
+  bsub -env "all" < hpc/weighting_comparison/run_weighting_comparison.lsf.sh)
 ```
 
 Screening mode uses 100 epochs and the W&B project `thesis-weighting-experiment-TEST`.

@@ -10,36 +10,29 @@
 
 set -euo pipefail
 
-# Example submissions:
+# Example submissions (use bsub -env to pass variables; inline VAR=val does not
+# propagate to the batch environment on this cluster):
 #
 #   Smoke dry-run (pipeline check, no execution):
-#     MODE=smoke DRY_RUN=true \
-#       bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+#     bsub -env "MODE=smoke,DRY_RUN=true" \
+#       < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 #
 #   Smoke run (lhs_static b256 ds01 bs01, 1 epoch):
-#     MODE=smoke MODEL_FLAG=SM4 \
-#       bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+#     bsub -env "MODE=smoke,MODEL_FLAG=SM4" \
+#       < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 #
-#   Final run, lhs_static subset:
-#     CAMPAIGN_TAG=dataset_final_sm4 MODE=final MODEL_FLAG=SM4 METHODS=lhs_static BUDGETS=b256,b512 \
-#       DATASET_SEEDS=ds01 BASELINE_SEEDS=bs01,bs02 \
-#       bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+#   Final run, lhs_static subset (values with commas require export + bsub -env all):
+#     (export CAMPAIGN_TAG=dataset_final_sm4 MODE=final MODEL_FLAG=SM4 METHODS=lhs_static \
+#       BUDGETS=b256,b512 DATASET_SEEDS=ds01 BASELINE_SEEDS=bs01,bs02 && \
+#       bsub -env "all" < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh)
 #
-#   Final run, adaptive methods (qbc/marker may need GPU and longer walltime;
-#   submit with bsub resource flags or edit #BSUB -q before submitting):
-#     MODE=final MODEL_FLAG=SM4 METHODS=qbc_deep_ensemble,qbc_marker_hybrid \
-#       BUDGETS=b512 DATASET_SEEDS=ds01 BASELINE_SEEDS=bs01 \
-#       bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+#   Final run, one method per job (no commas in values — short form works):
+#     bsub -env "CAMPAIGN_TAG=dataset_pinn_sm4,MODE=final,MODEL_FLAG=SM4,DOWNSTREAM_MODEL=pinn_data_only,METHODS=lhs_static" \
+#       -J data_lhs_pinn < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 #
-#   Final run with storage cleanup (deletes generated data/ after each cell):
-#     MODE=final MODEL_FLAG=SM4 METHODS=lhs_static BUDGETS=b256 \
-#       DATASET_SEEDS=ds01 BASELINE_SEEDS=bs01 CLEANUP_DATA=true \
-#       bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
-#
-#   Final run with PINN-formulation data-only downstream model:
-#     MODE=final MODEL_FLAG=SM4 DOWNSTREAM_MODEL=pinn_data_only \
-#       METHODS=lhs_static BUDGETS=b256 DATASET_SEEDS=ds01 BASELINE_SEEDS=bs01 ADAM_LR=0.003 \
-#       bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+#   Final run with storage cleanup:
+#     bsub -env "MODE=final,MODEL_FLAG=SM4,METHODS=lhs_static,BUDGETS=b256,CLEANUP_DATA=true" \
+#       < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -d "${SCRIPT_DIR}/../../src" ]]; then

@@ -118,7 +118,7 @@ The `pinn_data_only` path exposes `DEVICE`, `DTYPE`, `BATCH_SIZE`, and `ADAM_LR`
 
 Run commands from the repository root.
 
-HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`; the static `#BSUB` directives remain the submitted resources. Use inline environment variables only. Do not use `bsub -env` or `export` blocks in runbook commands.
+HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`; the static `#BSUB` directives remain the submitted resources. Use `bsub -env` to pass environment variables — inline `VAR=val bsub` does not propagate to the batch environment on this cluster. When a variable value contains commas (e.g. `DATASET_SEEDS=ds01,ds02`), use the subshell form `(export VAR=val ... && bsub -env "all" < script)` instead.
 
 The dataset-generation wrapper exposes `ID_EVAL_ID`, `OOD_EVAL_ID`, `NO_ID_EVAL`, `NO_OOD_EVAL`, and `CLEANUP_DATA`. External ID/OOD evaluation is the primary metric for this experiment, but smoke/compressed datasets may require `NO_ID_EVAL=true NO_OOD_EVAL=true` if their time grid is incompatible with fixed evaluation datasets.
 
@@ -182,22 +182,22 @@ python3 -m src.experiments.pipeline.run_dataset_generation_comparison \
 ### Full run (HPC)
 
 ```bash
-MODE=final MODEL_FLAG=SM4 \
-  bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+bsub -env "MODE=final,MODEL_FLAG=SM4" \
+  < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 ```
 
 ### Full run with PINN-shaped data-only downstream model (HPC)
 
 ```bash
-MODE=final MODEL_FLAG=SM4 DOWNSTREAM_MODEL=pinn_data_only DEVICE=cuda DTYPE=float64 ADAM_LR=0.003 \
-  bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+bsub -env "MODE=final,MODEL_FLAG=SM4,DOWNSTREAM_MODEL=pinn_data_only" \
+  < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 ```
 
 ### Full run with cleanup (HPC)
 
 ```bash
-MODE=final MODEL_FLAG=SM4 CLEANUP_DATA=true \
-  bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+bsub -env "MODE=final,MODEL_FLAG=SM4,CLEANUP_DATA=true" \
+  < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 ```
 
 ### Split Final Matrix Into Cluster Jobs
@@ -210,39 +210,42 @@ outputs/experiments/dataset_generation_comparison/<campaign-tag>/<shard-label>/
 
 If `SHARD_LABEL` is omitted, the launcher infers one from the selected subset, e.g. `lhs_static`, `lhs_static_b256`, or `qbc_deep_ensemble_b2048_ds01`.
 
-One job per method:
+One job per method (values contain commas — use subshell form):
 
 ```bash
-CAMPAIGN_TAG=dataset_final_sm4 MODE=final MODEL_FLAG=SM4 \
+(export CAMPAIGN_TAG=dataset_final_sm4 MODE=final MODEL_FLAG=SM4 \
   METHODS=lhs_static \
   DATASET_SEEDS=ds01,ds02,ds03,ds04,ds05 \
   BASELINE_SEEDS=bs01,bs02,bs03 \
-  CLEANUP_DATA=true \
-  bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+  CLEANUP_DATA=true && \
+  bsub -env "all" -J data_lhs \
+    < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh)
 ```
 
 One job per method and budget:
 
 ```bash
-CAMPAIGN_TAG=dataset_final_sm4 MODE=final MODEL_FLAG=SM4 \
+(export CAMPAIGN_TAG=dataset_final_sm4 MODE=final MODEL_FLAG=SM4 \
   METHODS=qbc_deep_ensemble \
   BUDGETS=b512 \
   DATASET_SEEDS=ds01,ds02,ds03,ds04,ds05 \
   BASELINE_SEEDS=bs01,bs02,bs03 \
-  CLEANUP_DATA=true \
-  bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+  CLEANUP_DATA=true && \
+  bsub -env "all" -J data_qbc_b512 \
+    < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh)
 ```
 
 One job per expensive adaptive dataset seed:
 
 ```bash
-CAMPAIGN_TAG=dataset_final_sm4 MODE=final MODEL_FLAG=SM4 \
+(export CAMPAIGN_TAG=dataset_final_sm4 MODE=final MODEL_FLAG=SM4 \
   METHODS=qbc_marker_hybrid \
   BUDGETS=b2048 \
   DATASET_SEEDS=ds01 \
   BASELINE_SEEDS=bs01,bs02,bs03 \
-  CLEANUP_DATA=true \
-  bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+  CLEANUP_DATA=true && \
+  bsub -env "all" -J data_hybrid_b2048_ds01 \
+    < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh)
 ```
 
 Keep all model seeds for a generated dataset in the same shard when possible, because the launcher generates and preprocesses one dataset per `method × budget × dataset_seed` and then trains all `BASELINE_SEEDS` against it. Splitting by `BASELINE_SEEDS` causes repeated dataset generation.
@@ -250,15 +253,15 @@ Keep all model seeds for a generated dataset in the same shard when possible, be
 ### Dry-run check (HPC)
 
 ```bash
-MODE=smoke DRY_RUN=true \
-  bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+bsub -env "MODE=smoke,DRY_RUN=true" \
+  < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 ```
 
 ### Smoke check without external eval (HPC)
 
 ```bash
-MODE=smoke NO_ID_EVAL=true NO_OOD_EVAL=true DRY_RUN=true \
-  bsub < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+bsub -env "MODE=smoke,NO_ID_EVAL=true,NO_OOD_EVAL=true,DRY_RUN=true" \
+  < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 ```
 
 ## Outputs

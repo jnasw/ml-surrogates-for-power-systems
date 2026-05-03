@@ -11,17 +11,27 @@
 
 set -euo pipefail
 
-# Example submissions:
+# Example submissions (use bsub -env to pass variables; inline VAR=val does not
+# propagate to the batch environment on this cluster):
+#
 #   Screening dry-run on smoke reference dataset:
-#     MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 STRATEGIES=uniform_lhs,rad DENSITIES=d10,d25 DEVICE=cpu DRY_RUN=true bsub < hpc/collocation_comparison/run_collocation_comparison.lsf.sh
-#   Screening run with the default main reference dataset:
-#     MODE=screening bsub < hpc/collocation_comparison/run_collocation_comparison.lsf.sh
+#     (export MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 STRATEGIES=uniform_lhs,rad \
+#       DENSITIES=d10,d25 DEVICE=cpu DRY_RUN=true && \
+#       bsub -env "all" < hpc/collocation_comparison/run_collocation_comparison.lsf.sh)
+#
 #   Cadence calibration dry-run:
-#     MODE=cadence REFERENCE_ID=smoke_SM4_lhs_b256_ds01 DEVICE=cpu DRY_RUN=true bsub < hpc/collocation_comparison/run_collocation_comparison.lsf.sh
-#   Final run with explicit seeds:
-#     MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 SEED_LABELS=s01,s02,s03,s04,s05 bsub < hpc/collocation_comparison/run_collocation_comparison.lsf.sh
+#     bsub -env "MODE=cadence,REFERENCE_ID=smoke_SM4_lhs_b256_ds01,DEVICE=cpu,DRY_RUN=true" \
+#       < hpc/collocation_comparison/run_collocation_comparison.lsf.sh
+#
+#   Final run with all strategies and seeds:
+#     (export MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 \
+#       SEED_LABELS=s01,s02,s03,s04,s05 && \
+#       bsub -env "all" < hpc/collocation_comparison/run_collocation_comparison.lsf.sh)
+#
 #   Custom strategy/density subset:
-#     MODE=screening STRATEGIES=uniform_lhs,rad DENSITIES=d10,d25 REFERENCE_ID=smoke_SM4_lhs_b256_ds01 bsub < hpc/collocation_comparison/run_collocation_comparison.lsf.sh
+#     (export MODE=screening STRATEGIES=uniform_lhs,rad DENSITIES=d10,d25 \
+#       REFERENCE_ID=smoke_SM4_lhs_b256_ds01 && \
+#       bsub -env "all" < hpc/collocation_comparison/run_collocation_comparison.lsf.sh)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -d "${SCRIPT_DIR}/../../src" ]]; then

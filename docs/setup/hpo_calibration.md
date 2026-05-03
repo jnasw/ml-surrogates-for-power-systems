@@ -182,34 +182,34 @@ python3 -m src.experiments.pipeline.run_hpo_calibration \
 
 ## HPC Commands
 
-Run from the repository root. Use inline environment variables only. Do not use `bsub -env` or `export` blocks in runbook commands.
+Run from the repository root. Use `bsub -env` to pass environment variables — inline `VAR=val bsub` does not propagate to the batch environment on this cluster. When a variable value contains commas (e.g. `OPTIMIZERS=LBFGS,SSBFGS`), use the subshell form `(export VAR=val ... && bsub -env "all" < script)` instead.
 
 PINN architecture dry-run:
 
 ```bash
-STUDY=pinn_architecture DRY_RUN=true \
-  bsub < hpc/hpo/run_hpo_calibration.lsf.sh
+bsub -env "STUDY=pinn_architecture,DRY_RUN=true" \
+  < hpc/hpo/run_hpo_calibration.lsf.sh
 ```
 
 Adam LR:
 
 ```bash
-STUDY=adam_lr PINN_HIDDEN_DIM=64 PINN_HIDDEN_LAYERS=4 \
-  bsub < hpc/hpo/run_hpo_calibration.lsf.sh
+bsub -env "STUDY=adam_lr,PINN_HIDDEN_DIM=64,PINN_HIDDEN_LAYERS=3" \
+  < hpc/hpo/run_hpo_calibration.lsf.sh
 ```
 
-Second-order LR subset:
+Second-order LR subset (values contain commas — use subshell form):
 
 ```bash
-STUDY=second_order_lr OPTIMIZERS=LBFGS,SSBFGS,SSBroyden,SOAP LRS=0.05,0.1,0.3,1.0 \
-  bsub < hpc/hpo/run_hpo_calibration.lsf.sh
+(export STUDY=second_order_lr OPTIMIZERS=LBFGS,SSBFGS,SSBroyden,SOAP LRS=0.05,0.1,0.3,1.0 && \
+  bsub -env "all" < hpc/hpo/run_hpo_calibration.lsf.sh)
 ```
 
 Baseline architecture:
 
 ```bash
-STUDY=baseline_architecture DEVICE=cuda \
-  bsub < hpc/hpo/run_hpo_calibration.lsf.sh
+bsub -env "STUDY=baseline_architecture,DEVICE=cuda" \
+  < hpc/hpo/run_hpo_calibration.lsf.sh
 ```
 
 HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`, activate `.venv` or `venv` if present, and write cluster logs under:

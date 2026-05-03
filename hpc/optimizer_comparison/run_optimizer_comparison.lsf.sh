@@ -11,17 +11,24 @@
 
 set -euo pipefail
 
-# Example submissions:
-#   Screening smoke run with default reference dataset:
-#     MODE=screening bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
-#   Custom strategies:
-#     MODE=screening STRATEGIES=adam,lbfgs,adam_lbfgs SEED_LABELS=s01 bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
-#   Dry-run:
-#     MODE=screening DRY_RUN=true STRATEGIES=adam SEED_LABELS=s01 bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
+# Example submissions (use bsub -env to pass variables; inline VAR=val does not
+# propagate to the batch environment on this cluster):
+#
+#   Screening dry-run:
+#     bsub -env "MODE=screening,DRY_RUN=true,STRATEGIES=adam,SEED_LABELS=s01" \
+#       < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
+#
+#   Custom strategies (commas in values — use export + bsub -env all):
+#     (export MODE=screening STRATEGIES=adam,lbfgs,adam_lbfgs SEED_LABELS=s01 && \
+#       bsub -env "all" < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh)
+#
 #   Final run:
-#     MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
-#   Final run with explicit thesis epoch budget:
-#     MODE=final TOTAL_EPOCHS=5000 ADAM_WARMUP_EPOCHS=500 REFERENCE_ID=main_SM4_qbc_b512_ds01 bsub < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
+#     bsub -env "MODE=final,REFERENCE_ID=main_SM4_qbc_b512_ds01" \
+#       < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
+#
+#   Final run with explicit epoch budget:
+#     bsub -env "MODE=final,TOTAL_EPOCHS=5000,ADAM_WARMUP_EPOCHS=500,REFERENCE_ID=main_SM4_qbc_b512_ds01" \
+#       < hpc/optimizer_comparison/run_optimizer_comparison.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
