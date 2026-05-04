@@ -213,7 +213,7 @@ def _adam_phase_dict(*, name: str, epochs: int, batch_size: int, lr: float = DEF
         "shuffle:true,"
         "full_batch:false,"
         "allow_sampling:false,"
-        "optimizer_kwargs:{},"
+        "optimizer_kwargs:{eps:1.0e-6},"
         "scheduler:null,"
         "line_search:null,"
         "convergence:null"

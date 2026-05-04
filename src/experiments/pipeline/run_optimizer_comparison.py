@@ -362,7 +362,9 @@ def _optimizer_stage(
             "eps:1.0e-8"
             "}"
         )
-    if optimizer in FULL_BATCH_OPTIMIZERS:
+    if optimizer == "Adam":
+        optimizer_kwargs = "{eps:1.0e-6}"
+    elif optimizer in FULL_BATCH_OPTIMIZERS:
         batch_size_value = "null"
         shuffle = "false"
         full_batch = "true"

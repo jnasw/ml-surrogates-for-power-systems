@@ -415,7 +415,7 @@ def _adam_phase_override(*, epochs: int, lr: float, batch_size: int) -> str:
         "{name:adam,optimizer:Adam,"
         f"lr:{float(lr)},epochs:{int(epochs)},batch_size:{int(batch_size)},"
         "shuffle:true,full_batch:false,allow_sampling:true,"
-        "optimizer_kwargs:{},scheduler:null,line_search:null,convergence:null}"
+        "optimizer_kwargs:{eps:1.0e-6},scheduler:null,line_search:null,convergence:null}"
         "]"
     )
 

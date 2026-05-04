@@ -290,7 +290,7 @@ def _adam_stage_override(
         "shuffle:true,"
         "full_batch:false,"
         f"allow_sampling:{'true' if allow_sampling else 'false'},"
-        "optimizer_kwargs:{},"
+        "optimizer_kwargs:{eps:1.0e-6},"
         f"scheduler:{scheduler_str},"
         "line_search:null,"
         "convergence:null"

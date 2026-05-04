@@ -148,7 +148,9 @@ def _optimizer_stage(
     batch_size_value = str(int(batch_size))
     shuffle = "true"
     full_batch = "false"
-    if optimizer in FULL_BATCH_OPTIMIZERS:
+    if optimizer == "Adam":
+        optimizer_kwargs = "{eps:1.0e-6}"
+    elif optimizer in FULL_BATCH_OPTIMIZERS:
         batch_size_value = "null"
         shuffle = "false"
         full_batch = "true"
