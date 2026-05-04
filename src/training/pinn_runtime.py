@@ -864,25 +864,29 @@ def train_pinn_step(
         optimizer.step(closure)
         raise_on_nonfinite_params(stage="optimizer step")
         optimizer.zero_grad(set_to_none=True)
-        measured_losses, measured_telemetry = measure_pinn_state(
-            model=model,
-            criterion=criterion,
-            ode_model=ode_model,
-            formulation=formulation,
-            weights=weights,
-            x_data=x_data,
-            y_data=y_data,
-            x_data_dt_weights=x_data_dt_weights,
-            x_col=x_col,
-            x_col_weights=x_col_weights,
-            x_init=x_init,
-            y_init=y_init,
-            x_init_weights=x_init_weights,
-            capture_gradient_telemetry=capture_gradient_telemetry,
-        )
-        raise_on_nonfinite_losses(measured_losses, stage="post-step evaluation")
-        breakdown_box["losses"] = measured_losses
-        telemetry_box["telemetry"] = measured_telemetry
+        # The closure writes the losses from its final (accepted) evaluation into
+        # breakdown_box["losses"], so no redundant forward pass is needed.
+        # Only re-evaluate when gradient telemetry requires a live graph.
+        if capture_gradient_telemetry:
+            measured_losses, measured_telemetry = measure_pinn_state(
+                model=model,
+                criterion=criterion,
+                ode_model=ode_model,
+                formulation=formulation,
+                weights=weights,
+                x_data=x_data,
+                y_data=y_data,
+                x_data_dt_weights=x_data_dt_weights,
+                x_col=x_col,
+                x_col_weights=x_col_weights,
+                x_init=x_init,
+                y_init=y_init,
+                x_init_weights=x_init_weights,
+                capture_gradient_telemetry=True,
+            )
+            breakdown_box["losses"] = measured_losses
+            telemetry_box["telemetry"] = measured_telemetry
+        raise_on_nonfinite_losses(breakdown_box["losses"], stage="post-step evaluation")
     else:
         closure()
         if capture_gradient_telemetry:
