@@ -228,12 +228,17 @@ def main(config) -> None:
             allow_missing_collocation=str(getattr(config.pinn.collocation, "mode", "preprocessed")).strip().lower() == "generated",
         )
         timings["dataset_load_seconds"] = monotonic() - dataset_load_started
+        active_col_points = int(cfg_get(config, "pinn.collocation.active_points", dataset.train_col_x.shape[0]))
+        val_col_rows = 0 if dataset.val_col_x is None else dataset.val_col_x.shape[0]
+        val_col_active = min(val_col_rows, active_col_points) if val_col_rows > 0 else 0
         print(
             "[pinn] Dataset loaded | "
             f"train_rows={dataset.train_x.shape[0]} "
-            f"col_rows={dataset.train_col_x.shape[0]} "
+            f"col_rows={dataset.train_col_x.shape[0]} (active={active_col_points}) "
             f"init_rows={dataset.train_init_x.shape[0]} "
             f"val_rows={0 if dataset.val_x is None else dataset.val_x.shape[0]} "
+            f"val_col_rows={val_col_rows} (active={val_col_active}) "
+            f"val_init_rows={0 if dataset.val_init_x is None else dataset.val_init_x.shape[0]} "
             f"test_rows={0 if dataset.test_x is None else dataset.test_x.shape[0]}"
         )
         if bool(cfg_get(config, "debug.print_io_example", False)):
