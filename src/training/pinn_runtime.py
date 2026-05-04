@@ -14,7 +14,7 @@ from src.pinn.data import PinnDatasetBundle
 from src.pinn.evaluator import evaluate_pinn_loss_breakdown, evaluate_pinn_weighting_terms
 from src.pinn.losses import LOSS_COMPONENTS, LossWeights, PinnLossBreakdown
 from src.pinn.optim import OptimizerSpec
-from src.pinn.residuals import compute_residual_terms, compute_supervised_dt_terms
+from src.pinn.residuals import compute_residual_terms, compute_supervised_dt_terms, prepare_input_for_autograd
 from src.pinn.runtime import OptimizerPhase, ResolvedLossWeightScheduleStage, SchedulerConfig
 from src.pinn.weighting import WeightUpdateStats, WeightingConfig
 from src.training.runtime import cfg_get
@@ -159,6 +159,36 @@ def evaluate_dt_loss(
     return float(criterion(terms.residual, torch.zeros_like(terms.residual)).item())
 
 
+def evaluate_data_and_dt_loss(
+    model: nn.Module,
+    x: torch.Tensor | None,
+    y: torch.Tensor | None,
+    ode_model: Any,
+    criterion: nn.Module,
+    formulation: str,
+) -> tuple[float | None, float | None]:
+    """Compute data loss and dt loss with a single shared forward pass on the same inputs."""
+    if x is None or y is None:
+        return None, None
+    x_eval = to_model_tensor(x, model)
+    y_eval = to_model_tensor(y, model)
+    model.eval()
+    x_req = prepare_input_for_autograd(x_eval)
+    pred = model(x_req)
+    data_loss = float(criterion(pred, y_eval).item())
+    terms = compute_supervised_dt_terms(
+        model=model,
+        x=x_req,
+        y_true=y_eval,
+        ode_model=ode_model,
+        formulation=formulation,
+        create_graph=False,
+        prediction=pred,
+    )
+    dt_loss = float(criterion(terms.residual, torch.zeros_like(terms.residual)).item())
+    return data_loss, dt_loss
+
+
 def compute_weighted_total_loss(
     component_losses: dict[str, float | None] | None,
     weights: LossWeights,
@@ -215,10 +245,7 @@ def evaluate_epoch_validation_and_test(
     if should_run_evaluation(global_epoch, config):
         val_component_losses = {}
         if dataset.val_x is not None and dataset.val_y is not None:
-            val_component_losses["data"] = evaluate_data_loss(
-                model=model, x=dataset.val_x, y=dataset.val_y, criterion=criterion
-            )
-            val_component_losses["dt"] = evaluate_dt_loss(
+            val_component_losses["data"], val_component_losses["dt"] = evaluate_data_and_dt_loss(
                 model=model,
                 x=dataset.val_x,
                 y=dataset.val_y,
