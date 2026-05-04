@@ -178,6 +178,24 @@ def compute_weighted_total_loss(
     return float(total)
 
 
+def _subsample_val_col(val_col_x: torch.Tensor, *, config: Any) -> torch.Tensor:
+    """Subsample val_col_x to match the training active_points budget.
+
+    Uses the same deterministic randperm technique as the collocation factory so
+    that the validation physics loss is computed on the same number of points as
+    training, making the two losses directly comparable.
+    """
+    active_points = int(cfg_get(config, "pinn.collocation.active_points", val_col_x.shape[0]))
+    n_rows = int(val_col_x.shape[0])
+    if n_rows <= active_points:
+        return val_col_x
+    seed = int(cfg_get(config, "pinn.collocation.seed", cfg_get(config, "model.seed", 0)))
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(seed)
+    indices = torch.randperm(n_rows, generator=generator, device="cpu")[:active_points].to(val_col_x.device)
+    return val_col_x.index_select(0, indices)
+
+
 def evaluate_epoch_validation_and_test(
     *,
     model: nn.Module,
@@ -208,9 +226,11 @@ def evaluate_epoch_validation_and_test(
                 criterion=criterion,
                 formulation=formulation,
             )
+            val_col_x = dataset.val_col_x if dataset.val_col_x is not None else dataset.val_x
+            val_col_x = _subsample_val_col(val_col_x, config=config)
             val_component_losses["physics"] = evaluate_physics_loss(
                 model=model,
-                x_rows=dataset.val_col_x if dataset.val_col_x is not None else dataset.val_x,
+                x_rows=val_col_x,
                 ode_model=ode_model,
                 criterion=criterion,
                 formulation=formulation,
