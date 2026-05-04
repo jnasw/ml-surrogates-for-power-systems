@@ -362,6 +362,7 @@ def _build_pinn_command(
         f"pinn.default_batch_size={int(batch_size)}",
         "pinn.collocation.sampling.enabled=false",
         "pinn.supervised_sampling.enabled=false",
+        "pinn.evaluation.frequency=25",
         f"pinn.gradient_telemetry.enabled={'true' if gradient_telemetry else 'false'}",
         "pinn.checkpointing.enabled=true",
         "pinn.checkpointing.save_best=true",

@@ -369,6 +369,7 @@ def _collocation_cfg_for_run(
 def _variant_overrides(*, variant: str, collocation_cfg: dict[str, Any]) -> list[str]:
     common = [
         "pinn.collocation.sampling.enabled=false",
+        "pinn.evaluation.frequency=25",
         f"pinn.collocation.active_points={int(collocation_cfg['active_points'])}",
         f"pinn.collocation.candidate_points={int(collocation_cfg['candidate_points'])}",
         f"pinn.collocation.append_points={int(collocation_cfg['append_points'])}",

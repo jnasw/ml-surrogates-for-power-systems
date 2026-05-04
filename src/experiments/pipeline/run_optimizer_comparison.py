@@ -574,6 +574,7 @@ def _build_pinn_command(
         f"pinn.default_batch_size={int(batch_size)}",
         "pinn.supervised_sampling.enabled=false",
         "pinn.collocation.sampling.enabled=false",
+        "pinn.evaluation.frequency=25",
         f"pinn.gradient_telemetry.enabled={'true' if gradient_telemetry else 'false'}",
         f"pinn.checkpointing.enabled={'true' if save_best_checkpoint or save_last_checkpoint or save_init_checkpoint else 'false'}",
         f"pinn.checkpointing.save_best={'true' if save_best_checkpoint else 'false'}",
