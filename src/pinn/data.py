@@ -111,6 +111,8 @@ class PinnDatasetBundle:
     val_x: torch.Tensor | None = None
     val_y: torch.Tensor | None = None
     val_col_x: torch.Tensor | None = None
+    val_init_x: torch.Tensor | None = None
+    val_init_y: torch.Tensor | None = None
     test_x: torch.Tensor | None = None
     test_y: torch.Tensor | None = None
 
@@ -133,6 +135,12 @@ class PinnDatasetBundle:
     @property
     def init_dataset(self) -> TensorRowDataset:
         return TensorRowDataset(self.train_init_x, self.train_init_y)
+
+    @property
+    def val_init_dataset(self) -> TensorRowDataset | None:
+        if self.val_init_x is None or self.val_init_y is None:
+            return None
+        return TensorRowDataset(self.val_init_x, self.val_init_y)
 
     @property
     def val_dataset(self) -> TensorRowDataset | None:
@@ -196,6 +204,23 @@ def load_pinn_dataset_from_preprocessed_root(
     test_x = _load_h5_tensor_rows(_iter_split_files(test_dir, H5_DATA_SUFFIX), H5_X_KEYS[TEST_SPLIT], torch_dtype)
     test_y = _load_h5_tensor_rows(_iter_split_files(test_dir, H5_DATA_SUFFIX), H5_Y_KEYS[TEST_SPLIT], torch_dtype)
 
+    # Load val IC from preprocessed split if available; otherwise carve a fixed
+    # 20 % holdout from the training IC pool using a deterministic permutation.
+    val_init_x = _load_optional_h5_tensor_rows(_iter_split_files(val_dir, H5_INIT_SUFFIX), H5_X_KEYS[VAL_SPLIT], torch_dtype)
+    val_init_y = _load_optional_h5_tensor_rows(_iter_split_files(val_dir, H5_INIT_SUFFIX), H5_Y_KEYS[VAL_SPLIT], torch_dtype)
+    if val_init_x is None or val_init_y is None:
+        n_init = train_init_x.shape[0]
+        n_val_init = max(1, int(round(n_init * 0.2)))
+        rng = torch.Generator()
+        rng.manual_seed(0)
+        perm = torch.randperm(n_init, generator=rng)
+        val_idx = perm[:n_val_init]
+        train_idx = perm[n_val_init:]
+        val_init_x = train_init_x[val_idx]
+        val_init_y = train_init_y[val_idx]
+        train_init_x = train_init_x[train_idx]
+        train_init_y = train_init_y[train_idx]
+
     return PinnDatasetBundle(
         train_x=train_x,
         train_y=train_y,
@@ -208,6 +233,8 @@ def load_pinn_dataset_from_preprocessed_root(
         val_x=val_x,
         val_y=val_y,
         val_col_x=val_col_x,
+        val_init_x=val_init_x,
+        val_init_y=val_init_y,
         test_x=test_x,
         test_y=test_y,
     )

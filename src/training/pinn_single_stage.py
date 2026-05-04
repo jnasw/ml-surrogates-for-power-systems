@@ -417,6 +417,8 @@ def train_single_stage_pinn_loop(
                 active_weights=active_weights,
                 config=config,
                 global_epoch=global_epoch,
+                eval_init_x=dataset.val_init_x,
+                eval_init_y=dataset.val_init_y,
             )
             scheduler_metric_value, scheduler_metric_name = trainer_impl._scheduler_metric_value(
                 scheduler_config=phase.scheduler,
