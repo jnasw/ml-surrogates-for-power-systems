@@ -366,7 +366,7 @@ def _build_pinn_command(
         "pinn.weighting.scheme=static",
         "pinn.supervised_sampling.enabled=false",
         "pinn.collocation.sampling.enabled=false",
-        "pinn.evaluation.frequency=25",
+        "pinn.evaluation.frequency=20",
         f"pinn.gradient_telemetry.enabled={'true' if gradient_telemetry else 'false'}",
         "pinn.checkpointing.enabled=true",
         "pinn.checkpointing.save_best=true",

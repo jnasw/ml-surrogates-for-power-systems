@@ -80,6 +80,8 @@ def scheduled_loss_weights(
 
 
 def should_run_evaluation(global_epoch: int, config: Any) -> bool:
+    if int(global_epoch) in (0, 1):
+        return True
     frequency = int(cfg_get(config, "pinn.evaluation.frequency", 1))
     if frequency < 1:
         frequency = 1

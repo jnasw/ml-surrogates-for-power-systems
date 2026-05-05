@@ -325,6 +325,8 @@ class PinnLogger:
         return path
 
     def _should_log_epoch(self, row: EpochMetrics) -> bool:
+        if int(row.global_epoch) in (0, 1):
+            return True
         log_every_epoch = int(getattr(getattr(self, "_config_logging", None), "log_every_epoch", 1))
         if log_every_epoch < 1:
             log_every_epoch = 1

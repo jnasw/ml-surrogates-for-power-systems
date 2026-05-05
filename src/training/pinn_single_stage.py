@@ -122,6 +122,89 @@ def train_single_stage_pinn_loop(
     total_epochs = int(sum(phase.epochs for phase in optimizer_phases))
     checkpoint_milestones = trainer_impl._resolve_checkpoint_milestones(config, total_epochs)
     train_dt_weights = dataset.train_dt_weights
+    initial_weights = (
+        trainer_impl._scheduled_loss_weights(
+            base_weights=base_weights,
+            schedule=loss_weight_schedule,
+            next_global_epoch=1,
+        )
+        if weighting_config.scheme == "static"
+        else weighting_policy.current_weights(weighting_state)
+    )
+    model.eval()
+    initial_losses, _ = trainer_impl._measure_pinn_state(
+        model=model,
+        criterion=criterion,
+        ode_model=ode_model,
+        formulation=formulation,
+        weights=initial_weights,
+        x_data=dataset.train_x,
+        y_data=dataset.train_y,
+        x_data_dt_weights=trainer_impl._active_dt_weights_or_none(vrba_config=vrba_config, x_data_dt_weights=train_dt_weights),
+        x_col=dataset.train_col_x,
+        x_col_weights=trainer_impl._active_collocation_weights_or_none(vrba_config=vrba_config, x_col_weights=dataset.train_col_weights),
+        x_init=dataset.train_init_x,
+        y_init=dataset.train_init_y,
+        x_init_weights=trainer_impl._active_init_weights_or_none(vrba_config=vrba_config, x_init_weights=dataset.train_init_weights),
+        capture_gradient_telemetry=False,
+    )
+    val_total_loss, val_component_losses, test_metrics = trainer_impl._evaluate_epoch_validation_and_test(
+        model=model,
+        dataset=dataset,
+        criterion=criterion,
+        ode_model=ode_model,
+        formulation=formulation,
+        active_weights=initial_weights,
+        config=config,
+        global_epoch=0,
+        eval_init_x=dataset.val_init_x,
+        eval_init_y=dataset.val_init_y,
+    )
+    initial_train_component_losses = {
+        name: float(value.detach().item())
+        for name, value in initial_losses.components.items()
+    }
+    initial_row = trainer_impl._build_epoch_metrics_row(
+        epoch=0,
+        global_epoch=0,
+        phase_name="init",
+        optimizer_name="none",
+        train_total_loss=float(initial_losses.total.detach().item()),
+        train_component_losses=initial_train_component_losses,
+        train_total_grad_norm=None,
+        train_component_grad_norms=None,
+        train_weighted_component_grad_norms=None,
+        val_total_loss=val_total_loss,
+        val_component_losses=val_component_losses,
+        test_metrics=test_metrics,
+        weighting_scheme=weighting_config.scheme,
+        weighting_updated=False,
+        train_loss_weights=initial_weights.as_dict(),
+        weighting_raw_candidate_weights=dict(weighting_state.raw_candidate_weights),
+        weighting_probe_grad_l2_norms=None,
+        weighting_probe_grad_mean_abs=None,
+        weighting_probe_grad_max_abs=None,
+        weighting_probe_grad_std=None,
+        weighting_probe_ntk_mean_trace=None,
+        weighting_probe_ntk_batch_sizes=None,
+        weighting_anchor=weighting_config.anchor,
+        vrba_summary=trainer_impl._collocation_vrba_summary(collocation_manager),
+        vrba_details=trainer_impl._collocation_vrba_details(collocation_manager),
+        epoch_wall_seconds=None,
+        cumulative_wall_seconds=None,
+        num_batches=0 if cost_tracking_enabled else None,
+        num_train_steps=0 if cost_tracking_enabled else None,
+        num_supervised_rows=int(dataset.train_x.shape[0]) if cost_tracking_enabled else None,
+        num_collocation_rows=int(dataset.train_col_x.shape[0]) if cost_tracking_enabled else None,
+        num_init_rows=int(dataset.train_init_x.shape[0]) if cost_tracking_enabled else None,
+        peak_gpu_memory_allocated_bytes=None,
+        peak_gpu_memory_reserved_bytes=None,
+        optimizer_diagnostics={"initial_evaluation": True},
+    )
+    rows.append(initial_row)
+    if logger is not None:
+        logger.print_epoch_metrics(initial_row)
+        logger.log_epoch_metrics(initial_row)
 
     if logger is not None and trainer_impl._checkpointing_enabled(config, "save_init", True):
         logger.save_checkpoint(
