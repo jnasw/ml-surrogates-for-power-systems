@@ -407,7 +407,7 @@ def scheduler_metric_value(
     if metric_name == "val_total_loss":
         if val_total_loss is not None:
             return float(val_total_loss), metric_name
-        return float(train_total_loss), "train_total_loss_fallback"
+        return None, "val_total_loss_unavailable"
     raise ValueError("Unsupported scheduler metric. Use scheduler.metric='train_total_loss' or 'val_total_loss'.")
 
 
