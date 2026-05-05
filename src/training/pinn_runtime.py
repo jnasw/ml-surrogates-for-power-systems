@@ -842,6 +842,17 @@ def train_pinn_step(
             components={name: value.detach() for name, value in losses.components.items()},
         )
 
+    def closure_step_needs_post_measure() -> bool:
+        if not hasattr(optimizer, "get_last_diagnostics"):
+            return True
+        diagnostics = optimizer.get_last_diagnostics()
+        reason = diagnostics.get("reason")
+        if reason in {"strong_wolfe_failed", "backtracking_failed", "step_below_min_threshold"}:
+            return True
+        if diagnostics.get("line_search_success") is False and int(diagnostics.get("line_search_evals") or 0) > 0:
+            return True
+        return False
+
     def closure() -> torch.Tensor:
         optimizer.zero_grad(set_to_none=True)
         losses = evaluate_pinn_loss_breakdown(
@@ -871,9 +882,10 @@ def train_pinn_step(
         raise_on_nonfinite_params(stage="optimizer step")
         optimizer.zero_grad(set_to_none=True)
         # The closure writes the losses from its final (accepted) evaluation into
-        # breakdown_box["losses"], so no redundant forward pass is needed.
-        # Only re-evaluate when gradient telemetry requires a live graph.
-        if capture_gradient_telemetry:
+        # breakdown_box["losses"] on successful custom line-search steps. If a
+        # line search failed or the optimizer cannot expose that guarantee,
+        # re-measure on the restored/accepted parameters.
+        if capture_gradient_telemetry or closure_step_needs_post_measure():
             measured_losses, measured_telemetry = measure_pinn_state(
                 model=model,
                 criterion=criterion,
@@ -888,7 +900,7 @@ def train_pinn_step(
                 x_init=x_init,
                 y_init=y_init,
                 x_init_weights=x_init_weights,
-                capture_gradient_telemetry=True,
+                capture_gradient_telemetry=capture_gradient_telemetry,
             )
             breakdown_box["losses"] = measured_losses
             telemetry_box["telemetry"] = measured_telemetry
