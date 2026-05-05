@@ -74,6 +74,8 @@ def train_multistage_pinn_loop(
         val_x=dataset.val_x,
         val_y=dataset.val_y,
         val_col_x=dataset.val_col_x,
+        val_init_x=dataset.val_init_x,
+        val_init_y=dataset.val_init_y,
         test_x=dataset.test_x,
         test_y=dataset.test_y,
     )

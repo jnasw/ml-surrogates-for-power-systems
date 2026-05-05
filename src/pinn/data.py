@@ -70,6 +70,20 @@ def _load_optional_h5_tensor_rows(paths: Iterable[str], dataset_key: str, dtype:
     return torch.cat(parts, dim=0)
 
 
+def _derive_init_rows_from_supervised_split(
+    x: torch.Tensor | None,
+    y: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor] | None:
+    if x is None or y is None or x.shape[0] == 0:
+        return None
+    time = x[:, 0]
+    t0 = time.min()
+    mask = torch.isclose(time, t0)
+    if not bool(mask.any().item()):
+        return None
+    return x[mask], y[mask]
+
+
 class TensorRowDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     def __init__(self, x: torch.Tensor, y: torch.Tensor):
         if x.shape[0] != y.shape[0]:
@@ -204,22 +218,28 @@ def load_pinn_dataset_from_preprocessed_root(
     test_x = _load_h5_tensor_rows(_iter_split_files(test_dir, H5_DATA_SUFFIX), H5_X_KEYS[TEST_SPLIT], torch_dtype)
     test_y = _load_h5_tensor_rows(_iter_split_files(test_dir, H5_DATA_SUFFIX), H5_Y_KEYS[TEST_SPLIT], torch_dtype)
 
-    # Load val IC from preprocessed split if available; otherwise carve a fixed
-    # 20 % holdout from the training IC pool using a deterministic permutation.
+    # Prefer explicit validation IC files. Legacy datasets may not have them;
+    # in that case derive validation IC rows from the supervised validation
+    # trajectories when possible, and only fall back to a deterministic training
+    # IC holdout when no validation split exists.
     val_init_x = _load_optional_h5_tensor_rows(_iter_split_files(val_dir, H5_INIT_SUFFIX), H5_X_KEYS[VAL_SPLIT], torch_dtype)
     val_init_y = _load_optional_h5_tensor_rows(_iter_split_files(val_dir, H5_INIT_SUFFIX), H5_Y_KEYS[VAL_SPLIT], torch_dtype)
     if val_init_x is None or val_init_y is None:
-        n_init = train_init_x.shape[0]
-        n_val_init = max(1, int(round(n_init * 0.2)))
-        rng = torch.Generator()
-        rng.manual_seed(0)
-        perm = torch.randperm(n_init, generator=rng)
-        val_idx = perm[:n_val_init]
-        train_idx = perm[n_val_init:]
-        val_init_x = train_init_x[val_idx]
-        val_init_y = train_init_y[val_idx]
-        train_init_x = train_init_x[train_idx]
-        train_init_y = train_init_y[train_idx]
+        derived_val_init = _derive_init_rows_from_supervised_split(val_x, val_y)
+        if derived_val_init is not None:
+            val_init_x, val_init_y = derived_val_init
+        else:
+            n_init = train_init_x.shape[0]
+            n_val_init = max(1, int(round(n_init * 0.2)))
+            rng = torch.Generator()
+            rng.manual_seed(0)
+            perm = torch.randperm(n_init, generator=rng)
+            val_idx = perm[:n_val_init]
+            train_idx = perm[n_val_init:]
+            val_init_x = train_init_x[val_idx]
+            val_init_y = train_init_y[val_idx]
+            train_init_x = train_init_x[train_idx]
+            train_init_y = train_init_y[train_idx]
 
     return PinnDatasetBundle(
         train_x=train_x,

@@ -70,6 +70,8 @@ def move_pinn_dataset_to_device(
         val_x=None if dataset.val_x is None else dataset.val_x.to(device=device, dtype=dtype),
         val_y=None if dataset.val_y is None else dataset.val_y.to(device=device, dtype=dtype),
         val_col_x=None if dataset.val_col_x is None else dataset.val_col_x.to(device=device, dtype=dtype),
+        val_init_x=None if dataset.val_init_x is None else dataset.val_init_x.to(device=device, dtype=dtype),
+        val_init_y=None if dataset.val_init_y is None else dataset.val_init_y.to(device=device, dtype=dtype),
         test_x=None if dataset.test_x is None else dataset.test_x.to(device=device, dtype=dtype),
         test_y=None if dataset.test_y is None else dataset.test_y.to(device=device, dtype=dtype),
     )
@@ -97,6 +99,8 @@ def move_pinn_training_data_to_device(
         val_x=None if dataset.val_x is None else dataset.val_x.to(dtype=dtype),
         val_y=None if dataset.val_y is None else dataset.val_y.to(dtype=dtype),
         val_col_x=None if dataset.val_col_x is None else dataset.val_col_x.to(dtype=dtype),
+        val_init_x=None if dataset.val_init_x is None else dataset.val_init_x.to(dtype=dtype),
+        val_init_y=None if dataset.val_init_y is None else dataset.val_init_y.to(dtype=dtype),
         test_x=None if dataset.test_x is None else dataset.test_x.to(dtype=dtype),
         test_y=None if dataset.test_y is None else dataset.test_y.to(dtype=dtype),
     )

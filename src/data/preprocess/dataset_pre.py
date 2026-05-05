@@ -123,7 +123,9 @@ class Datapreprocessor:
         self.val_file_count = self._existing_split_count(self.val_folder, H5_DATA_SUFFIX)
         self.test_file_count = self._existing_split_count(self.test_folder, H5_DATA_SUFFIX)
         self.col_file_count = self._existing_split_count(self.train_folder, H5_COLLOCATION_SUFFIX)
+        self.val_col_file_count = self._existing_split_count(self.val_folder, H5_COLLOCATION_SUFFIX)
         self.init_file_count = self._existing_split_count(self.train_folder, H5_INIT_SUFFIX)
+        self.val_init_file_count = self._existing_split_count(self.val_folder, H5_INIT_SUFFIX)
         print(
             "[preprocess] Output folders ready | "
             f"train_files={self.train_file_count} val_files={self.val_file_count} test_files={self.test_file_count}"
@@ -433,6 +435,20 @@ class Datapreprocessor:
         if has_val and traj_idx < val_cutoff:
             return VAL_SPLIT
         return TEST_SPLIT
+
+    def _local_split_from_index(self, traj_idx: int, train_cutoff: int, val_cutoff: int, has_val: bool) -> str:
+        if self.test_split_mode in {"internal", "paired_common_from_datasets"}:
+            return self._split_from_index(
+                traj_idx=traj_idx,
+                train_cutoff=train_cutoff,
+                val_cutoff=val_cutoff,
+                has_val=has_val,
+            )
+        if traj_idx < train_cutoff:
+            return TRAIN_SPLIT
+        if has_val:
+            return VAL_SPLIT
+        return TRAIN_SPLIT
 
     def _ic_key_from_trajectory(self, trajectory: Any) -> tuple[float, ...]:
         arr = np.asarray(trajectory, dtype=np.float32)
@@ -891,6 +907,19 @@ class Datapreprocessor:
         points_per_traj = int(self.cfg.num_of_points) + 1
         ic_chunk_size = max(1, self.save_freq // points_per_traj)
         saved_col_files = 0
+        saved_val_col_files = 0
+        train_col_trajectories = 0
+        val_col_trajectories = 0
+        has_val = bool(self.dataset_cfg.validation_flag)
+        train_cutoff = int(self.total_init_conditions * float(self.dataset_cfg.split_ratio))
+        if self.test_split_mode in {"internal", "paired_common_from_datasets"}:
+            if has_val:
+                remaining = self.total_init_conditions - train_cutoff
+                val_cutoff = train_cutoff + (remaining // 2)
+            else:
+                val_cutoff = train_cutoff
+        else:
+            val_cutoff = self.total_init_conditions if has_val else train_cutoff
 
         for start in range(0, len(init_conditions), ic_chunk_size):
             chunk = init_conditions[start : start + ic_chunk_size]
@@ -899,24 +928,56 @@ class Datapreprocessor:
             if not save_flag:
                 return x_col, x_init, y_init
 
-            self._update_train_stats(x_col)
-            self.col_file_count += 1
-            self.init_file_count += 1
-            self._save_dataset(TRAIN_SPLIT, x_col, None, self.col_file_count, suffix=H5_COLLOCATION_SUFFIX)
-            self._save_dataset(TRAIN_SPLIT, x_init, y_init, self.init_file_count, suffix=H5_INIT_SUFFIX)
-            saved_col_files += 1
+            split_labels = [
+                self._local_split_from_index(
+                    traj_idx=start + local_idx,
+                    train_cutoff=train_cutoff,
+                    val_cutoff=val_cutoff,
+                    has_val=has_val,
+                )
+                for local_idx in range(chunk.shape[0])
+            ]
+            x_col_by_ic = x_col.reshape(chunk.shape[0], points_per_traj, x_col.shape[1])
+            for split in (TRAIN_SPLIT, VAL_SPLIT):
+                split_indices = np.array(
+                    [idx for idx, label in enumerate(split_labels) if label == split],
+                    dtype=np.int64,
+                )
+                if split_indices.size == 0:
+                    continue
+                split_x_col = x_col_by_ic[split_indices].reshape(-1, x_col.shape[1])
+                split_x_init = x_init[split_indices]
+                split_y_init = y_init[split_indices]
+                if split == TRAIN_SPLIT:
+                    train_col_trajectories += int(split_indices.size)
+                    self._update_train_stats(split_x_col)
+                    self.col_file_count += 1
+                    self.init_file_count += 1
+                    self._save_dataset(TRAIN_SPLIT, split_x_col, None, self.col_file_count, suffix=H5_COLLOCATION_SUFFIX)
+                    self._save_dataset(TRAIN_SPLIT, split_x_init, split_y_init, self.init_file_count, suffix=H5_INIT_SUFFIX)
+                    saved_col_files += 1
+                else:
+                    val_col_trajectories += int(split_indices.size)
+                    self.val_col_file_count += 1
+                    self.val_init_file_count += 1
+                    self._save_dataset(VAL_SPLIT, split_x_col, None, self.val_col_file_count, suffix=H5_COLLOCATION_SUFFIX)
+                    self._save_dataset(VAL_SPLIT, split_x_init, split_y_init, self.val_init_file_count, suffix=H5_INIT_SUFFIX)
+                    saved_val_col_files += 1
             print(
                 "[preprocess] Wrote collocation chunk | "
-                f"chunk={saved_col_files} ic_batch={chunk.shape[0]} x_col_shape={tuple(x_col.shape)}"
+                f"chunk={saved_col_files} val_chunks={saved_val_col_files} ic_batch={chunk.shape[0]}"
             )
 
         self.set_info_attributes(
             num_of_train_col_files=self.col_file_count,
-            num_of_training_col_trajectories=int(len(init_conditions)),
+            num_of_val_col_files=self.val_col_file_count,
+            num_of_training_col_trajectories=int(train_col_trajectories),
+            num_of_validation_col_trajectories=int(val_col_trajectories),
             num_of_train_init_files=self.init_file_count,
+            num_of_val_init_files=self.val_init_file_count,
         )
         print(
             "[preprocess] Collocation generation complete | "
-            f"chunks={saved_col_files} trajectories={int(len(init_conditions))}"
+            f"train_chunks={saved_col_files} val_chunks={saved_val_col_files}"
         )
         return None
