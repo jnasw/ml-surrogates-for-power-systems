@@ -836,6 +836,12 @@ def train_pinn_step(
             if not bool(torch.isfinite(param.detach()).all().item()):
                 raise FloatingPointError(f"Encountered non-finite parameter '{name}' during {stage}.")
 
+    def detach_loss_breakdown(losses: PinnLossBreakdown) -> PinnLossBreakdown:
+        return PinnLossBreakdown(
+            total=losses.total.detach(),
+            components={name: value.detach() for name, value in losses.components.items()},
+        )
+
     def closure() -> torch.Tensor:
         optimizer.zero_grad(set_to_none=True)
         losses = evaluate_pinn_loss_breakdown(
@@ -897,7 +903,7 @@ def train_pinn_step(
             )
         optimizer.step()
         raise_on_nonfinite_params(stage="optimizer step")
-    return breakdown_box["losses"], telemetry_box["telemetry"]
+    return detach_loss_breakdown(breakdown_box["losses"]), telemetry_box["telemetry"]
 
 
 def phase_effective_full_batch(phase: OptimizerPhase, optimizer_spec: OptimizerSpec) -> bool:

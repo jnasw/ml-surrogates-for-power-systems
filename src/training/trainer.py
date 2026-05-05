@@ -335,6 +335,18 @@ def _scale_optimizer_state_tensors(state_dict: dict[str, Any], factor: float) ->
     return scaled
 
 
+def _copy_optimizer_state_to_cpu(value: Any) -> Any:
+    if torch.is_tensor(value):
+        return value.detach().cpu().clone()
+    if isinstance(value, dict):
+        return {key: _copy_optimizer_state_to_cpu(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_copy_optimizer_state_to_cpu(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_copy_optimizer_state_to_cpu(item) for item in value)
+    return copy.deepcopy(value)
+
+
 def _maybe_restore_optimizer_state(
     *,
     optimizer_spec: OptimizerSpec,
@@ -390,7 +402,7 @@ def _cache_optimizer_state(
         return
     family = _optimizer_transition_family(phase, transition_settings)
     transition_state.cache[family] = {
-        "state_dict": copy.deepcopy(optimizer_spec.optimizer.state_dict()),
+        "state_dict": _copy_optimizer_state_to_cpu(optimizer_spec.optimizer.state_dict()),
         "optimizer_name": optimizer_name,
     }
     transition_state.previous_optimizer_name = optimizer_name

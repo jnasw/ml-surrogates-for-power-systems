@@ -101,6 +101,8 @@ HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`; the stati
 
 PINN wrappers expose `MODEL_FLAG`, `DTYPE`, `ID_EVAL_ID`, `OOD_EVAL_ID`, and `NO_OOD_EVAL`. OOD evaluation is enabled by default using the launcher default unless `NO_OOD_EVAL=true` / `--no-ood-eval` is used. ID evaluation is optional and must be requested explicitly.
 
+For CUDA multistage submissions, `hpc/multistage_comparison/run_multistage_comparison.lsf.sh` defaults `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` unless the variable is already set.
+
 ### Screening (local)
 
 ```bash

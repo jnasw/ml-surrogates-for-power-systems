@@ -59,6 +59,10 @@ EPOCHS="${EPOCHS:-}"
 WANDB_PROJECT="${WANDB_PROJECT:-}"
 DRY_RUN="${DRY_RUN:-false}"
 
+if [[ -z "${PYTORCH_CUDA_ALLOC_CONF:-}" && "${DEVICE}" == cuda* ]]; then
+  export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
+fi
+
 LSF_LOG_DIR="${REPO_ROOT}/hpc/logs/multistage"
 mkdir -p "${LSF_LOG_DIR}"
 
@@ -85,6 +89,7 @@ echo "[hpc] strategies=${STRATEGIES:-<all strategies>}"
 echo "[hpc] epochs=${EPOCHS:-<mode default>}"
 echo "[hpc] wandb_project=${WANDB_PROJECT:-<mode default>}"
 echo "[hpc] dry_run=${DRY_RUN}"
+echo "[hpc] pytorch_cuda_alloc_conf=${PYTORCH_CUDA_ALLOC_CONF:-<not set>}"
 
 cmd=(
   python3

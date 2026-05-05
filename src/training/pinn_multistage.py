@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import os
 from typing import Any
 
 import numpy as np
+import torch
 
 from src.pinn.residuals import compute_residual_terms as _compute_residual_terms
 from src.training import trainer as trainer_impl
 from src.training.pinn_runtime import measure_pinn_state as _measure_pinn_state
+
+
+def _cleanup_cuda_stage_boundary() -> None:
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def train_multistage_pinn_loop(
@@ -105,6 +113,8 @@ def train_multistage_pinn_loop(
     prev_stage_total_loss: float | None = None
 
     for stage_idx in range(max_stages):
+        if stage_idx > 0:
+            _cleanup_cuda_stage_boundary()
         stage_wall_start = trainer_impl.time.perf_counter()
         if stage_idx == 0:
             time_scale = 1.0
@@ -553,6 +563,8 @@ def train_multistage_pinn_loop(
                 transition_settings=transition_settings,
                 transition_state=transition_state,
             )
+            del optimizer_spec
+            del scheduler
 
         ensemble.eval()
 
