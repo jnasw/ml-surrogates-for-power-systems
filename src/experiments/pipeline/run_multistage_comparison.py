@@ -58,6 +58,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_REFERENCE_ID = "main_SM4_qbc_b512_ds01"
 DEFAULT_OOD_EVAL_ID = "ood_SM4_wide_ic_b512_ds01"
 DEFAULT_ADAM_LR = 3.0e-3
+DEFAULT_LBFGS_LR = 1.0e-1
 
 SCREENING_SEED_LABELS = ("s01",)
 FINAL_SEED_LABELS = ("s01", "s02", "s03", "s04", "s05")
@@ -109,6 +110,14 @@ STRATEGY_REGISTRY: dict[str, dict[str, Any]] = {
             [("ssbroyden", "SSBroyden", 0.5, 6_000)],
             [("ssbroyden", "SSBroyden", 0.25, 6_000)],
             [("ssbroyden", "SSBroyden", 0.1, 6_000)],
+        ],
+    },
+    "adam_lbfgs_ssbroyden_3stage": {
+        "pinn_mode": "multistage",
+        "stages": [
+            [("adam", "Adam", DEFAULT_ADAM_LR, 3_000), ("lbfgs", "LBFGS", DEFAULT_LBFGS_LR, 333)],
+            [("adam", "Adam", DEFAULT_ADAM_LR, 10_000), ("lbfgs", "LBFGS", DEFAULT_LBFGS_LR, 3_333)],
+            [("ssbroyden", "SSBroyden", 1.0, 13_333)],
         ],
     },
 }
@@ -240,9 +249,30 @@ def _ssbroyden_phase_dict(*, name: str, epochs: int, lr: float) -> str:
     )
 
 
+def _lbfgs_phase_dict(*, name: str, epochs: int, lr: float) -> str:
+    return (
+        "{"
+        f"name:{name},"
+        "optimizer:LBFGS,"
+        f"lr:{float(lr)},"
+        f"epochs:{int(epochs)},"
+        "batch_size:null,"
+        "shuffle:false,"
+        "full_batch:true,"
+        "allow_sampling:false,"
+        "optimizer_kwargs:{},"
+        "scheduler:null,"
+        "line_search:{name:strong_wolfe},"
+        "convergence:null"
+        "}"
+    )
+
+
 def _build_phase_dict(*, name: str, optimizer: str, lr: float, epochs: int, batch_size: int) -> str:
     if optimizer == "Adam":
         return _adam_phase_dict(name=name, epochs=epochs, batch_size=batch_size, lr=lr)
+    if optimizer == "LBFGS":
+        return _lbfgs_phase_dict(name=name, epochs=epochs, lr=lr)
     if optimizer == "SSBroyden":
         return _ssbroyden_phase_dict(name=name, epochs=epochs, lr=lr)
     raise ValueError(f"Unsupported optimizer in strategy registry: {optimizer}")
