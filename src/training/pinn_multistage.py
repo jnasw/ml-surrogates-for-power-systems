@@ -542,6 +542,7 @@ def train_multistage_pinn_loop(
                     collocation_manager=collocation_manager,
                     train_dt_weights=train_dt_weights,
                     best_metric=best_metric,
+                    validation_available=dataset.val_x is not None and dataset.val_y is not None,
                 )
             if trainer_impl._collocation_phase_boundary_enabled(resolved_stack.collocation):
                 collocation_manager.handle_phase_boundary(

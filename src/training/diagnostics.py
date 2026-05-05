@@ -333,6 +333,7 @@ def record_epoch_row_and_checkpoints(
     collocation_manager: Any,
     train_dt_weights: torch.Tensor | None,
     best_metric: float | None,
+    validation_available: bool = False,
 ) -> float | None:
     rows.append(row)
     collocation_manager.observe_epoch_losses(
@@ -373,6 +374,8 @@ def record_epoch_row_and_checkpoints(
                 tag="last",
             )
 
+    if validation_available and row.val_total_loss is None:
+        return best_metric
     selection_metric = row.val_total_loss if row.val_total_loss is not None else row.train_total_loss
     if best_metric is None or selection_metric < best_metric:
         best_metric = selection_metric
