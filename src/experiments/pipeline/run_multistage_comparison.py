@@ -616,7 +616,7 @@ def build_parser() -> argparse.ArgumentParser:
             f"Defaults: screening={SCREENING_TOTAL_EPOCHS}, final={FINAL_TOTAL_EPOCHS}."
         ),
     )
-    parser.add_argument("--batch-size", type=int, default=1024, help="Mini-batch size for Adam phases.")
+    parser.add_argument("--batch-size", type=int, default=4096, help="Mini-batch size for Adam phases.")
 
     parser.add_argument("--loss-weight-data", type=float, default=1.0, help="Static supervised loss weight.")
     parser.add_argument("--loss-weight-dt", type=float, default=1.0e-4, help="Static dt loss weight.")

@@ -873,7 +873,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hidden-layers", type=int, default=4, help="PINN hidden depth.")
     parser.add_argument("--activation", default="tanh", help="PINN activation.")
     parser.add_argument("--dtype", default="float64", help="PINN dtype.")
-    parser.add_argument("--batch-size", type=int, default=1024, help="Mini-batch size for Adam/SOAP/stochastic phases.")
+    parser.add_argument("--batch-size", type=int, default=4096, help="Mini-batch size for Adam/SOAP/stochastic phases.")
     parser.add_argument("--adam-lr", type=float, default=DEFAULT_ADAM_LR, help="Adam learning rate.")
     parser.add_argument("--soap-lr", type=float, default=CALIBRATED_OPTIMIZER_LRS["SOAP"], help="SOAP learning rate.")
     parser.add_argument(

@@ -707,7 +707,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--epochs", type=int, default=None,
         help=f"Adam epochs. Defaults: cadence={CADENCE_DEFAULT_EPOCHS}, screening={SCREENING_DEFAULT_EPOCHS}, final={FINAL_DEFAULT_EPOCHS}.",
     )
-    parser.add_argument("--batch-size", type=int, default=1024, help="Adam mini-batch size.")
+    parser.add_argument("--batch-size", type=int, default=4096, help="Adam mini-batch size.")
     parser.add_argument("--adam-lr", type=float, default=DEFAULT_ADAM_LR, help="Adam learning rate.")
 
     # Collocation parameters

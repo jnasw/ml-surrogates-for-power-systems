@@ -132,7 +132,7 @@ def _safe_name(value: str) -> str:
 
 
 def _pinn_batch_size(args: argparse.Namespace) -> int:
-    return 1024 if args.batch_size is None else int(args.batch_size)
+    return 4096 if args.batch_size is None else int(args.batch_size)
 
 
 def _optimizer_stage(

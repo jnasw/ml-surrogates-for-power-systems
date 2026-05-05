@@ -780,7 +780,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--device", default="auto", help="Device for pinn_data_only downstream runs.")
     parser.add_argument("--dtype", default="float64", help="Dtype for pinn_data_only downstream runs.")
-    parser.add_argument("--batch-size", type=int, default=1024, help="Batch size for pinn_data_only downstream runs.")
+    parser.add_argument("--batch-size", type=int, default=4096, help="Batch size for pinn_data_only downstream runs.")
     parser.add_argument("--adam-lr", type=float, default=DEFAULT_ADAM_LR, help="Adam learning rate for pinn_data_only downstream runs.")
     parser.add_argument("--preset", default=None, help="Config preset. Defaults by --mode.")
 
