@@ -70,16 +70,19 @@ SCREENING_TOTAL_EPOCHS = 100
 # Each strategy: list of stages, each stage: list of phases.
 # Phase tuple: (phase_name, optimizer, lr, final_epochs)
 # final_epochs is the epoch count for FINAL_TOTAL_EPOCHS; scaled for other budgets.
+# Set fixed_epochs=true for calibrated short schedules that should not be scaled by --epochs.
 # ---------------------------------------------------------------------------
 STRATEGY_REGISTRY: dict[str, dict[str, Any]] = {
     "adam_30000": {
         "pinn_mode": "single_stage",
+        "default": True,
         "stages": [
             [("adam", "Adam", DEFAULT_ADAM_LR, 30_000)],
         ],
     },
     "adam_ssbroyden_2stage": {
         "pinn_mode": "multistage",
+        "default": True,
         "stages": [
             [("adam", "Adam", DEFAULT_ADAM_LR, 15_000)],
             [("ssbroyden", "SSBroyden", 1.0, 15_000)],
@@ -87,6 +90,7 @@ STRATEGY_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "adam_ssbroyden_3stage": {
         "pinn_mode": "multistage",
+        "default": True,
         "stages": [
             [("adam", "Adam", DEFAULT_ADAM_LR, 10_000)],
             [("ssbroyden", "SSBroyden", 1.0, 10_000)],
@@ -95,6 +99,7 @@ STRATEGY_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "adam_ssbroyden_4stage": {
         "pinn_mode": "multistage",
+        "default": True,
         "stages": [
             [("adam", "Adam", DEFAULT_ADAM_LR, 8_000)],
             [("ssbroyden", "SSBroyden", 1.0, 8_000)],
@@ -104,6 +109,7 @@ STRATEGY_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "adam_ssbroyden_5stage": {
         "pinn_mode": "multistage",
+        "default": True,
         "stages": [
             [("adam", "Adam", DEFAULT_ADAM_LR, 6_000)],
             [("ssbroyden", "SSBroyden", 1.0, 6_000)],
@@ -114,15 +120,71 @@ STRATEGY_REGISTRY: dict[str, dict[str, Any]] = {
     },
     "adam_lbfgs_ssbroyden_3stage": {
         "pinn_mode": "multistage",
+        "default": False,
         "stages": [
             [("adam", "Adam", DEFAULT_ADAM_LR, 3_000), ("lbfgs", "LBFGS", DEFAULT_LBFGS_LR, 333)],
             [("adam", "Adam", DEFAULT_ADAM_LR, 10_000), ("lbfgs", "LBFGS", DEFAULT_LBFGS_LR, 3_333)],
             [("ssbroyden", "SSBroyden", 1.0, 13_333)],
         ],
     },
+    "warm_start_only": {
+        "pinn_mode": "single_stage",
+        "fixed_epochs": True,
+        "default": False,
+        "stages": [
+            [("adam_warmup", "Adam", DEFAULT_ADAM_LR, 300), ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 100)],
+        ],
+    },
+    "warm_start_more_adam": {
+        "pinn_mode": "single_stage",
+        "fixed_epochs": True,
+        "default": False,
+        "stages": [
+            [
+                ("adam_warmup", "Adam", DEFAULT_ADAM_LR, 300),
+                ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 100),
+                ("adam_refine", "Adam", DEFAULT_ADAM_LR, 1_000),
+            ],
+        ],
+    },
+    "warm_start_ssbroyden": {
+        "pinn_mode": "single_stage",
+        "fixed_epochs": True,
+        "default": False,
+        "stages": [
+            [
+                ("adam_warmup", "Adam", DEFAULT_ADAM_LR, 300),
+                ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 100),
+                ("ssbroyden_refine", "SSBroyden", 1.0, 300),
+            ],
+        ],
+    },
+    "multistage_adam_correction": {
+        "pinn_mode": "multistage",
+        "fixed_epochs": True,
+        "default": False,
+        "stages": [
+            [("adam_warmup", "Adam", DEFAULT_ADAM_LR, 300), ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 100)],
+            [("adam_residual", "Adam", DEFAULT_ADAM_LR, 1_000)],
+        ],
+    },
+    "multistage_adam_ssbroyden_correction": {
+        "pinn_mode": "multistage",
+        "fixed_epochs": True,
+        "default": False,
+        "stages": [
+            [("adam_warmup", "Adam", DEFAULT_ADAM_LR, 300), ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 100)],
+            [("adam_residual", "Adam", DEFAULT_ADAM_LR, 1_000)],
+            [("ssbroyden_residual", "SSBroyden", 1.0, 300)],
+        ],
+    },
 }
 
 ALL_STRATEGIES = tuple(STRATEGY_REGISTRY)
+DEFAULT_STRATEGIES = tuple(
+    name for name, spec in STRATEGY_REGISTRY.items()
+    if bool(spec.get("default", True))
+)
 
 SUMMARY_FIELDNAMES = [
     "run_name",
@@ -189,7 +251,7 @@ def _parse_strategies(raw: str | None) -> list[str]:
     if raw:
         strategies = [s.strip().lower().replace("-", "_") for s in parse_csv_list(raw) if s.strip()]
     else:
-        strategies = list(ALL_STRATEGIES)
+        strategies = list(DEFAULT_STRATEGIES)
     if not strategies:
         raise ValueError("Expected at least one strategy.")
     unsupported = [s for s in strategies if s not in STRATEGY_REGISTRY]
@@ -282,6 +344,18 @@ def _scale_epochs(final_epochs: int, *, total_epochs: int) -> int:
     return max(1, round(final_epochs * total_epochs / FINAL_TOTAL_EPOCHS))
 
 
+def _phase_epochs(*, spec: dict[str, Any], final_epochs: int, total_epochs: int) -> int:
+    if bool(spec.get("fixed_epochs", False)):
+        return int(final_epochs)
+    return _scale_epochs(final_epochs, total_epochs=total_epochs)
+
+
+def _strategy_total_epochs(*, spec: dict[str, Any], total_epochs: int) -> int:
+    if bool(spec.get("fixed_epochs", False)):
+        return int(sum(sum(int(phase[3]) for phase in stage) for stage in spec["stages"]))
+    return int(total_epochs)
+
+
 def _strategy_overrides(*, run_spec: MultistageRunSpec, batch_size: int) -> list[str]:
     spec = STRATEGY_REGISTRY[run_spec.strategy]
     pinn_mode = spec["pinn_mode"]
@@ -293,7 +367,7 @@ def _strategy_overrides(*, run_spec: MultistageRunSpec, batch_size: int) -> list
                 name=phase_name,
                 optimizer=optimizer,
                 lr=lr,
-                epochs=_scale_epochs(final_epochs, total_epochs=run_spec.total_epochs),
+                epochs=_phase_epochs(spec=spec, final_epochs=final_epochs, total_epochs=run_spec.total_epochs),
                 batch_size=batch_size,
             )
             for (phase_name, optimizer, lr, final_epochs) in stages[0]
@@ -311,7 +385,7 @@ def _strategy_overrides(*, run_spec: MultistageRunSpec, batch_size: int) -> list
                 name=phase_name,
                 optimizer=optimizer,
                 lr=lr,
-                epochs=_scale_epochs(final_epochs, total_epochs=run_spec.total_epochs),
+                epochs=_phase_epochs(spec=spec, final_epochs=final_epochs, total_epochs=run_spec.total_epochs),
                 batch_size=batch_size,
             )
             for (phase_name, optimizer, lr, final_epochs) in stage_phases
@@ -338,12 +412,13 @@ def _build_run_specs(
     specs: list[MultistageRunSpec] = []
     for strategy in strategies:
         spec = STRATEGY_REGISTRY[strategy]
+        strategy_total_epochs = _strategy_total_epochs(spec=spec, total_epochs=total_epochs)
         for seed_label, seed_value in seed_pairs:
             specs.append(MultistageRunSpec(
                 strategy=strategy,
                 pinn_mode=spec["pinn_mode"],
                 planned_num_stages=len(spec["stages"]),
-                total_epochs=total_epochs,
+                total_epochs=strategy_total_epochs,
                 seed_label=seed_label,
                 seed_value=int(seed_value),
             ))
@@ -629,7 +704,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--strategies", default=None,
         help=(
-            f"Comma-separated strategies. Default: all strategies. "
+            f"Comma-separated strategies. Default: legacy proportional strategies ({', '.join(DEFAULT_STRATEGIES)}). "
             f"Choices: {', '.join(ALL_STRATEGIES)}."
         ),
     )
@@ -642,7 +717,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--epochs", type=int, default=None,
         help=(
-            f"Total epoch budget (all phases proportionally scaled). "
+            f"Total epoch budget for proportional strategies. Fixed-epoch strategies ignore this. "
             f"Defaults: screening={SCREENING_TOTAL_EPOCHS}, final={FINAL_TOTAL_EPOCHS}."
         ),
     )
