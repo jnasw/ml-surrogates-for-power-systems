@@ -79,6 +79,11 @@ DENSITY_LABELS: dict[str, float] = {
     "d50": 0.50,
     "d100": 1.00,
 }
+ACTIVE_POINT_LABELS: dict[str, int] = {
+    "p4k": 4_096,
+    "p32k": 32_768,
+    "p64k": 65_536,
+}
 SCREENING_DEFAULT_DENSITIES = ("d10", "d25")
 FINAL_DEFAULT_DENSITIES = ("d10", "d25", "d50", "d100")
 CADENCE_DEFAULT_DENSITIES = ("d25",)
@@ -198,22 +203,30 @@ def _parse_densities(raw: str | None, *, mode: str) -> list[str]:
         raise ValueError("Expected at least one density.")
     resolved: list[str] = []
     for item in items:
-        if item in DENSITY_LABELS:
+        if item in DENSITY_LABELS or item in ACTIVE_POINT_LABELS:
             resolved.append(item)
         else:
             try:
                 value = float(item)
             except ValueError:
                 raise ValueError(
-                    f"Unknown density '{item}'. Use a label ({', '.join(DENSITY_LABELS)}) "
-                    "or a float fraction in (0, 1]."
+                    f"Unknown density/budget '{item}'. Use a density label ({', '.join(DENSITY_LABELS)}), "
+                    f"an active-point label ({', '.join(ACTIVE_POINT_LABELS)}), "
+                    "a float fraction in (0, 1], or an integer active-point count."
                 )
-            if not (0.0 < value <= 1.0):
-                raise ValueError(f"Density value {value} out of range (0, 1].")
-            label = next((k for k, v in DENSITY_LABELS.items() if abs(v - value) < 1e-9), None)
-            if label is None:
-                label = f"d{int(round(value * 100)):03d}"
-                DENSITY_LABELS[label] = value  # register ad-hoc label
+            if value > 1.0 and abs(value - round(value)) < 1e-9:
+                points = int(round(value))
+                if points <= 0:
+                    raise ValueError(f"Active-point count {points} must be positive.")
+                label = f"p{points}"
+                ACTIVE_POINT_LABELS[label] = points  # register ad-hoc point budget
+            else:
+                if not (0.0 < value <= 1.0):
+                    raise ValueError(f"Density value {value} out of range (0, 1].")
+                label = next((k for k, v in DENSITY_LABELS.items() if abs(v - value) < 1e-9), None)
+                if label is None:
+                    label = f"d{int(round(value * 100)):03d}"
+                    DENSITY_LABELS[label] = value  # register ad-hoc density
             resolved.append(label)
     if len(set(resolved)) != len(resolved):
         raise ValueError("--densities must not contain duplicates.")
@@ -274,10 +287,24 @@ def _count_preprocessed_collocation_rows(dataset_root: Path) -> int:
 
 
 def _active_points_for_density(*, total: int, density_label: str) -> int:
+    if density_label in ACTIVE_POINT_LABELS:
+        active_points = int(ACTIVE_POINT_LABELS[density_label])
+        if active_points > int(total):
+            raise ValueError(
+                f"Active-point budget '{density_label}' ({active_points}) exceeds "
+                f"the available collocation pool ({int(total)})."
+            )
+        return active_points
     density_value = DENSITY_LABELS[density_label]
     if abs(density_value - 1.0) < 1e-9:
         return total
     return max(1, int(total * density_value))
+
+
+def _density_value_for_label(*, total: int, density_label: str) -> float:
+    if density_label in ACTIVE_POINT_LABELS:
+        return float(ACTIVE_POINT_LABELS[density_label]) / float(total)
+    return float(DENSITY_LABELS[density_label])
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +342,10 @@ def _build_collocation_run_specs(
                         strategy=strategy,
                         variant=variant,
                         density_label=density_label,
-                        density_value=DENSITY_LABELS[density_label],
+                        density_value=_density_value_for_label(
+                            total=total_preprocessed_col_rows,
+                            density_label=density_label,
+                        ),
                         refresh_period_epochs=refresh_period_epochs,
                         active_points=active_points,
                         candidate_points=candidate_points,
@@ -692,7 +722,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--densities", default=None,
         help=(
             f"Comma-separated density labels or fractions. "
-            f"Labels: {', '.join(DENSITY_LABELS)}. "
+            f"Density labels: {', '.join(DENSITY_LABELS)}. "
+            f"Active-point labels: {', '.join(ACTIVE_POINT_LABELS)}. "
             "Cadence default: d25. Screening default: d10,d25. Final default: d10,d25,d50,d100."
         ),
     )
@@ -894,7 +925,6 @@ def main() -> None:
     manifest["artifacts"]["wandb_group"] = wandb_group
     manifest["artifacts"]["strategies"] = strategies
     manifest["artifacts"]["density_labels"] = density_labels
-    manifest["artifacts"]["density_values"] = [DENSITY_LABELS[d] for d in density_labels]
     manifest["artifacts"]["cadences"] = cadences
     manifest["artifacts"]["seed_labels"] = [label for label, _ in seed_pairs]
     manifest["artifacts"]["seed_values"] = [value for _, value in seed_pairs]
@@ -920,6 +950,14 @@ def main() -> None:
         raise SystemExit(str(exc)) from None
 
     manifest["artifacts"]["total_preprocessed_collocation_points"] = total_preprocessed_col_rows
+    manifest["artifacts"]["density_values"] = [
+        _density_value_for_label(total=total_preprocessed_col_rows, density_label=d)
+        for d in density_labels
+    ]
+    manifest["artifacts"]["active_collocation_points"] = [
+        _active_points_for_density(total=total_preprocessed_col_rows, density_label=d)
+        for d in density_labels
+    ]
     save_manifest(str(manifest_path), manifest)
 
     print(f"[collocation-comparison] repo_root={REPO_ROOT}")
