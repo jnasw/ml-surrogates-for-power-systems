@@ -132,31 +132,7 @@ STRATEGY_REGISTRY: dict[str, dict[str, Any]] = {
         "fixed_epochs": True,
         "default": False,
         "stages": [
-            [("adam_warmup", "Adam", DEFAULT_ADAM_LR, 300), ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 100)],
-        ],
-    },
-    "warm_start_more_adam": {
-        "pinn_mode": "single_stage",
-        "fixed_epochs": True,
-        "default": False,
-        "stages": [
-            [
-                ("adam_warmup", "Adam", DEFAULT_ADAM_LR, 300),
-                ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 100),
-                ("adam_refine", "Adam", DEFAULT_ADAM_LR, 1_000),
-            ],
-        ],
-    },
-    "warm_start_ssbroyden": {
-        "pinn_mode": "single_stage",
-        "fixed_epochs": True,
-        "default": False,
-        "stages": [
-            [
-                ("adam_warmup", "Adam", DEFAULT_ADAM_LR, 300),
-                ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 100),
-                ("ssbroyden_refine", "SSBroyden", 1.0, 300),
-            ],
+            [("adam_warmup", "Adam", DEFAULT_ADAM_LR, 1_000), ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 500)],
         ],
     },
     "multistage_adam_correction": {
@@ -164,18 +140,18 @@ STRATEGY_REGISTRY: dict[str, dict[str, Any]] = {
         "fixed_epochs": True,
         "default": False,
         "stages": [
-            [("adam_warmup", "Adam", DEFAULT_ADAM_LR, 300), ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 100)],
-            [("adam_residual", "Adam", DEFAULT_ADAM_LR, 1_000)],
+            [("adam_warmup", "Adam", DEFAULT_ADAM_LR, 1_000), ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 500)],
+            [("adam_residual", "Adam", DEFAULT_ADAM_LR, 2_000)],
         ],
     },
-    "multistage_adam_ssbroyden_correction": {
+    "multistage_adam_lbfgs_correction": {
         "pinn_mode": "multistage",
         "fixed_epochs": True,
         "default": False,
         "stages": [
-            [("adam_warmup", "Adam", DEFAULT_ADAM_LR, 300), ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 100)],
-            [("adam_residual", "Adam", DEFAULT_ADAM_LR, 1_000)],
-            [("ssbroyden_residual", "SSBroyden", 1.0, 300)],
+            [("adam_warmup", "Adam", DEFAULT_ADAM_LR, 1_000), ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 500)],
+            [("adam_residual", "Adam", DEFAULT_ADAM_LR, 2_000)],
+            [("lbfgs_residual", "LBFGS", DEFAULT_LBFGS_LR, 500)],
         ],
     },
 }
