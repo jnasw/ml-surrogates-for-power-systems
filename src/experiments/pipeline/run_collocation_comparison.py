@@ -417,14 +417,30 @@ def _variant_overrides(*, variant: str, collocation_cfg: dict[str, Any]) -> list
 
 
 def _adam_phase_override(*, epochs: int, lr: float, batch_size: int) -> str:
-    return (
-        "pinn.optimizer_phases=["
-        "{name:adam,optimizer:Adam,"
-        f"lr:{float(lr)},epochs:{int(epochs)},batch_size:{int(batch_size)},"
-        "shuffle:true,full_batch:false,allow_sampling:true,"
-        "optimizer_kwargs:{eps:1.0e-6},scheduler:null,line_search:null,convergence:null}"
-        "]"
-    )
+    def phase(*, name: str, phase_epochs: int, phase_lr: float) -> str:
+        return (
+            "{"
+            f"name:{name},optimizer:Adam,"
+            f"lr:{float(phase_lr)},epochs:{int(phase_epochs)},batch_size:{int(batch_size)},"
+            "shuffle:true,full_batch:false,allow_sampling:true,"
+            "optimizer_kwargs:{eps:1.0e-6},scheduler:null,line_search:null,convergence:null"
+            "}"
+        )
+
+    remaining = int(epochs)
+    phases: list[str] = []
+    if remaining <= 0:
+        raise ValueError("Adam epochs must be positive.")
+    fast_epochs = min(500, remaining)
+    phases.append(phase(name="adam_fast", phase_epochs=fast_epochs, phase_lr=float(lr)))
+    remaining -= fast_epochs
+    if remaining > 0:
+        mid_epochs = min(1_500, remaining)
+        phases.append(phase(name="adam_mid", phase_epochs=mid_epochs, phase_lr=float(lr) / 3.0))
+        remaining -= mid_epochs
+    if remaining > 0:
+        phases.append(phase(name="adam_fine", phase_epochs=remaining, phase_lr=float(lr) / 10.0))
+    return "pinn.optimizer_phases=[" + ",".join(phases) + "]"
 
 
 # ---------------------------------------------------------------------------
