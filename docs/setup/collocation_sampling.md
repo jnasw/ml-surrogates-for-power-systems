@@ -9,16 +9,16 @@ The goal is to isolate how physics enforcement through collocation affects model
 - Do adaptive collocation strategies improve accuracy compared to static sampling?
 - Which collocation method provides the best performance for a fixed collocation budget?
 - Can adaptive methods achieve the same accuracy with fewer collocation points?
-- How does performance scale with collocation density?
-- At what collocation density do performance gains begin to saturate?
+- How does performance scale with active collocation budget?
+- At what collocation budget do performance gains begin to saturate?
 - Do adaptive methods improve OOD generalization or mainly reduce local residual errors?
 - Can residuals on unseen collocation points serve as a proxy for generalization error?
 
 ## Hypotheses
-- Static collocation requires higher densities to enforce physics effectively.
+- Static collocation may require higher active budgets to enforce physics effectively.
 - Adaptive methods focus sampling on high-residual regions and improve efficiency.
 - Adaptive strategies can achieve comparable accuracy at lower collocation density.
-- Increasing collocation density yields diminishing returns beyond a certain threshold.
+- Increasing the active collocation budget yields diminishing returns beyond a certain threshold.
 
 ## Experimental Setup
 - Single-stage PINN training
@@ -27,7 +27,7 @@ The goal is to isolate how physics enforcement through collocation affects model
 - Fixed optimizer: Adam
 - Fixed static loss weighting
 - Fixed train/test and optional OOD evaluation setup
-- Collocation strategy and collocation density are the only variables
+- Collocation strategy and active collocation budget are the only variables
 
 ## Collocation Strategies
 - Uniform LHS baseline
@@ -37,14 +37,13 @@ The goal is to isolate how physics enforcement through collocation affects model
   - RAR-D
   - optional: RAR-G
 
-## Collocation Density
-Collocation budget is defined as a fraction of a fixed reference collocation pool. This tests where training starts to become overly expensive relative to accuracy gains.
+## Collocation Budget
+Collocation budget is defined as an absolute active point count. This keeps the experiment aligned with the default PINN collocation setting and avoids tying the budget to the size of a specific preprocessed pool.
 
-Density levels:
-- Low: 10% (`d10`)
-- Medium: 25% (`d25`)
-- High: 50% (`d50`)
-- Full: 100% (`d100`)
+Budget levels:
+- Default: 4,096 (`p4k`)
+- Medium: 32,768 (`p32k`)
+- High: 65,536 (`p64k`)
 
 ## Experimental Procedure
 
@@ -53,7 +52,7 @@ Adaptive methods require a refresh frequency for updating collocation points.
 
 Evaluate:
 - Strategies: random resampling, RAD, RAR-D
-- Fixed density: 25%
+- Fixed budget: `p32k`
 - Single seed: `s01`
 - Cadence: 100, 500, 1000, 2000 epochs
 
@@ -67,13 +66,13 @@ Outcome: one fixed cadence for all adaptive methods.
 ### Stage 2: Main Comparison
 Using the selected cadence:
 - Strategies: uniform LHS, random resampling, RAD, RAR-D
-- Density: 10%, 25%, 50%, 100%
+- Budgets: `p4k`, `p32k`, `p64k`
 - Seeds: `s01`-`s05`
 
 Run matrix:
 
 ```text
-strategy x density x seed = 4 x 4 x 5 = 80 runs
+strategy x budget x seed = 4 x 3 x 5 = 60 runs
 ```
 
 ## Metrics
@@ -102,15 +101,15 @@ strategy x density x seed = 4 x 4 x 5 = 80 runs
 - Number of residual evaluations
 
 ## Potential Outputs
-- Test error vs collocation density
+- Test error vs collocation budget
 - Accuracy vs computational cost
 - Static vs adaptive efficiency comparison
 - Residual vs test error correlation
 - Collocation point distribution plots
-- Sample-efficiency curves: accuracy vs density
+- Sample-efficiency curves: accuracy vs active collocation budget
 
 ## Expected Outcome
-This experiment determines how collocation point placement affects physics-informed learning efficiency. It identifies whether adaptive sampling provides meaningful gains over static methods, whether similar accuracy can be achieved at lower collocation density, and at which point increasing density yields diminishing returns. It also evaluates whether residual-based metrics can serve as reliable indicators of model generalization.
+This experiment determines how collocation point placement affects physics-informed learning efficiency. It identifies whether adaptive sampling provides meaningful gains over static methods, whether similar accuracy can be achieved at lower active collocation budgets, and at which point increasing the budget yields diminishing returns. It also evaluates whether residual-based metrics can serve as reliable indicators of model generalization.
 
 ## Implementation Details
 
@@ -127,13 +126,15 @@ Collocation strategy mapping:
 - `rar_d` -> generated residual adaptive refinement with distribution sampling
 - `rar_g` -> generated residual adaptive refinement with greedy top-residual sampling
 
-Density is computed from the preprocessed dataset:
+Budget is configured as an absolute active point count:
 
 ```text
-active_points = int(total_collocation_points x density)
+p4k  = 4096 active points
+p32k = 32768 active points
+p64k = 65536 active points
 ```
 
-For `uniform_lhs`, this is a fixed subset of the preprocessed collocation pool. For generated adaptive methods, density is used as a budget derived from the reference pool size, not as a literal subset of the stored pool.
+For `uniform_lhs`, this is a fixed subset of the preprocessed collocation pool. For generated adaptive methods, the same active point budget is sampled from the continuous generated domain.
 
 Cadence is controlled via:
 
@@ -145,7 +146,7 @@ Important: the first refresh happens after the cadence boundary. For example, ca
 
 RAR-D and RAR-G behavior:
 - start with a partial collocation set, approximately 50% of the target active points
-- append points over time until the target density is reached
+- append points over time until the target active budget is reached
 - use `pinn.collocation.append_points`, derived by the launcher unless explicitly changed in code later
 
 ## How To Run
@@ -194,7 +195,7 @@ python3 -m src.experiments.pipeline.run_collocation_comparison \
   --mode final \
   --reference-id main_SM4_qbc_b512_ds01 \
   --strategies uniform_lhs,random_resampling,rad,rar_d \
-  --densities d10,d25,d50,d100 \
+  --budgets p4k,p32k,p64k \
   --seed-labels s01,s02,s03,s04,s05 \
   --refresh-period-epochs 1000
 ```
@@ -217,7 +218,7 @@ Main (values contain commas — use subshell form):
 ```bash
 (export MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 \
   STRATEGIES=uniform_lhs,random_resampling,rad,rar_d \
-  DENSITIES=d10,d25,d50,d100 \
+  DENSITIES=p4k,p32k,p64k \
   SEED_LABELS=s01,s02,s03,s04,s05 \
   REFRESH_PERIOD_EPOCHS=1000 && \
   bsub -env "all" < hpc/collocation_comparison/run_collocation_comparison.lsf.sh)

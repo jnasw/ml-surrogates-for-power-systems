@@ -1,13 +1,13 @@
 """Thesis Experiment 4: Collocation Point Sampling comparison for single-stage PINN training.
 
-Evaluate how collocation strategy and collocation density affect PINN accuracy, residual
+Evaluate how collocation strategy and collocation budget affect PINN accuracy, residual
 behaviour, convergence, and computational cost.
 
 Fixed:  single-stage PINN, reference dataset, architecture, Adam optimizer, static weights.
-Vary:   collocation strategy × collocation density × seed.
+Vary:   collocation strategy × collocation budget × seed.
 
-Run matrix:  strategy × density × seed.
-Run name:    <strategy>_<density_label>_<seed_label>  (e.g. rad_d25_s01).
+Run matrix:  strategy × budget × seed.
+Run name:    <strategy>_<budget_label>_<seed_label>  (e.g. rad_p32k_s01).
 """
 
 from __future__ import annotations
@@ -72,21 +72,14 @@ SCREENING_DEFAULT_REFRESH_PERIOD = 10
 FINAL_DEFAULT_REFRESH_PERIOD = 500
 CADENCE_DEFAULT_REFRESH_PERIODS = (100, 500, 1000, 2000)
 
-# Density labels and their fraction of total preprocessed collocation rows.
-DENSITY_LABELS: dict[str, float] = {
-    "d10": 0.10,
-    "d25": 0.25,
-    "d50": 0.50,
-    "d100": 1.00,
-}
 ACTIVE_POINT_LABELS: dict[str, int] = {
     "p4k": 4_096,
     "p32k": 32_768,
     "p64k": 65_536,
 }
-SCREENING_DEFAULT_DENSITIES = ("d10", "d25")
-FINAL_DEFAULT_DENSITIES = ("d10", "d25", "d50", "d100")
-CADENCE_DEFAULT_DENSITIES = ("d25",)
+SCREENING_DEFAULT_BUDGETS = ("p4k", "p32k")
+FINAL_DEFAULT_BUDGETS = ("p4k", "p32k", "p64k")
+CADENCE_DEFAULT_BUDGETS = ("p32k",)
 
 # Maps user-facing strategy names to the variant names consumed by _variant_overrides().
 STRATEGY_TO_VARIANT: dict[str, str] = {
@@ -164,7 +157,7 @@ class CollocationRunSpec:
 
 
 # ---------------------------------------------------------------------------
-# Strategy / density helpers
+# Strategy / budget helpers
 # ---------------------------------------------------------------------------
 
 def _default_strategies_for_mode(mode: str) -> list[str]:
@@ -196,40 +189,30 @@ def _parse_densities(raw: str | None, *, mode: str) -> list[str]:
         items = [item.strip().lower() for item in parse_csv_list(raw) if item.strip()]
     else:
         if mode == "cadence":
-            items = list(CADENCE_DEFAULT_DENSITIES)
+            items = list(CADENCE_DEFAULT_BUDGETS)
         else:
-            items = list(SCREENING_DEFAULT_DENSITIES if mode == "screening" else FINAL_DEFAULT_DENSITIES)
+            items = list(SCREENING_DEFAULT_BUDGETS if mode == "screening" else FINAL_DEFAULT_BUDGETS)
     if not items:
-        raise ValueError("Expected at least one density.")
+        raise ValueError("Expected at least one collocation budget.")
     resolved: list[str] = []
     for item in items:
-        if item in DENSITY_LABELS or item in ACTIVE_POINT_LABELS:
+        if item in ACTIVE_POINT_LABELS:
             resolved.append(item)
         else:
             try:
-                value = float(item)
+                points = int(item)
             except ValueError:
                 raise ValueError(
-                    f"Unknown density/budget '{item}'. Use a density label ({', '.join(DENSITY_LABELS)}), "
-                    f"an active-point label ({', '.join(ACTIVE_POINT_LABELS)}), "
-                    "a float fraction in (0, 1], or an integer active-point count."
+                    f"Unknown collocation budget '{item}'. Use one of: {', '.join(ACTIVE_POINT_LABELS)} "
+                    "or an integer active-point count."
                 )
-            if value > 1.0 and abs(value - round(value)) < 1e-9:
-                points = int(round(value))
-                if points <= 0:
-                    raise ValueError(f"Active-point count {points} must be positive.")
-                label = f"p{points}"
-                ACTIVE_POINT_LABELS[label] = points  # register ad-hoc point budget
-            else:
-                if not (0.0 < value <= 1.0):
-                    raise ValueError(f"Density value {value} out of range (0, 1].")
-                label = next((k for k, v in DENSITY_LABELS.items() if abs(v - value) < 1e-9), None)
-                if label is None:
-                    label = f"d{int(round(value * 100)):03d}"
-                    DENSITY_LABELS[label] = value  # register ad-hoc density
+            if points <= 0:
+                raise ValueError(f"Active-point count {points} must be positive.")
+            label = f"p{points}"
+            ACTIVE_POINT_LABELS[label] = points  # register ad-hoc point budget
             resolved.append(label)
     if len(set(resolved)) != len(resolved):
-        raise ValueError("--densities must not contain duplicates.")
+        raise ValueError("--densities/--budgets must not contain duplicates.")
     return resolved
 
 
@@ -287,24 +270,17 @@ def _count_preprocessed_collocation_rows(dataset_root: Path) -> int:
 
 
 def _active_points_for_density(*, total: int, density_label: str) -> int:
-    if density_label in ACTIVE_POINT_LABELS:
-        active_points = int(ACTIVE_POINT_LABELS[density_label])
-        if active_points > int(total):
-            raise ValueError(
-                f"Active-point budget '{density_label}' ({active_points}) exceeds "
-                f"the available collocation pool ({int(total)})."
-            )
-        return active_points
-    density_value = DENSITY_LABELS[density_label]
-    if abs(density_value - 1.0) < 1e-9:
-        return total
-    return max(1, int(total * density_value))
+    active_points = int(ACTIVE_POINT_LABELS[density_label])
+    if active_points > int(total):
+        raise ValueError(
+            f"Active-point budget '{density_label}' ({active_points}) exceeds "
+            f"the available collocation pool ({int(total)})."
+        )
+    return active_points
 
 
 def _density_value_for_label(*, total: int, density_label: str) -> float:
-    if density_label in ACTIVE_POINT_LABELS:
-        return float(ACTIVE_POINT_LABELS[density_label]) / float(total)
-    return float(DENSITY_LABELS[density_label])
+    return float(ACTIVE_POINT_LABELS[density_label]) / float(total)
 
 
 # ---------------------------------------------------------------------------
@@ -670,7 +646,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--python-bin", default=sys.executable, help="Python executable.")
     parser.add_argument(
         "--mode", default="screening", choices=["screening", "final", "cadence"],
-        help="Experiment mode. Controls default epochs, seeds, densities, and W&B project.",
+        help="Experiment mode. Controls default epochs, seeds, budgets, and W&B project.",
     )
     parser.add_argument("--experiment-tag", default=None, help="Output/W&B tag suffix. Default: timestamp.")
     parser.add_argument("--output-root", default=None, help="Explicit output root. Default: outputs/pinn/collocation_comparison/<tag>.")
@@ -709,7 +685,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Deprecated single raw integer seed. Prefer --seed-labels.",
     )
 
-    # Strategies and densities
+    # Strategies and budgets
     parser.add_argument(
         "--strategies", default=None,
         help=(
@@ -719,12 +695,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--densities", default=None,
+        "--densities", "--budgets", dest="densities", default=None,
         help=(
-            f"Comma-separated density labels or fractions. "
-            f"Density labels: {', '.join(DENSITY_LABELS)}. "
-            f"Active-point labels: {', '.join(ACTIVE_POINT_LABELS)}. "
-            "Cadence default: d25. Screening default: d10,d25. Final default: d10,d25,d50,d100."
+            f"Comma-separated active collocation budgets. Labels: {', '.join(ACTIVE_POINT_LABELS)}. "
+            "Integer active-point counts are also accepted. "
+            "Cadence default: p32k. Screening default: p4k,p32k. Final default: p4k,p32k,p64k."
         ),
     )
 

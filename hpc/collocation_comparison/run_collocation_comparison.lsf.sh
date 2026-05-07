@@ -16,7 +16,7 @@ set -euo pipefail
 #
 #   Screening dry-run on smoke reference dataset:
 #     (export MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 STRATEGIES=uniform_lhs,rad \
-#       DENSITIES=d10,d25 DEVICE=cpu DRY_RUN=true && \
+#       DENSITIES=p4k,p32k DEVICE=cpu DRY_RUN=true && \
 #       bsub -env "all" < hpc/collocation_comparison/run_collocation_comparison.lsf.sh)
 #
 #   Cadence calibration dry-run:
@@ -28,8 +28,8 @@ set -euo pipefail
 #       SEED_LABELS=s01,s02,s03,s04,s05 && \
 #       bsub -env "all" < hpc/collocation_comparison/run_collocation_comparison.lsf.sh)
 #
-#   Custom strategy/density subset:
-#     (export MODE=screening STRATEGIES=uniform_lhs,rad DENSITIES=d10,d25 \
+#   Custom strategy/budget subset:
+#     (export MODE=screening STRATEGIES=uniform_lhs,rad DENSITIES=p4k,p32k \
 #       REFERENCE_ID=smoke_SM4_lhs_b256_ds01 && \
 #       bsub -env "all" < hpc/collocation_comparison/run_collocation_comparison.lsf.sh)
 
@@ -92,7 +92,7 @@ echo "[hpc] no_ood_eval=${NO_OOD_EVAL}"
 echo "[hpc] epochs=${EPOCHS:-<mode default>}"
 echo "[hpc] adam_lr=${ADAM_LR:-<launcher default>}"
 echo "[hpc] strategies=${STRATEGIES:-<default>}"
-echo "[hpc] densities=${DENSITIES:-<mode default>}"
+echo "[hpc] budgets=${DENSITIES:-<mode default>}"
 echo "[hpc] cadences=${CADENCES:-<mode/default single cadence>}"
 echo "[hpc] refresh_period_epochs=${REFRESH_PERIOD_EPOCHS:-<none>}"
 echo "[hpc] wandb_project=${WANDB_PROJECT:-<mode default>}"
