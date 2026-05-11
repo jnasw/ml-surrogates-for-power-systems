@@ -12,8 +12,30 @@ python3 -m pip install --extra-index-url https://download.pytorch.org/whl/cu124 
   -r requirements-lock-a100.txt
 ```
 
+## 2. W&B Login
 
-## 2. Dependency Smoke Check
+
+```bash
+wandb login
+```
+
+Paste the API-key
+
+Quick check:
+
+```bash
+python3 - <<'PY'
+import os
+import wandb
+
+print("wandb import ok")
+print("WANDB_API_KEY set:", bool(os.environ.get("WANDB_API_KEY")))
+print("configured api key:", bool(wandb.api.api_key))
+PY
+```
+
+
+## 3. Dependency Smoke Check
 
 
 ```bash
@@ -43,7 +65,7 @@ python3 -m src.experiments.pipeline.run_weighting_comparison \
   --output-root outputs/smoke/dependency_check
 ```
 
-## 3. Reference Dataset
+## 4. Reference Dataset
 
 ```bash
 bsub -env "REFERENCE_IDS=main_SM4_qbc_b512_ds01,DRY_RUN=false,FORCE_REBUILD=false" \
@@ -57,7 +79,7 @@ data/reference/main/SM4/qbc_deep_ensemble/b512/ds01/
 data/reference/index.json
 ```
 
-## 4. Evaluation Datasets
+## 5. Evaluation Datasets
 
 ```bash
 bsub -env "EVALUATION_IDS=id_SM4_lhs_b512_ds01,ood_SM4_wide_ic_b512_ds01,DRY_RUN=false,FORCE_REBUILD=false" \
@@ -72,7 +94,7 @@ data/evaluation/ood/SM4/ood_SM4_wide_ic_b512_ds01/
 data/evaluation/index.json
 ```
 
-## 5. Weighting Comparison
+## 6. Weighting Comparison
 
 ### s02 Static
 
@@ -142,7 +164,7 @@ data/evaluation/index.json
     < hpc/weighting_comparison/run_weighting_comparison.lsf.sh)
 ```
 
-## 6. Optimizer Comparison
+## 7. Optimizer Comparison
 
 Target seeds for this handoff: `s02` and `s03`.
 
