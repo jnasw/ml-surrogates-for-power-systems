@@ -58,6 +58,7 @@ NO_OOD_EVAL="${NO_OOD_EVAL:-false}"
 EPOCHS="${EPOCHS:-}"
 ADAM_LR="${ADAM_LR:-}"
 STRATEGIES="${STRATEGIES:-}"
+GRADIENT_TELEMETRY="${GRADIENT_TELEMETRY:-}"
 WANDB_PROJECT="${WANDB_PROJECT:-}"
 DRY_RUN="${DRY_RUN:-false}"
 
@@ -86,6 +87,7 @@ echo "[hpc] no_ood_eval=${NO_OOD_EVAL}"
 echo "[hpc] epochs=${EPOCHS:-<mode default>}"
 echo "[hpc] adam_lr=${ADAM_LR:-<launcher default>}"
 echo "[hpc] strategies=${STRATEGIES:-<core strategies>}"
+echo "[hpc] gradient_telemetry=${GRADIENT_TELEMETRY:-<launcher default>}"
 echo "[hpc] wandb_project=${WANDB_PROJECT:-<mode default>}"
 echo "[hpc] dry_run=${DRY_RUN}"
 
@@ -140,6 +142,21 @@ fi
 if [[ -n "${STRATEGIES}" ]]; then
   cmd+=(--strategies "${STRATEGIES}")
 fi
+
+case "${GRADIENT_TELEMETRY}" in
+  true|TRUE|1|yes|YES)
+    cmd+=(--gradient-telemetry)
+    ;;
+  false|FALSE|0|no|NO)
+    cmd+=(--no-gradient-telemetry)
+    ;;
+  "")
+    ;;
+  *)
+    echo "[hpc] ERROR: GRADIENT_TELEMETRY must be true or false, got '${GRADIENT_TELEMETRY}'." >&2
+    exit 2
+    ;;
+esac
 
 if [[ -n "${WANDB_PROJECT}" ]]; then
   cmd+=(--wandb-project "${WANDB_PROJECT}")

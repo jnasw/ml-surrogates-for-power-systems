@@ -261,7 +261,7 @@ W&B project is `thesis-weighting-experiment` in final mode and `thesis-weighting
 
 ## Notes
 - Console logging is reduced (`log_every_epoch=10`). Full per-epoch resolution is available in W&B.
-- Gradient telemetry is enabled for all runs (`pinn.gradient_telemetry.enabled=true`). Component grad norms and weighted grad norms are logged to W&B under `train/grad_norm/{name}` and `train/grad_weighted_norm/{name}`.
+- Gradient telemetry is enabled by default (`pinn.gradient_telemetry.enabled=true`). For follow-up seed runs where gradient diagnostics are already covered, pass `GRADIENT_TELEMETRY=false` to the HPC wrapper to reduce overhead. Component grad norms and weighted grad norms are logged to W&B under `train/grad_norm/{name}` and `train/grad_weighted_norm/{name}` when telemetry is enabled.
 - Active weights at the final epoch are recorded in `summary.csv` as `train_weight_{data,physics,dt,ic}`.
 - Smoke/compressed datasets may have a time grid that differs from external evaluation datasets. Use `NO_OOD_EVAL=true` or `--no-ood-eval` for those checks.
 - Smoke/reference smoke datasets disable validation. Normal/final datasets keep validation by default.
