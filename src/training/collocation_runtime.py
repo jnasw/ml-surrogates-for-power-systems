@@ -18,7 +18,7 @@ def collocation_refresh_mode(collocation: ResolvedCollocationSettings) -> str:
 
 
 def collocation_phase_boundary_enabled(collocation: ResolvedCollocationSettings) -> bool:
-    return collocation_refresh_mode(collocation) == "phase_boundary"
+    return collocation_refresh_mode(collocation) in {"phase_boundary", "epoch_periodic_plus_phase_boundary"}
 
 
 def phase_boundary_refresh_planned(
@@ -27,7 +27,7 @@ def phase_boundary_refresh_planned(
     phase_name: str,
     event: str,
 ) -> bool:
-    if collocation_refresh_mode(collocation) != "phase_boundary":
+    if collocation_refresh_mode(collocation) not in {"phase_boundary", "epoch_periodic_plus_phase_boundary"}:
         return False
     if event == "start":
         names = set(collocation.refresh_on_phase_start)

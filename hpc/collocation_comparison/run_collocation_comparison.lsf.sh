@@ -64,6 +64,10 @@ STRATEGIES="${STRATEGIES:-}"
 DENSITIES="${DENSITIES:-}"
 CADENCES="${CADENCES:-}"
 REFRESH_PERIOD_EPOCHS="${REFRESH_PERIOD_EPOCHS:-}"
+TERMINAL_OPTIMIZER="${TERMINAL_OPTIMIZER:-}"
+TERMINAL_EPOCHS="${TERMINAL_EPOCHS:-}"
+TERMINAL_LR="${TERMINAL_LR:-}"
+TERMINAL_REFRESH="${TERMINAL_REFRESH:-}"
 WANDB_PROJECT="${WANDB_PROJECT:-}"
 DRY_RUN="${DRY_RUN:-false}"
 
@@ -95,6 +99,10 @@ echo "[hpc] strategies=${STRATEGIES:-<default>}"
 echo "[hpc] budgets=${DENSITIES:-<mode default>}"
 echo "[hpc] cadences=${CADENCES:-<mode/default single cadence>}"
 echo "[hpc] refresh_period_epochs=${REFRESH_PERIOD_EPOCHS:-<none>}"
+echo "[hpc] terminal_optimizer=${TERMINAL_OPTIMIZER:-<none>}"
+echo "[hpc] terminal_epochs=${TERMINAL_EPOCHS:-<none>}"
+echo "[hpc] terminal_lr=${TERMINAL_LR:-<launcher default>}"
+echo "[hpc] terminal_refresh=${TERMINAL_REFRESH:-<launcher default>}"
 echo "[hpc] wandb_project=${WANDB_PROJECT:-<mode default>}"
 echo "[hpc] dry_run=${DRY_RUN}"
 
@@ -161,6 +169,33 @@ fi
 if [[ -n "${REFRESH_PERIOD_EPOCHS}" ]]; then
   cmd+=(--refresh-period-epochs "${REFRESH_PERIOD_EPOCHS}")
 fi
+
+if [[ -n "${TERMINAL_OPTIMIZER}" ]]; then
+  cmd+=(--terminal-optimizer "${TERMINAL_OPTIMIZER}")
+fi
+
+if [[ -n "${TERMINAL_EPOCHS}" ]]; then
+  cmd+=(--terminal-epochs "${TERMINAL_EPOCHS}")
+fi
+
+if [[ -n "${TERMINAL_LR}" ]]; then
+  cmd+=(--terminal-lr "${TERMINAL_LR}")
+fi
+
+case "${TERMINAL_REFRESH}" in
+  true|TRUE|1|yes|YES)
+    cmd+=(--terminal-refresh)
+    ;;
+  false|FALSE|0|no|NO)
+    cmd+=(--no-terminal-refresh)
+    ;;
+  "")
+    ;;
+  *)
+    echo "[hpc] ERROR: TERMINAL_REFRESH must be true or false, got '${TERMINAL_REFRESH}'." >&2
+    exit 2
+    ;;
+esac
 
 if [[ -n "${WANDB_PROJECT}" ]]; then
   cmd+=(--wandb-project "${WANDB_PROJECT}")

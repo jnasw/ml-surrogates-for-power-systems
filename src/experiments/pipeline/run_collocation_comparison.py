@@ -61,6 +61,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_REFERENCE_ID = "main_SM4_qbc_b512_ds01"
 DEFAULT_OOD_EVAL_ID = "ood_SM4_wide_ic_b512_ds01"
 DEFAULT_ADAM_LR = 3.0e-3
+DEFAULT_TERMINAL_LBFGS_LR = 1.0
 
 SCREENING_SEED_LABELS = ("s01",)
 FINAL_SEED_LABELS = ("s01", "s02", "s03", "s04", "s05")
@@ -99,6 +100,11 @@ SUMMARY_FIELDNAMES = [
     "density_label",
     "density_value",
     "refresh_period_epochs",
+    "optimizer_schedule",
+    "terminal_optimizer",
+    "terminal_epochs",
+    "terminal_lr",
+    "terminal_refresh",
     "total_preprocessed_collocation_points",
     "active_collocation_points",
     "candidate_points",
@@ -346,6 +352,8 @@ def _collocation_cfg_for_run(
     rad_c: float,
     rar_d_k: float,
     rar_d_c: float,
+    terminal_phase_name: str | None = None,
+    terminal_refresh: bool = False,
 ) -> dict[str, Any]:
     active = run_spec.active_points
     candidate = run_spec.candidate_points if run_spec.candidate_points is not None else max(active * 4, 256)
@@ -356,8 +364,8 @@ def _collocation_cfg_for_run(
         "initial_points": None,  # let factory derive default (half of active for rar_d/rar_g)
         "append_points": append,
         "refresh_period_epochs": 0 if run_spec.refresh_period_epochs is None else run_spec.refresh_period_epochs,
-        "refresh_mode": "epoch_periodic",
-        "refresh_on_phase_start": [],
+        "refresh_mode": "epoch_periodic_plus_phase_boundary" if terminal_refresh and terminal_phase_name else "epoch_periodic",
+        "refresh_on_phase_start": [] if not terminal_refresh or terminal_phase_name is None else [terminal_phase_name],
         "refresh_on_phase_end": [],
         "sampler": sampler,
         "score_norm": score_norm,
@@ -416,7 +424,16 @@ def _variant_overrides(*, variant: str, collocation_cfg: dict[str, Any]) -> list
     raise ValueError(f"Unsupported variant: {variant}")
 
 
-def _adam_phase_override(*, epochs: int, lr: float, batch_size: int) -> str:
+def _optimizer_phase_override(
+    *,
+    adam_epochs: int,
+    adam_lr: float,
+    batch_size: int,
+    terminal_optimizer: str,
+    terminal_epochs: int,
+    terminal_lr: float,
+    terminal_phase_name: str,
+) -> str:
     def phase(*, name: str, phase_epochs: int, phase_lr: float) -> str:
         return (
             "{"
@@ -427,20 +444,41 @@ def _adam_phase_override(*, epochs: int, lr: float, batch_size: int) -> str:
             "}"
         )
 
-    remaining = int(epochs)
+    remaining = int(adam_epochs)
     phases: list[str] = []
     if remaining <= 0:
         raise ValueError("Adam epochs must be positive.")
     fast_epochs = min(500, remaining)
-    phases.append(phase(name="adam_fast", phase_epochs=fast_epochs, phase_lr=float(lr)))
+    phases.append(phase(name="adam_fast", phase_epochs=fast_epochs, phase_lr=float(adam_lr)))
     remaining -= fast_epochs
     if remaining > 0:
         mid_epochs = min(1_500, remaining)
-        phases.append(phase(name="adam_mid", phase_epochs=mid_epochs, phase_lr=float(lr) / 3.0))
+        phases.append(phase(name="adam_mid", phase_epochs=mid_epochs, phase_lr=float(adam_lr) / 3.0))
         remaining -= mid_epochs
     if remaining > 0:
-        phases.append(phase(name="adam_fine", phase_epochs=remaining, phase_lr=float(lr) / 10.0))
+        phases.append(phase(name="adam_fine", phase_epochs=remaining, phase_lr=float(adam_lr) / 10.0))
+    if terminal_optimizer == "lbfgs" and int(terminal_epochs) > 0:
+        phases.append(
+            "{"
+            f"name:{terminal_phase_name},optimizer:LBFGS,"
+            f"lr:{float(terminal_lr)},epochs:{int(terminal_epochs)},batch_size:null,"
+            "shuffle:false,full_batch:true,allow_sampling:false,"
+            "optimizer_kwargs:{},scheduler:null,line_search:{name:strong_wolfe},convergence:null"
+            "}"
+        )
     return "pinn.optimizer_phases=[" + ",".join(phases) + "]"
+
+
+def _optimizer_schedule_label(*, terminal_optimizer: str, terminal_epochs: int) -> str:
+    if terminal_optimizer == "none" or int(terminal_epochs) <= 0:
+        return "adam"
+    return f"adam_{terminal_optimizer}{int(terminal_epochs)}"
+
+
+def _run_name_for_spec(run_spec: CollocationRunSpec, *, optimizer_schedule: str) -> str:
+    if optimizer_schedule == "adam":
+        return run_spec.run_name
+    return f"{run_spec.run_name}_{optimizer_schedule}"
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +495,7 @@ def _build_pinn_command(
     wandb_group: str,
     wandb_entity: str | None,
     wandb_tags: list[str],
+    run_name: str,
     run_spec: CollocationRunSpec,
     collocation_cfg: dict[str, Any],
     device: str,
@@ -467,6 +506,10 @@ def _build_pinn_command(
     epochs: int,
     batch_size: int,
     adam_lr: float,
+    terminal_optimizer: str,
+    terminal_epochs: int,
+    terminal_lr: float,
+    terminal_phase_name: str,
     log_every_epoch: int,
     id_eval_root: str | None,
     ood_eval_root: str | None,
@@ -497,10 +540,18 @@ def _build_pinn_command(
         "wandb.use=true",
         f"wandb.project={wandb_project}",
         f"wandb.group={wandb_group}",
-        f"wandb.name={run_spec.run_name}",
+        f"wandb.name={run_name}",
         f"wandb.tags={format_hydra_list(wandb_tags)}",
         *_variant_overrides(variant=run_spec.variant, collocation_cfg=collocation_cfg),
-        _adam_phase_override(epochs=epochs, lr=adam_lr, batch_size=batch_size),
+        _optimizer_phase_override(
+            adam_epochs=epochs,
+            adam_lr=adam_lr,
+            batch_size=batch_size,
+            terminal_optimizer=terminal_optimizer,
+            terminal_epochs=terminal_epochs,
+            terminal_lr=terminal_lr,
+            terminal_phase_name=terminal_phase_name,
+        ),
     ]
     if wandb_entity:
         command.append(f"wandb.entity={wandb_entity}")
@@ -525,6 +576,11 @@ def _summary_row_for_run(run: dict[str, Any]) -> dict[str, Any]:
         "density_label": run.get("density_label"),
         "density_value": run.get("density_value"),
         "refresh_period_epochs": run.get("refresh_period_epochs"),
+        "optimizer_schedule": run.get("optimizer_schedule"),
+        "terminal_optimizer": run.get("terminal_optimizer"),
+        "terminal_epochs": run.get("terminal_epochs"),
+        "terminal_lr": run.get("terminal_lr"),
+        "terminal_refresh": run.get("terminal_refresh"),
         "total_preprocessed_collocation_points": run.get("total_preprocessed_col_rows"),
         "active_collocation_points": run.get("active_points"),
         "candidate_points": run.get("candidate_points"),
@@ -731,6 +787,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--batch-size", type=int, default=4096, help="Adam mini-batch size.")
     parser.add_argument("--adam-lr", type=float, default=DEFAULT_ADAM_LR, help="Adam learning rate.")
+    parser.add_argument(
+        "--terminal-optimizer",
+        default="none",
+        choices=["none", "lbfgs"],
+        help="Optional full-batch terminal optimizer after the Adam collocation phase.",
+    )
+    parser.add_argument("--terminal-epochs", type=int, default=0, help="Terminal optimizer epochs.")
+    parser.add_argument("--terminal-lr", type=float, default=DEFAULT_TERMINAL_LBFGS_LR, help="Terminal optimizer learning rate.")
+    parser.add_argument(
+        "--terminal-refresh",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Refresh adaptive collocation points once at the terminal optimizer phase start.",
+    )
 
     # Collocation parameters
     parser.add_argument(
@@ -870,6 +940,22 @@ def main() -> None:
         epochs = SCREENING_DEFAULT_EPOCHS if mode == "screening" else FINAL_DEFAULT_EPOCHS
     if epochs < 0:
         raise SystemExit("--epochs must be non-negative.")
+    terminal_optimizer = str(args.terminal_optimizer).strip().lower()
+    terminal_epochs = int(args.terminal_epochs)
+    terminal_lr = float(args.terminal_lr)
+    if terminal_epochs < 0:
+        raise SystemExit("--terminal-epochs must be non-negative.")
+    if terminal_optimizer == "none":
+        terminal_epochs = 0
+    elif terminal_epochs <= 0:
+        raise SystemExit("--terminal-epochs must be > 0 when --terminal-optimizer is not 'none'.")
+    if terminal_optimizer != "none" and terminal_lr <= 0.0:
+        raise SystemExit("--terminal-lr must be > 0.")
+    terminal_phase_name = f"{terminal_optimizer}_refine"
+    optimizer_schedule = _optimizer_schedule_label(
+        terminal_optimizer=terminal_optimizer,
+        terminal_epochs=terminal_epochs,
+    )
 
     if args.refresh_period_epochs is not None:
         cadence_default: int | tuple[int, ...] = int(args.refresh_period_epochs)
@@ -922,6 +1008,11 @@ def main() -> None:
     manifest["artifacts"]["epochs"] = epochs
     manifest["artifacts"]["batch_size"] = args.batch_size
     manifest["artifacts"]["adam_lr"] = args.adam_lr
+    manifest["artifacts"]["optimizer_schedule"] = optimizer_schedule
+    manifest["artifacts"]["terminal_optimizer"] = terminal_optimizer
+    manifest["artifacts"]["terminal_epochs"] = terminal_epochs
+    manifest["artifacts"]["terminal_lr"] = terminal_lr
+    manifest["artifacts"]["terminal_refresh"] = bool(args.terminal_refresh and terminal_epochs > 0)
     manifest["artifacts"]["id_eval_id"] = eval_inputs["id_eval_id"]
     manifest["artifacts"]["id_eval_root"] = eval_inputs["id_eval_root"]
     manifest["artifacts"]["ood_eval_id"] = eval_inputs["ood_eval_id"]
@@ -961,6 +1052,7 @@ def main() -> None:
     print(f"[collocation-comparison] cadences={cadences}")
     print(f"[collocation-comparison] seed_labels={[l for l, _ in seed_pairs]}")
     print(f"[collocation-comparison] epochs={epochs}")
+    print(f"[collocation-comparison] optimizer_schedule={optimizer_schedule}")
     print(f"[collocation-comparison] wandb_project={wandb_project}")
 
     tags_base = wandb_tags_list(
@@ -981,9 +1073,9 @@ def main() -> None:
     )
 
     for run_spec in run_specs:
-        run_name = run_spec.run_name
+        run_name = _run_name_for_spec(run_spec, optimizer_schedule=optimizer_schedule)
         run_dir = output_root / "runs" / run_name
-        wandb_tags = [*tags_base, *run_spec.wandb_tags()]
+        wandb_tags = [*tags_base, *run_spec.wandb_tags(), optimizer_schedule]
         collocation_cfg = _collocation_cfg_for_run(
             run_spec=run_spec,
             sampler=args.sampler,
@@ -992,6 +1084,8 @@ def main() -> None:
             rad_c=args.rad_c,
             rar_d_k=args.rar_d_k,
             rar_d_c=args.rar_d_c,
+            terminal_phase_name=terminal_phase_name,
+            terminal_refresh=bool(args.terminal_refresh and terminal_epochs > 0),
         )
         command = _build_pinn_command(
             python_bin=args.python_bin,
@@ -1002,6 +1096,7 @@ def main() -> None:
             wandb_group=wandb_group,
             wandb_entity=args.wandb_entity,
             wandb_tags=wandb_tags,
+            run_name=run_name,
             run_spec=run_spec,
             collocation_cfg=collocation_cfg,
             device=args.device,
@@ -1012,6 +1107,10 @@ def main() -> None:
             epochs=epochs,
             batch_size=args.batch_size,
             adam_lr=args.adam_lr,
+            terminal_optimizer=terminal_optimizer,
+            terminal_epochs=terminal_epochs,
+            terminal_lr=terminal_lr,
+            terminal_phase_name=terminal_phase_name,
             log_every_epoch=args.log_every_epoch,
             id_eval_root=eval_inputs["id_eval_root"],
             ood_eval_root=eval_inputs["ood_eval_root"],
@@ -1030,6 +1129,11 @@ def main() -> None:
             "seed_label": run_spec.seed_label,
             "seed_value": run_spec.seed_value,
             "epochs": epochs,
+            "optimizer_schedule": optimizer_schedule,
+            "terminal_optimizer": terminal_optimizer,
+            "terminal_epochs": terminal_epochs,
+            "terminal_lr": terminal_lr,
+            "terminal_refresh": bool(args.terminal_refresh and terminal_epochs > 0),
             "dataset_reference_id": dataset_reference_id,
             "dataset_root": str(dataset_root),
             "id_eval_id": eval_inputs["id_eval_id"],
