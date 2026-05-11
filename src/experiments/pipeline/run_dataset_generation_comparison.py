@@ -29,8 +29,10 @@ from src.experiments.pipeline.helpers.launch_utils import (
 from src.experiments.pipeline.helpers.manifest import save_manifest, utc_now_iso
 from src.experiments.pipeline.helpers.seeds import load_seed_registry
 from src.experiments.pipeline.helpers.summary import (
+    STANDARD_PINN_SUMMARY_FIELDNAMES,
     csv_value as _csv_value,
     eval_metrics as _eval_metrics_from_payload,
+    extract_standard_pinn_summary_fields as _extract_standard_pinn_summary_fields,
     float_or_none as _float_or_none,
     mean_std as _mean_std_dict,
     read_json_if_exists as _read_json_if_exists,
@@ -67,7 +69,7 @@ FINAL_BUDGETS = ALL_BUDGETS
 FINAL_DATASET_SEEDS = ("ds01", "ds02", "ds03", "ds04", "ds05")
 FINAL_BASELINE_SEEDS = ("bs01", "bs02", "bs03")
 FINAL_PRESET = "main"
-DOWNSTREAM_MODELS = ("trajectory_baseline", "pinn_data_only")
+DOWNSTREAM_MODELS = ("pinn_data_only",)
 DEFAULT_PINN_DATA_ONLY_EPOCHS = 300
 DEFAULT_ADAM_LR = 3.0e-3
 
@@ -116,6 +118,7 @@ SUMMARY_FIELDNAMES = [
     "ood_eval_rmse",
     "ood_eval_mae",
     "id_ood_rmse_gap",
+    *STANDARD_PINN_SUMMARY_FIELDNAMES,
     "dataset_generation_seconds",
     "preprocessing_seconds",
     "baseline_training_seconds",
@@ -318,7 +321,11 @@ def _build_pinn_data_only_command(
         "pinn.supervised_sampling.enabled=false",
         "pinn.collocation.sampling.enabled=false",
         "pinn.gradient_telemetry.enabled=false",
-        "pinn.checkpointing.enabled=false",
+        "pinn.checkpointing.enabled=true",
+        "pinn.checkpointing.save_best=true",
+        "pinn.checkpointing.save_last=false",
+        "pinn.checkpointing.save_init=false",
+        "pinn.checkpointing.epoch_fractions=[]",
         "wandb.use=false",
         "logging.log_every_epoch=1",
         (
@@ -391,19 +398,12 @@ def _summary_rows_for_dataset_run(
     dataset_seed_label = dataset_run.get("dataset_seed_label")
     dataset_seed_value = dataset_run.get("dataset_seed_value")
     dataset_run_status = dataset_run.get("status")
-    baseline_runs: dict[str, Any] = dict(
-        dataset_manifest.get("baseline_runs", {})
-    ) if dataset_manifest else {}
     downstream_runs: dict[str, Any] = dict(dataset_run.get("downstream_runs", {}) or {})
 
     rows: list[dict[str, Any]] = []
     for seed_label in baseline_seed_labels:
         run_name = f"{method}_{budget}_{dataset_seed_label}_{seed_label}"
-        baseline_run = (
-            dict(baseline_runs.get(seed_label, {}))
-            if downstream_model == "trajectory_baseline"
-            else dict(downstream_runs.get(seed_label, {}))
-        )
+        baseline_run = dict(downstream_runs.get(seed_label, {}))
 
         if not baseline_run and dataset_run_status not in ("completed", "dry_run"):
             status = dataset_run_status or "failed"
@@ -425,31 +425,29 @@ def _summary_rows_for_dataset_run(
             baseline_root = baseline_run.get("baseline_root") or baseline_run.get("run_dir")
             raw_payload = baseline_run.get("metrics_payload")
             metrics_payload = dict(raw_payload) if isinstance(raw_payload, dict) else None
-            if downstream_model == "trajectory_baseline":
-                baseline_training_seconds = _iso_elapsed_seconds(
+            timings_payload = (
+                _read_json_if_exists(Path(str(baseline_root)) / "timings.json")
+                if baseline_root
+                else None
+            )
+            baseline_training_seconds = (
+                _float_or_none(timings_payload.get("training_seconds"))
+                if timings_payload
+                else _iso_elapsed_seconds(
                     baseline_run.get("started_at_utc"),
                     baseline_run.get("completed_at_utc"),
                 )
-            else:
-                timings_payload = (
-                    _read_json_if_exists(Path(str(baseline_root)) / "timings.json")
-                    if baseline_root
-                    else None
-                )
-                baseline_training_seconds = (
-                    _float_or_none(timings_payload.get("training_seconds"))
-                    if timings_payload
-                    else _iso_elapsed_seconds(
-                        baseline_run.get("started_at_utc"),
-                        baseline_run.get("completed_at_utc"),
-                    )
-                )
+            )
 
         final_test_metrics = dict(metrics_payload.get("final_test_metrics") or {}) if metrics_payload else {}
         id_eval_m = _eval_metrics_from_payload(metrics_payload, "id")
         ood_eval_m = _eval_metrics_from_payload(metrics_payload, "ood")
         id_rmse = _float_or_none(id_eval_m.get("rmse"))
         ood_rmse = _float_or_none(ood_eval_m.get("rmse"))
+        standard_pinn_metrics = _extract_standard_pinn_summary_fields(
+            metrics=metrics_payload,
+            run_dir=Path(str(baseline_root)) if baseline_root else None,
+        )
 
         rows.append({
             "run_name": run_name,
@@ -487,6 +485,7 @@ def _summary_rows_for_dataset_run(
             "id_ood_rmse_gap": (
                 None if id_rmse is None or ood_rmse is None else ood_rmse - id_rmse
             ),
+            **standard_pinn_metrics,
             "dataset_generation_seconds": dataset_generation_seconds,
             "preprocessing_seconds": preprocessing_seconds,
             "baseline_training_seconds": baseline_training_seconds,
@@ -762,20 +761,19 @@ def build_parser() -> argparse.ArgumentParser:
     # Training
     parser.add_argument(
         "--downstream-model",
-        default="trajectory_baseline",
+        default="pinn_data_only",
         choices=DOWNSTREAM_MODELS,
         help=(
             "Downstream model trained on each generated dataset. "
-            "trajectory_baseline keeps the legacy IC-to-trajectory baseline; "
-            "pinn_data_only uses 20_run_pinn.py with only supervised data loss active."
+            "Only pinn_data_only is supported: 20_run_pinn.py with supervised data loss active "
+            "and physics/dt/IC losses disabled."
         ),
     )
     parser.add_argument(
         "--baseline-epochs", type=int, default=None,
         help=(
             "Override downstream training epochs. Smoke default: 1. "
-            "For trajectory_baseline final mode uses config default; "
-            f"for pinn_data_only final default is {DEFAULT_PINN_DATA_ONLY_EPOCHS}."
+            f"For pinn_data_only final default is {DEFAULT_PINN_DATA_ONLY_EPOCHS}."
         ),
     )
     parser.add_argument("--device", default="auto", help="Device for pinn_data_only downstream runs.")
@@ -815,7 +813,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "After each dataset cell finishes, delete generated data artifacts "
             "(data/ and qbc/rounds/, qbc/checkpoints/) to save HPC storage. "
-            "Preserves dataset_manifest.json, logs/, hydra/, baseline/, and summary artifacts. "
+            "Preserves dataset_manifest.json, logs/, hydra/, pinn_data_only/, baseline/, and summary artifacts. "
             "Never deletes anything under data/reference or data/evaluation. "
             "Ignored during --dry-run (shows planned deletions instead)."
         ),
@@ -862,8 +860,6 @@ def main() -> None:
             SMOKE_BASELINE_EPOCHS
             if mode == "smoke"
             else DEFAULT_PINN_DATA_ONLY_EPOCHS
-            if downstream_model == "pinn_data_only"
-            else None
         )
     )
 

@@ -27,7 +27,7 @@ set -euo pipefail
 #       bsub -env "all" < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh)
 #
 #   Final run, one method per job (no commas in values — short form works):
-#     bsub -env "CAMPAIGN_TAG=dataset_pinn_sm4,MODE=final,MODEL_FLAG=SM4,DOWNSTREAM_MODEL=pinn_data_only,METHODS=lhs_static" \
+#     bsub -env "CAMPAIGN_TAG=dataset_pinn_sm4,MODE=final,MODEL_FLAG=SM4,METHODS=lhs_static" \
 #       -J data_lhs_pinn < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 #
 #   Final run with storage cleanup:

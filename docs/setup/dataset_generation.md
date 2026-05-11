@@ -26,8 +26,7 @@ Evaluate how different trajectory sampling strategies affect downstream surrogat
 - Compare dataset generation strategies across fixed trajectory budgets.
 - Use identical preprocessing for all datasets.
 - Train one fixed downstream surrogate per generated dataset.
-- Default downstream model: `trajectory_baseline`, the legacy IC-to-trajectory supervised baseline.
-- Optional downstream model: `pinn_data_only`, which uses the PINN architecture with only supervised data loss active.
+- Downstream model: `pinn_data_only`, which uses the PINN architecture with only supervised data loss active.
 - Fixed downstream setup: architecture, optimizer, and training protocol.
 - Evaluation uses fixed external ID and OOD datasets.
 - Generated datasets are ephemeral and may be deleted after use when cleanup is enabled.
@@ -99,20 +98,19 @@ Planned matrix:
 
 ## Storage Strategy
 
-Generated datasets can become large on HPC. The pipeline supports a cleanup mode (`--cleanup-data`) that deletes large generated data artifacts — specifically `data/`, `qbc/rounds/`, and `qbc/checkpoints/` — after downstream baseline runs complete. Metrics, manifests, logs, configs, and summary files are always retained. `data/reference` and `data/evaluation` are never touched. Cleanup is disabled by default.
+Generated datasets can become large on HPC. The pipeline supports a cleanup mode (`--cleanup-data`) that deletes large generated data artifacts — specifically `data/`, `qbc/rounds/`, and `qbc/checkpoints/` — after downstream PINN data-only runs complete. Metrics, manifests, logs, configs, checkpoints, and summary files are always retained. `data/reference` and `data/evaluation` are never touched. Cleanup is disabled by default.
 
 ## Downstream Model Choices
 
-The launcher supports two downstream models:
+The launcher supports one downstream model:
 
 | Value | Meaning | Use |
 |-------|---------|-----|
-| `trajectory_baseline` | Legacy supervised network mapping ICs to flattened trajectories | Default, keeps historical baseline behavior |
-| `pinn_data_only` | `20_run_pinn.py` with data loss active and physics/dt/IC weights set to zero | PINN-shaped data-driven comparison |
+| `pinn_data_only` | `20_run_pinn.py` with data loss active and physics/dt/IC weights set to zero | Default dataset-generation downstream evaluator |
 
-`pinn_data_only` is useful when the dataset-generation study should use the same input/output formulation as the PINN experiments while removing physics supervision. It does not change simulator data or preprocessing.
+`pinn_data_only` makes the dataset-generation study use the same input/output formulation as the PINN experiments while removing physics supervision. It does not change simulator data or preprocessing.
 
-The `pinn_data_only` path exposes `DEVICE`, `DTYPE`, `BATCH_SIZE`, and `ADAM_LR`. The current calibrated Adam LR is `0.003`.
+The `pinn_data_only` path exposes `DEVICE`, `DTYPE`, `BATCH_SIZE`, and `ADAM_LR`. The current calibrated Adam LR is `0.003`. It saves the best validation checkpoint by default and reports both final metrics and best-checkpoint metrics in the summary artifacts.
 
 ## How to Run
 
@@ -154,7 +152,7 @@ python3 -m src.experiments.pipeline.run_dataset_generation_comparison \
   --baseline-seeds bs01,bs02,bs03
 ```
 
-### PINN-shaped data-only downstream model (local)
+### Data-only PINN downstream model (local)
 
 ```bash
 python3 -m src.experiments.pipeline.run_dataset_generation_comparison \
@@ -164,7 +162,6 @@ python3 -m src.experiments.pipeline.run_dataset_generation_comparison \
   --budgets b256 \
   --dataset-seeds ds01 \
   --baseline-seeds bs01,bs02,bs03 \
-  --downstream-model pinn_data_only \
   --device cuda \
   --dtype float64 \
   --adam-lr 0.003
@@ -183,13 +180,6 @@ python3 -m src.experiments.pipeline.run_dataset_generation_comparison \
 
 ```bash
 bsub -env "MODE=final,MODEL_FLAG=SM4" \
-  < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
-```
-
-### Full run with PINN-shaped data-only downstream model (HPC)
-
-```bash
-bsub -env "MODE=final,MODEL_FLAG=SM4,DOWNSTREAM_MODEL=pinn_data_only" \
   < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
 ```
 
@@ -279,7 +269,7 @@ Each comparison run produces:
 - `summary.json` — same data as `summary.csv` in JSON format
 - `failures.json` — details of any failed cells
 
-`summary.csv` columns include: `method`, `budget`, `dataset_seed`, `baseline_seed`, downstream model, internal test metrics, `id_eval` metrics, `ood_eval` metrics, `id_ood_rmse_gap`, and timing fields where available.
+`summary.csv` columns include: `method`, `budget`, `dataset_seed`, `baseline_seed`, downstream model, final internal test metrics, final `id_eval` metrics, final `ood_eval` metrics, best-checkpoint train/val/test/ID/OOD metrics, best checkpoint path, epoch metrics path, and timing fields where available.
 
 Cluster logs are written under:
 
