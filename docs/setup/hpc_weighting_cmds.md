@@ -68,8 +68,10 @@ python3 -m src.experiments.pipeline.run_weighting_comparison \
 ## 4. Reference Dataset
 
 ```bash
-bsub -env "REFERENCE_IDS=main_SM4_qbc_b512_ds01,DRY_RUN=false,FORCE_REBUILD=false" \
-  < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+(export REFERENCE_IDS=main_SM4_qbc_b512_ds01 \
+  DRY_RUN=false \
+  FORCE_REBUILD=false && \
+  bsub -env "all" < hpc/reference_datasets/generate_reference_datasets.lsf.sh)
 ```
 
 Expected outputs:
@@ -82,8 +84,10 @@ data/reference/index.json
 ## 5. Evaluation Datasets
 
 ```bash
-bsub -env "EVALUATION_IDS=id_SM4_lhs_b512_ds01,ood_SM4_wide_ic_b512_ds01,DRY_RUN=false,FORCE_REBUILD=false" \
-  < hpc/evaluation_datasets/generate_evaluation_datasets.lsf.sh
+(export EVALUATION_IDS=id_SM4_lhs_b512_ds01,ood_SM4_wide_ic_b512_ds01 \
+  DRY_RUN=false \
+  FORCE_REBUILD=false && \
+  bsub -env "all" < hpc/evaluation_datasets/generate_evaluation_datasets.lsf.sh)
 ```
 
 Expected outputs:
