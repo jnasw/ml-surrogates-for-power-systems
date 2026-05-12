@@ -67,6 +67,9 @@ OOD_EVAL_ID="${OOD_EVAL_ID:-}"
 NO_ID_EVAL="${NO_ID_EVAL:-false}"
 NO_OOD_EVAL="${NO_OOD_EVAL:-false}"
 BASELINE_EPOCHS="${BASELINE_EPOCHS:-}"
+QBC_SAVE_ROUND_ARRAYS="${QBC_SAVE_ROUND_ARRAYS:-}"
+QBC_SAVE_DATASET_CHECKPOINTS="${QBC_SAVE_DATASET_CHECKPOINTS:-}"
+QBC_SAVE_ENSEMBLE_CHECKPOINTS="${QBC_SAVE_ENSEMBLE_CHECKPOINTS:-}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-}"
 CLEANUP_DATA="${CLEANUP_DATA:-false}"
 DRY_RUN="${DRY_RUN:-false}"
@@ -101,6 +104,9 @@ echo "[hpc] ood_eval_id=${OOD_EVAL_ID:-<model-aware default>}"
 echo "[hpc] no_id_eval=${NO_ID_EVAL}"
 echo "[hpc] no_ood_eval=${NO_OOD_EVAL}"
 echo "[hpc] baseline_epochs=${BASELINE_EPOCHS:-<mode default>}"
+echo "[hpc] qbc_save_round_arrays=${QBC_SAVE_ROUND_ARRAYS:-<stage1 default>}"
+echo "[hpc] qbc_save_dataset_checkpoints=${QBC_SAVE_DATASET_CHECKPOINTS:-<stage1 default>}"
+echo "[hpc] qbc_save_ensemble_checkpoints=${QBC_SAVE_ENSEMBLE_CHECKPOINTS:-<stage1 default>}"
 echo "[hpc] output_root=${OUTPUT_ROOT:-<auto>}"
 echo "[hpc] cleanup_data=${CLEANUP_DATA}"
 echo "[hpc] dry_run=${DRY_RUN}"
@@ -178,6 +184,51 @@ fi
 if [[ -n "${BASELINE_EPOCHS}" ]]; then
   cmd+=(--baseline-epochs "${BASELINE_EPOCHS}")
 fi
+
+case "${QBC_SAVE_ROUND_ARRAYS}" in
+  true|TRUE|1|yes|YES)
+    cmd+=(--qbc-save-round-arrays)
+    ;;
+  false|FALSE|0|no|NO)
+    cmd+=(--no-qbc-save-round-arrays)
+    ;;
+  "")
+    ;;
+  *)
+    echo "[hpc] ERROR: QBC_SAVE_ROUND_ARRAYS must be true or false, got '${QBC_SAVE_ROUND_ARRAYS}'." >&2
+    exit 2
+    ;;
+esac
+
+case "${QBC_SAVE_DATASET_CHECKPOINTS}" in
+  true|TRUE|1|yes|YES)
+    cmd+=(--qbc-save-dataset-checkpoints)
+    ;;
+  false|FALSE|0|no|NO)
+    cmd+=(--no-qbc-save-dataset-checkpoints)
+    ;;
+  "")
+    ;;
+  *)
+    echo "[hpc] ERROR: QBC_SAVE_DATASET_CHECKPOINTS must be true or false, got '${QBC_SAVE_DATASET_CHECKPOINTS}'." >&2
+    exit 2
+    ;;
+esac
+
+case "${QBC_SAVE_ENSEMBLE_CHECKPOINTS}" in
+  true|TRUE|1|yes|YES)
+    cmd+=(--qbc-save-ensemble-checkpoints)
+    ;;
+  false|FALSE|0|no|NO)
+    cmd+=(--no-qbc-save-ensemble-checkpoints)
+    ;;
+  "")
+    ;;
+  *)
+    echo "[hpc] ERROR: QBC_SAVE_ENSEMBLE_CHECKPOINTS must be true or false, got '${QBC_SAVE_ENSEMBLE_CHECKPOINTS}'." >&2
+    exit 2
+    ;;
+esac
 
 if [[ -n "${OUTPUT_ROOT}" ]]; then
   cmd+=(--output-root "${OUTPUT_ROOT}")

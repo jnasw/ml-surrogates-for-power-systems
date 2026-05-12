@@ -286,6 +286,17 @@ def _build_run_experiment_command(
     return cmd
 
 
+def _qbc_storage_stage1_overrides(args: argparse.Namespace) -> tuple[str, ...]:
+    overrides: list[str] = []
+    if args.qbc_save_round_arrays is not None:
+        overrides.append(f"qbc_save_round_arrays={str(bool(args.qbc_save_round_arrays)).lower()}")
+    if args.qbc_save_dataset_checkpoints is not None:
+        overrides.append(f"qbc_save_dataset_checkpoints={str(bool(args.qbc_save_dataset_checkpoints)).lower()}")
+    if args.qbc_save_ensemble_checkpoints is not None:
+        overrides.append(f"qbc_save_ensemble_checkpoints={str(bool(args.qbc_save_ensemble_checkpoints)).lower()}")
+    return tuple(overrides)
+
+
 def _build_pinn_data_only_command(
     *,
     python_bin: str,
@@ -782,6 +793,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--adam-lr", type=float, default=DEFAULT_ADAM_LR, help="Adam learning rate for pinn_data_only downstream runs.")
     parser.add_argument("--preset", default=None, help="Config preset. Defaults by --mode.")
 
+    # Adaptive dataset-generation artifacts
+    parser.add_argument(
+        "--qbc-save-round-arrays",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Save per-round adaptive arrays under qbc/rounds. Default: stage-1 config default.",
+    )
+    parser.add_argument(
+        "--qbc-save-dataset-checkpoints",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Save adaptive dataset resume checkpoints under qbc/checkpoints. Default: stage-1 config default.",
+    )
+    parser.add_argument(
+        "--qbc-save-ensemble-checkpoints",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Save QBC ensemble model checkpoints under qbc/checkpoints. Default: stage-1 config default.",
+    )
+
     # External evaluation
     parser.add_argument(
         "--id-eval-id", default=None,
@@ -834,6 +865,7 @@ def main() -> None:
     model_flag = str(args.model_flag)
     downstream_model = str(args.downstream_model)
     cleanup_data = bool(args.cleanup_data)
+    qbc_storage_overrides = _qbc_storage_stage1_overrides(args)
 
     # Resolve matrix from mode defaults + CLI overrides
     methods: list[str] = (
@@ -935,6 +967,9 @@ def main() -> None:
             "downstream_epochs": baseline_epochs,
             "adam_lr": float(args.adam_lr),
             "cleanup_data": cleanup_data,
+            "qbc_save_round_arrays": args.qbc_save_round_arrays,
+            "qbc_save_dataset_checkpoints": args.qbc_save_dataset_checkpoints,
+            "qbc_save_ensemble_checkpoints": args.qbc_save_ensemble_checkpoints,
         },
     )
     manifest["artifacts"]["id_eval_id"] = id_eval_id
@@ -968,6 +1003,8 @@ def main() -> None:
     print(f"[dataset-gen-comparison] ood_eval_id={ood_eval_id or '<none>'}")
     print(f"[dataset-gen-comparison] ood_eval_root={ood_eval_root or '<none>'}")
     print(f"[dataset-gen-comparison] cleanup_data={cleanup_data}")
+    if qbc_storage_overrides:
+        print(f"[dataset-gen-comparison] qbc_storage_overrides={list(qbc_storage_overrides)}")
     print(f"[dataset-gen-comparison] total_dataset_runs={total_dataset_runs}")
     print(f"[dataset-gen-comparison] total_baseline_runs={total_baseline_runs}")
     print(f"[dataset-gen-comparison] output_root={output_root}")
@@ -994,7 +1031,10 @@ def main() -> None:
                     id_eval_root=id_eval_root,
                     ood_eval_root=ood_eval_root,
                     skip_baseline=downstream_model == "pinn_data_only",
-                    stage1_overrides=SMOKE_STAGE1_OVERRIDES if mode == "smoke" else (),
+                    stage1_overrides=(
+                        *(SMOKE_STAGE1_OVERRIDES if mode == "smoke" else ()),
+                        *qbc_storage_overrides,
+                    ),
                     stage2_overrides=SMOKE_STAGE2_OVERRIDES if mode == "smoke" else (),
                     dataset_run_index=dataset_run_idx,
                     dataset_run_total=total_dataset_runs,

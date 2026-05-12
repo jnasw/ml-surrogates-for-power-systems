@@ -46,6 +46,9 @@ class AdaptiveConfig:
     k_select: int
     t_rounds: int
     enable_logging: bool
+    save_round_arrays: bool
+    save_dataset_checkpoints: bool
+    save_ensemble_checkpoints: bool
     run_dir: str
     resume_from_round: int
     resume_stage: str
@@ -119,6 +122,9 @@ def _build_adaptive_config(config: Any, method_name: str) -> AdaptiveConfig:
         k_select=int(getattr(config, "qbc_K", 16)),
         t_rounds=int(getattr(config, "qbc_T", 3)),
         enable_logging=bool(getattr(config, "qbc_enable_logging", False)),
+        save_round_arrays=bool(getattr(config, "qbc_save_round_arrays", True)),
+        save_dataset_checkpoints=bool(getattr(config, "qbc_save_dataset_checkpoints", True)),
+        save_ensemble_checkpoints=bool(getattr(config, "qbc_save_ensemble_checkpoints", True)),
         run_dir=run_dir,
         resume_from_round=int(getattr(config, "qbc_resume_from_round", -1)),
         resume_stage=str(getattr(config, "qbc_resume_stage", "next_round")),
@@ -126,6 +132,15 @@ def _build_adaptive_config(config: Any, method_name: str) -> AdaptiveConfig:
 
     if adaptive_cfg.resume_from_round >= 0 and not adaptive_cfg.enable_logging:
         raise ValueError("qbc_resume_from_round requires qbc_enable_logging=true.")
+    if adaptive_cfg.resume_from_round >= 0 and not adaptive_cfg.save_dataset_checkpoints:
+        raise ValueError("qbc_resume_from_round requires qbc_save_dataset_checkpoints=true.")
+    if (
+        adaptive_cfg.method_name in {METHOD_QBC_DEEP_ENSEMBLE, METHOD_QBC_MARKER_HYBRID}
+        and adaptive_cfg.resume_from_round >= 0
+        and adaptive_cfg.resume_stage == "same_round_post_train"
+        and not adaptive_cfg.save_ensemble_checkpoints
+    ):
+        raise ValueError("qbc_resume_stage=same_round_post_train requires qbc_save_ensemble_checkpoints=true.")
     if adaptive_cfg.method_name == METHOD_MARKER_DIRECTED and adaptive_cfg.resume_from_round >= 0:
         raise ValueError("marker_directed currently does not support qbc_resume_from_round.")
     return adaptive_cfg
@@ -232,9 +247,20 @@ def _setup_logger(config: Any, adaptive_cfg: AdaptiveConfig) -> ExperimentLogger
         print("[stage-1] Adaptive logger disabled.")
         return None
 
-    logger = ExperimentLogger(run_dir=adaptive_cfg.run_dir)
+    logger = ExperimentLogger(
+        run_dir=adaptive_cfg.run_dir,
+        save_round_arrays=adaptive_cfg.save_round_arrays,
+        save_dataset_checkpoints=adaptive_cfg.save_dataset_checkpoints,
+        save_ensemble_checkpoints=adaptive_cfg.save_ensemble_checkpoints,
+    )
     logger.save_config(config)
-    print(f"[stage-1] Adaptive logger enabled. run_dir={adaptive_cfg.run_dir}")
+    print(
+        "[stage-1] Adaptive logger enabled. "
+        f"run_dir={adaptive_cfg.run_dir} "
+        f"round_arrays={adaptive_cfg.save_round_arrays} "
+        f"dataset_checkpoints={adaptive_cfg.save_dataset_checkpoints} "
+        f"ensemble_checkpoints={adaptive_cfg.save_ensemble_checkpoints}"
+    )
     return logger
 
 

@@ -100,6 +100,8 @@ Planned matrix:
 
 Generated datasets can become large on HPC. The pipeline supports a cleanup mode (`--cleanup-data`) that deletes large generated data artifacts — specifically `data/`, `qbc/rounds/`, and `qbc/checkpoints/` — after downstream PINN data-only runs complete. Metrics, manifests, logs, configs, checkpoints, and summary files are always retained. `data/reference` and `data/evaluation` are never touched. Cleanup is disabled by default.
 
+QBC artifact storage can also be controlled before the run writes large intermediates. When QBC logging is enabled, `qbc/history.jsonl` is always retained. Set `QBC_SAVE_ROUND_ARRAYS=false` to skip `qbc/rounds/`, `QBC_SAVE_DATASET_CHECKPOINTS=false` to skip dataset checkpoints, and `QBC_SAVE_ENSEMBLE_CHECKPOINTS=false` to skip ensemble checkpoints. Keep dataset checkpoints enabled for QBC resume workflows.
+
 ## Downstream Model Choices
 
 The launcher supports one downstream model:

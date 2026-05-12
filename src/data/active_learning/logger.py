@@ -18,12 +18,25 @@ from src.data.loaders.trajectory_dataset import TrajectoryDataset
 class ExperimentLogger:
     """Lightweight file-based logger for iterative QBC experiments."""
 
-    def __init__(self, run_dir: str):
+    def __init__(
+        self,
+        run_dir: str,
+        *,
+        save_round_arrays: bool = True,
+        save_dataset_checkpoints: bool = True,
+        save_ensemble_checkpoints: bool = True,
+    ):
         self.run_dir = run_dir
         self.rounds_dir = os.path.join(run_dir, "rounds")
         self.ckpt_dir = os.path.join(run_dir, "checkpoints")
-        os.makedirs(self.rounds_dir, exist_ok=True)
-        os.makedirs(self.ckpt_dir, exist_ok=True)
+        self.save_round_arrays_enabled = bool(save_round_arrays)
+        self.save_dataset_checkpoints_enabled = bool(save_dataset_checkpoints)
+        self.save_ensemble_checkpoints_enabled = bool(save_ensemble_checkpoints)
+        os.makedirs(self.run_dir, exist_ok=True)
+        if self.save_round_arrays_enabled:
+            os.makedirs(self.rounds_dir, exist_ok=True)
+        if self.save_dataset_checkpoints_enabled or self.save_ensemble_checkpoints_enabled:
+            os.makedirs(self.ckpt_dir, exist_ok=True)
         self.history_path = os.path.join(run_dir, "history.jsonl")
 
     @staticmethod
@@ -43,12 +56,13 @@ class ExperimentLogger:
         selected_idx: np.ndarray,
         selected_ics: np.ndarray,
     ) -> None:
-        round_dir = os.path.join(self.rounds_dir, f"round_{summary.round_idx:03d}")
-        os.makedirs(round_dir, exist_ok=True)
-        np.save(os.path.join(round_dir, "candidate_ics.npy"), x_cand)
-        np.save(os.path.join(round_dir, "scores.npy"), scores)
-        np.save(os.path.join(round_dir, "selected_indices.npy"), selected_idx)
-        np.save(os.path.join(round_dir, "selected_ics.npy"), selected_ics)
+        if self.save_round_arrays_enabled:
+            round_dir = os.path.join(self.rounds_dir, f"round_{summary.round_idx:03d}")
+            os.makedirs(round_dir, exist_ok=True)
+            np.save(os.path.join(round_dir, "candidate_ics.npy"), x_cand)
+            np.save(os.path.join(round_dir, "scores.npy"), scores)
+            np.save(os.path.join(round_dir, "selected_indices.npy"), selected_idx)
+            np.save(os.path.join(round_dir, "selected_ics.npy"), selected_ics)
 
         payload = asdict(summary)
         payload["selected_indices"] = summary.selected_indices.tolist()
@@ -57,6 +71,8 @@ class ExperimentLogger:
 
     def save_round_arrays(self, round_idx: int, **arrays: Any) -> None:
         """Save additional round-level arrays for custom acquisition analyses."""
+        if not self.save_round_arrays_enabled:
+            return
         round_dir = os.path.join(self.rounds_dir, f"round_{int(round_idx):03d}")
         os.makedirs(round_dir, exist_ok=True)
         for key, value in arrays.items():
@@ -65,6 +81,9 @@ class ExperimentLogger:
             np.save(os.path.join(round_dir, f"{key}.npy"), np.asarray(value))
 
     def save_dataset_checkpoint(self, dataset: TrajectoryDataset, tag: str) -> str:
+        if not self.save_dataset_checkpoints_enabled:
+            return ""
+        os.makedirs(self.ckpt_dir, exist_ok=True)
         path = os.path.join(self.ckpt_dir, f"dataset_{tag}.npz")
         test_ics, test_trajs = dataset.test_view()
         np.savez_compressed(
@@ -96,6 +115,9 @@ class ExperimentLogger:
         )
 
     def save_ensemble_checkpoint(self, ensemble: DeepEnsemble, tag: str) -> str:
+        if not self.save_ensemble_checkpoints_enabled:
+            return ""
+        os.makedirs(self.ckpt_dir, exist_ok=True)
         return save_ensemble_checkpoint(ensemble=ensemble, folder=self.ckpt_dir, tag=tag)
 
     def load_ensemble_checkpoint(self, tag: str, device_preference: str = "auto") -> DeepEnsemble:

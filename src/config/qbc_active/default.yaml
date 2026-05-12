@@ -35,6 +35,9 @@ qbc_T: 3
 # Optional QBC logging/checkpointing for create_dataset.py.
 # Disabled by default.
 qbc_enable_logging: false
+qbc_save_round_arrays: true
+qbc_save_dataset_checkpoints: true
+qbc_save_ensemble_checkpoints: true
 qbc_run_dir: null
 qbc_resume_from_round: -1
 qbc_resume_stage: next_round # next_round | same_round_post_train
