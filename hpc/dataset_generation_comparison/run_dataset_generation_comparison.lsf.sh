@@ -67,6 +67,10 @@ OOD_EVAL_ID="${OOD_EVAL_ID:-}"
 NO_ID_EVAL="${NO_ID_EVAL:-false}"
 NO_OOD_EVAL="${NO_OOD_EVAL:-false}"
 BASELINE_EPOCHS="${BASELINE_EPOCHS:-}"
+WANDB_USE="${WANDB_USE:-false}"
+WANDB_PROJECT="${WANDB_PROJECT:-}"
+WANDB_ENTITY="${WANDB_ENTITY:-}"
+WANDB_TAGS="${WANDB_TAGS:-}"
 QBC_SAVE_ROUND_ARRAYS="${QBC_SAVE_ROUND_ARRAYS:-}"
 QBC_SAVE_DATASET_CHECKPOINTS="${QBC_SAVE_DATASET_CHECKPOINTS:-}"
 QBC_SAVE_ENSEMBLE_CHECKPOINTS="${QBC_SAVE_ENSEMBLE_CHECKPOINTS:-}"
@@ -104,6 +108,10 @@ echo "[hpc] ood_eval_id=${OOD_EVAL_ID:-<model-aware default>}"
 echo "[hpc] no_id_eval=${NO_ID_EVAL}"
 echo "[hpc] no_ood_eval=${NO_OOD_EVAL}"
 echo "[hpc] baseline_epochs=${BASELINE_EPOCHS:-<mode default>}"
+echo "[hpc] wandb_use=${WANDB_USE}"
+echo "[hpc] wandb_project=${WANDB_PROJECT:-<launcher default>}"
+echo "[hpc] wandb_entity=${WANDB_ENTITY:-<none>}"
+echo "[hpc] wandb_tags=${WANDB_TAGS:-<none>}"
 echo "[hpc] qbc_save_round_arrays=${QBC_SAVE_ROUND_ARRAYS:-<stage1 default>}"
 echo "[hpc] qbc_save_dataset_checkpoints=${QBC_SAVE_DATASET_CHECKPOINTS:-<stage1 default>}"
 echo "[hpc] qbc_save_ensemble_checkpoints=${QBC_SAVE_ENSEMBLE_CHECKPOINTS:-<stage1 default>}"
@@ -183,6 +191,31 @@ fi
 
 if [[ -n "${BASELINE_EPOCHS}" ]]; then
   cmd+=(--baseline-epochs "${BASELINE_EPOCHS}")
+fi
+
+case "${WANDB_USE}" in
+  true|TRUE|1|yes|YES)
+    cmd+=(--wandb-use)
+    ;;
+  false|FALSE|0|no|NO)
+    cmd+=(--no-wandb-use)
+    ;;
+  *)
+    echo "[hpc] ERROR: WANDB_USE must be true or false, got '${WANDB_USE}'." >&2
+    exit 2
+    ;;
+esac
+
+if [[ -n "${WANDB_PROJECT}" ]]; then
+  cmd+=(--wandb-project "${WANDB_PROJECT}")
+fi
+
+if [[ -n "${WANDB_ENTITY}" ]]; then
+  cmd+=(--wandb-entity "${WANDB_ENTITY}")
+fi
+
+if [[ -n "${WANDB_TAGS}" ]]; then
+  cmd+=(--wandb-tags "${WANDB_TAGS}")
 fi
 
 case "${QBC_SAVE_ROUND_ARRAYS}" in

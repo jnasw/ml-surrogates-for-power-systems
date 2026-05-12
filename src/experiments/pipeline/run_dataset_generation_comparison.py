@@ -20,6 +20,7 @@ from typing import Any
 
 from src.experiments.pipeline.helpers.evaluation import resolve_evaluation_dataset as _resolve_evaluation_dataset
 from src.experiments.pipeline.helpers.launch_utils import (
+    format_hydra_list,
     init_experiment_manifest,
     parse_csv_list,
     run_logged_command,
@@ -74,14 +75,14 @@ DEFAULT_PINN_DATA_ONLY_EPOCHS = 300
 DEFAULT_ADAM_LR = 3.0e-3
 
 DEFAULT_ID_EVAL_IDS: dict[str, str] = {
-    "SM4": "id_SM4_lhs_b512_ds01",
-    "SM6": "id_SM6_lhs_b512_ds01",
-    "SM_AVR_GOV": "id_SM_AVR_GOV_lhs_b512_ds01",
+    "SM4": "id_SM4_lhs_b4096_eval01",
+    "SM6": "id_SM6_lhs_b4096_eval01",
+    "SM_AVR_GOV": "id_SM_AVR_GOV_lhs_b4096_eval01",
 }
 DEFAULT_OOD_EVAL_IDS: dict[str, str] = {
-    "SM4": "ood_SM4_wide_ic_b512_ds01",
-    "SM6": "ood_SM6_wide_ic_b512_ds01",
-    "SM_AVR_GOV": "ood_SM_AVR_GOV_wide_ic_b512_ds01",
+    "SM4": "ood_SM4_wide_ic_b4096_eval01",
+    "SM6": "ood_SM6_wide_ic_b4096_eval01",
+    "SM_AVR_GOV": "ood_SM_AVR_GOV_wide_ic_b4096_eval01",
 }
 
 SUMMARY_FIELDNAMES = [
@@ -311,6 +312,12 @@ def _build_pinn_data_only_command(
     batch_size: int,
     id_eval_root: str | None,
     ood_eval_root: str | None,
+    wandb_use: bool,
+    wandb_project: str,
+    wandb_entity: str | None,
+    wandb_group: str,
+    wandb_name: str,
+    wandb_tags: list[str],
 ) -> list[str]:
     command = [
         python_bin,
@@ -337,7 +344,7 @@ def _build_pinn_data_only_command(
         "pinn.checkpointing.save_last=false",
         "pinn.checkpointing.save_init=false",
         "pinn.checkpointing.epoch_fractions=[]",
-        "wandb.use=false",
+        f"wandb.use={str(bool(wandb_use)).lower()}",
         "logging.log_every_epoch=1",
         (
             "pinn.optimizer_phases=["
@@ -352,6 +359,15 @@ def _build_pinn_data_only_command(
         command.append(f"evaluation.id.root={id_eval_root}")
     if ood_eval_root:
         command.append(f"evaluation.ood.root={ood_eval_root}")
+    if wandb_use:
+        command.extend([
+            f"wandb.project={wandb_project}",
+            f"wandb.group={wandb_group}",
+            f"wandb.name={wandb_name}",
+            f"wandb.tags={format_hydra_list(wandb_tags)}",
+        ])
+        if wandb_entity:
+            command.append(f"wandb.entity={wandb_entity}")
     return command
 
 
@@ -792,6 +808,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=4096, help="Batch size for pinn_data_only downstream runs.")
     parser.add_argument("--adam-lr", type=float, default=DEFAULT_ADAM_LR, help="Adam learning rate for pinn_data_only downstream runs.")
     parser.add_argument("--preset", default=None, help="Config preset. Defaults by --mode.")
+    parser.add_argument(
+        "--wandb-use",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable W&B for downstream pinn_data_only runs. Default: disabled.",
+    )
+    parser.add_argument("--wandb-project", default="thesis-dataset-generation", help="W&B project for downstream runs.")
+    parser.add_argument("--wandb-entity", default=None, help="Optional W&B entity for downstream runs.")
+    parser.add_argument("--wandb-tags", default="", help="Comma-separated extra W&B tags for downstream runs.")
 
     # Adaptive dataset-generation artifacts
     parser.add_argument(
@@ -866,6 +891,10 @@ def main() -> None:
     downstream_model = str(args.downstream_model)
     cleanup_data = bool(args.cleanup_data)
     qbc_storage_overrides = _qbc_storage_stage1_overrides(args)
+    wandb_use = bool(args.wandb_use)
+    wandb_project = str(args.wandb_project)
+    wandb_entity = str(args.wandb_entity) if args.wandb_entity else None
+    wandb_extra_tags = parse_csv_list(str(args.wandb_tags)) if args.wandb_tags else []
 
     # Resolve matrix from mode defaults + CLI overrides
     methods: list[str] = (
@@ -970,6 +999,9 @@ def main() -> None:
             "qbc_save_round_arrays": args.qbc_save_round_arrays,
             "qbc_save_dataset_checkpoints": args.qbc_save_dataset_checkpoints,
             "qbc_save_ensemble_checkpoints": args.qbc_save_ensemble_checkpoints,
+            "wandb_use": wandb_use,
+            "wandb_project": wandb_project if wandb_use else None,
+            "wandb_entity": wandb_entity if wandb_use else None,
         },
     )
     manifest["artifacts"]["id_eval_id"] = id_eval_id
@@ -1003,6 +1035,10 @@ def main() -> None:
     print(f"[dataset-gen-comparison] ood_eval_id={ood_eval_id or '<none>'}")
     print(f"[dataset-gen-comparison] ood_eval_root={ood_eval_root or '<none>'}")
     print(f"[dataset-gen-comparison] cleanup_data={cleanup_data}")
+    print(f"[dataset-gen-comparison] wandb_use={wandb_use}")
+    if wandb_use:
+        print(f"[dataset-gen-comparison] wandb_project={wandb_project}")
+        print(f"[dataset-gen-comparison] wandb_entity={wandb_entity or '<none>'}")
     if qbc_storage_overrides:
         print(f"[dataset-gen-comparison] qbc_storage_overrides={list(qbc_storage_overrides)}")
     print(f"[dataset-gen-comparison] total_dataset_runs={total_dataset_runs}")
@@ -1122,6 +1158,20 @@ def main() -> None:
                             batch_size=int(args.batch_size),
                             id_eval_root=id_eval_root,
                             ood_eval_root=ood_eval_root,
+                            wandb_use=wandb_use,
+                            wandb_project=wandb_project,
+                            wandb_entity=wandb_entity,
+                            wandb_group=f"{campaign_tag or stamp}_{shard_label}",
+                            wandb_name=pinn_run_name,
+                            wandb_tags=[
+                                "dataset_generation",
+                                model_flag.lower(),
+                                str(method),
+                                str(budget),
+                                str(dataset_seed),
+                                str(seed_label),
+                                *wandb_extra_tags,
+                            ],
                         )
                         print(
                             f"[dataset-gen-comparison] pinn_data_only subrun "

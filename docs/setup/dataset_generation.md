@@ -71,6 +71,7 @@ Planned matrix:
 - External ID evaluation dataset is the primary in-distribution metric.
 - External OOD evaluation dataset is the primary generalization metric.
 - Internal dataset test split is secondary / debug only.
+- Dataset-generation comparisons use larger independent default evaluation sets: `id_SM4_lhs_b4096_eval01` and `ood_SM4_wide_ic_b4096_eval01`. Other experiment pipelines may still use the smaller `b512` evaluation defaults.
 
 ## Metrics
 
@@ -121,6 +122,15 @@ Run commands from the repository root.
 HPC wrappers source shared defaults from `hpc/common/lsf_defaults.sh`; the static `#BSUB` directives remain the submitted resources. Use `bsub -env` to pass environment variables — inline `VAR=val bsub` does not propagate to the batch environment on this cluster. When a variable value contains commas (e.g. `DATASET_SEEDS=ds01,ds02`), use the subshell form `(export VAR=val ... && bsub -env "all" < script)` instead.
 
 The dataset-generation wrapper exposes `ID_EVAL_ID`, `OOD_EVAL_ID`, `NO_ID_EVAL`, `NO_OOD_EVAL`, and `CLEANUP_DATA`. External ID/OOD evaluation is the primary metric for this experiment, but smoke/compressed datasets may require `NO_ID_EVAL=true NO_OOD_EVAL=true` if their time grid is incompatible with fixed evaluation datasets.
+
+Generate the default SM4 evaluation datasets before final dataset-generation jobs:
+
+```bash
+(export EVALUATION_IDS=id_SM4_lhs_b4096_eval01,ood_SM4_wide_ic_b4096_eval01 \
+  DRY_RUN=false \
+  FORCE_REBUILD=false && \
+  bsub -env "all" < hpc/evaluation_datasets/generate_evaluation_datasets.lsf.sh)
+```
 
 ### Smoke test (local)
 

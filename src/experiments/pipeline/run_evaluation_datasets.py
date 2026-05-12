@@ -68,6 +68,32 @@ def _evaluation_specs() -> list[EvaluationDatasetSpec]:
                 stage1_overrides=("model.init_condition_bounds=2",),
             )
         )
+        specs.append(
+            EvaluationDatasetSpec(
+                evaluation_id=f"id_{model_flag}_lhs_b4096_eval01",
+                kind="id",
+                model_flag=model_flag,
+                method="lhs_static",
+                budget="b4096",
+                dataset_seed="eval01",
+                distribution="training_distribution",
+                notes="Larger independent evaluation set for dataset-generation comparisons.",
+            )
+        )
+        specs.append(
+            EvaluationDatasetSpec(
+                evaluation_id=f"ood_{model_flag}_wide_ic_b4096_eval01",
+                kind="ood",
+                model_flag=model_flag,
+                method="lhs_static",
+                budget="b4096",
+                dataset_seed="eval01",
+                distribution="wide_ic",
+                init_condition_bounds=2,
+                stage1_overrides=("model.init_condition_bounds=2",),
+                notes="Larger independent OOD evaluation set for dataset-generation comparisons.",
+            )
+        )
     return specs
 
 
