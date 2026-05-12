@@ -124,7 +124,7 @@ data/evaluation/index.json
   REFERENCE_ID=main_SM4_qbc_b512_ds01 \
   ID_EVAL_ID=id_SM4_lhs_b512_ds01 \
   OOD_EVAL_ID=ood_SM4_wide_ic_b512_ds01 \
-  STRATEGIES=ma,id,dn,ntk,relobralo \
+  STRATEGIES=ma,id,dn,ntk \
   SEED_LABELS=s02 \
   EPOCHS=10000 \
   DEVICE=cuda \
@@ -158,7 +158,7 @@ data/evaluation/index.json
   REFERENCE_ID=main_SM4_qbc_b512_ds01 \
   ID_EVAL_ID=id_SM4_lhs_b512_ds01 \
   OOD_EVAL_ID=ood_SM4_wide_ic_b512_ds01 \
-  STRATEGIES=ma,id,dn,ntk,relobralo \
+  STRATEGIES=ma,id,dn,ntk \
   SEED_LABELS=s03 \
   EPOCHS=10000 \
   DEVICE=cuda \
