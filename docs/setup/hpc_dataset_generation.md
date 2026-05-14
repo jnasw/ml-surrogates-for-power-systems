@@ -220,6 +220,81 @@ data/evaluation/index.json
     < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh)
 ```
 
+### b1024 lhs_static
+
+```bash
+(export CAMPAIGN_TAG=sm4_b1024 \
+  SHARD_LABEL=lhs_static \
+  MODE=final \
+  MODEL_FLAG=SM4 \
+  METHODS=lhs_static \
+  BUDGETS=b1024 \
+  DATASET_SEEDS=ds01,ds02,ds03 \
+  BASELINE_SEEDS=bs01,bs02 \
+  BASELINE_EPOCHS=2000 \
+  DEVICE=cuda \
+  WANDB_USE=true \
+  WANDB_PROJECT=thesis-dataset-generation \
+  ID_EVAL_ID=id_SM4_lhs_b4096_eval01 \
+  OOD_EVAL_ID=ood_SM4_wide_ic_b4096_eval01 \
+  CLEANUP_DATA=false \
+  DRY_RUN=false && \
+  bsub -gpu "num=1:mode=exclusive_process" -W 48:00 -env "all" -J data_lhs_b1024 \
+    < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh)
+```
+
+### b1024 qbc_deep_ensemble
+
+```bash
+(export CAMPAIGN_TAG=sm4_b1024 \
+  SHARD_LABEL=qbc_deep_ensemble \
+  MODE=final \
+  MODEL_FLAG=SM4 \
+  METHODS=qbc_deep_ensemble \
+  BUDGETS=b1024 \
+  DATASET_SEEDS=ds01,ds02,ds03 \
+  BASELINE_SEEDS=bs01,bs02 \
+  BASELINE_EPOCHS=2000 \
+  DEVICE=cuda \
+  WANDB_USE=true \
+  WANDB_PROJECT=thesis-dataset-generation \
+  ID_EVAL_ID=id_SM4_lhs_b4096_eval01 \
+  OOD_EVAL_ID=ood_SM4_wide_ic_b4096_eval01 \
+  QBC_SAVE_ROUND_ARRAYS=false \
+  QBC_SAVE_DATASET_CHECKPOINTS=false \
+  QBC_SAVE_ENSEMBLE_CHECKPOINTS=false \
+  CLEANUP_DATA=false \
+  DRY_RUN=false && \
+  bsub -gpu "num=1:mode=exclusive_process" -W 48:00 -env "all" -J data_qbc_b1024 \
+    < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh)
+```
+
+### b1024 marker_directed
+
+```bash
+(export CAMPAIGN_TAG=sm4_b1024 \
+  SHARD_LABEL=marker_directed \
+  MODE=final \
+  MODEL_FLAG=SM4 \
+  METHODS=marker_directed \
+  BUDGETS=b1024 \
+  DATASET_SEEDS=ds01,ds02,ds03 \
+  BASELINE_SEEDS=bs01,bs02 \
+  BASELINE_EPOCHS=2000 \
+  DEVICE=cuda \
+  WANDB_USE=true \
+  WANDB_PROJECT=thesis-dataset-generation \
+  ID_EVAL_ID=id_SM4_lhs_b4096_eval01 \
+  OOD_EVAL_ID=ood_SM4_wide_ic_b4096_eval01 \
+  QBC_SAVE_ROUND_ARRAYS=false \
+  QBC_SAVE_DATASET_CHECKPOINTS=false \
+  QBC_SAVE_ENSEMBLE_CHECKPOINTS=false \
+  CLEANUP_DATA=false \
+  DRY_RUN=false && \
+  bsub -gpu "num=1:mode=exclusive_process" -W 48:00 -env "all" -J data_marker_b1024 \
+    < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh)
+```
+
 ## 6. Relevant Outputs
 
 ```text
