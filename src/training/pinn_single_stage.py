@@ -9,6 +9,50 @@ import numpy as np
 from src.training import trainer as trainer_impl
 
 
+def _sample_epoch_supervised_rows(
+    *,
+    dataset,
+    config,
+    curriculum,
+    global_epoch: int,
+    phase_allows_sampling: bool,
+    acquisition_manager,
+    model=None,
+):
+    if acquisition_manager is None:
+        epoch_train_x, epoch_train_y, epoch_train_data_idx = trainer_impl._sample_supervised_rows_with_indices(
+            dataset.train_x,
+            dataset.train_y,
+            config,
+            curriculum,
+            global_epoch=global_epoch,
+            difficulty_bins=dataset.train_difficulty_bins,
+            allow_row_subsampling=phase_allows_sampling,
+        )
+        return epoch_train_x, epoch_train_y, epoch_train_data_idx, None
+
+    diagnostics = acquisition_manager.maybe_acquire(
+        global_epoch=global_epoch,
+        model=model,
+        x=dataset.train_x,
+        y=dataset.train_y,
+    )
+    active_row_indices = acquisition_manager.active_row_indices(device=dataset.train_x.device)
+    active_train_x = dataset.train_x.index_select(0, active_row_indices)
+    active_train_y = dataset.train_y.index_select(0, active_row_indices)
+    epoch_train_x, epoch_train_y, local_idx = trainer_impl._sample_supervised_rows_with_indices(
+        active_train_x,
+        active_train_y,
+        config,
+        curriculum,
+        global_epoch=global_epoch,
+        difficulty_bins=None,
+        allow_row_subsampling=phase_allows_sampling,
+    )
+    epoch_train_data_idx = active_row_indices.index_select(0, local_idx)
+    return epoch_train_x, epoch_train_y, epoch_train_data_idx, diagnostics
+
+
 def train_single_stage_pinn_loop(
     *,
     dataset,
@@ -35,6 +79,19 @@ def train_single_stage_pinn_loop(
     vrba_config = resolved_stack.vrba_config
     if loss_weight_schedule is not None and weighting_config.scheme != "static":
         raise ValueError("pinn.loss_weight_schedule currently supports static weighting only. Set pinn.weighting.scheme=static.")
+    acquisition_settings = resolved_stack.supervised_acquisition
+    if bool(acquisition_settings.enabled):
+        if bool(resolved_stack.curriculum.enabled):
+            raise ValueError(
+                "pinn.supervised_acquisition.enabled=true cannot currently be combined with "
+                "pinn.curriculum.enabled=true. Curriculum is still partially pre-refactor and both features "
+                "control supervised row visibility."
+            )
+        if weighting_config.scheme != "static":
+            raise ValueError(
+                "pinn.supervised_acquisition.enabled=true currently supports pinn.weighting.scheme=static only "
+                "to avoid scoring hidden candidate-pool labels through dynamic weighting probes."
+            )
     weighting_policy = trainer_impl.build_weighting_policy(weighting_config)
     weighting_state = weighting_policy.initial_state(base_weights)
     gradient_telemetry_enabled = bool(trainer_impl.cfg_get(config, "pinn.gradient_telemetry.enabled", False))
@@ -90,11 +147,32 @@ def train_single_stage_pinn_loop(
         test_x=dataset.test_x,
         test_y=dataset.test_y,
     )
+    supervised_acquisition_manager = None
+    if bool(acquisition_settings.enabled):
+        supervised_acquisition_manager = trainer_impl._SupervisedAcquisitionManager(
+            train_traj_ids=dataset.train_traj_ids,
+            strategy=acquisition_settings.strategy,
+            initial_trajectories=acquisition_settings.initial_trajectories,
+            add_trajectories=acquisition_settings.add_trajectories,
+            max_trajectories=acquisition_settings.max_trajectories,
+            refresh_period_epochs=acquisition_settings.refresh_period_epochs,
+            candidate_batch_size=acquisition_settings.candidate_batch_size,
+            seed=acquisition_settings.seed,
+        )
+    initial_train_x, initial_train_y, initial_train_data_idx, _ = _sample_epoch_supervised_rows(
+        dataset=dataset,
+        config=config,
+        curriculum=resolved_stack.curriculum,
+        global_epoch=1,
+        phase_allows_sampling=False,
+        acquisition_manager=supervised_acquisition_manager,
+        model=model,
+    )
     vrba_state = trainer_impl.initialize_vrba_state(
         vrba_config,
         initial_point_counts={
-            "data": int(dataset.train_x.shape[0]),
-            "dt": int(dataset.train_x.shape[0]),
+            "data": int(initial_train_x.shape[0]),
+            "dt": int(initial_train_x.shape[0]),
             "physics": int(dataset.train_col_x.shape[0]),
             "ic": int(dataset.train_init_x.shape[0]),
         },
@@ -138,9 +216,16 @@ def train_single_stage_pinn_loop(
         ode_model=ode_model,
         formulation=formulation,
         weights=initial_weights,
-        x_data=dataset.train_x,
-        y_data=dataset.train_y,
-        x_data_dt_weights=trainer_impl._active_dt_weights_or_none(vrba_config=vrba_config, x_data_dt_weights=train_dt_weights),
+        x_data=initial_train_x,
+        y_data=initial_train_y,
+        x_data_dt_weights=trainer_impl._active_dt_weights_or_none(
+            vrba_config=vrba_config,
+            x_data_dt_weights=(
+                None
+                if train_dt_weights is None
+                else trainer_impl._sample_rows_with_indices(train_dt_weights, initial_train_data_idx)
+            ),
+        ),
         x_col=dataset.train_col_x,
         x_col_weights=trainer_impl._active_collocation_weights_or_none(vrba_config=vrba_config, x_col_weights=dataset.train_col_weights),
         x_init=dataset.train_init_x,
@@ -296,14 +381,14 @@ def train_single_stage_pinn_loop(
                 next_global_epoch=global_epoch + 1,
             )
             active_weights = scheduled_base_weights if weighting_config.scheme == "static" else weighting_policy.current_weights(weighting_state)
-            epoch_train_x, epoch_train_y, epoch_train_data_idx = trainer_impl._sample_supervised_rows_with_indices(
-                dataset.train_x,
-                dataset.train_y,
-                config,
-                resolved_stack.curriculum,
+            epoch_train_x, epoch_train_y, epoch_train_data_idx, _ = _sample_epoch_supervised_rows(
+                dataset=dataset,
+                config=config,
+                curriculum=resolved_stack.curriculum,
                 global_epoch=global_epoch + 1,
-                difficulty_bins=dataset.train_difficulty_bins,
-                allow_row_subsampling=phase_allows_sampling,
+                phase_allows_sampling=phase_allows_sampling,
+                acquisition_manager=supervised_acquisition_manager,
+                model=model,
             )
             epoch_constraints = trainer_impl._prepare_epoch_constraint_batch(
                 collocation_manager=collocation_manager,

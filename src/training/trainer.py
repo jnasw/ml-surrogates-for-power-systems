@@ -90,6 +90,7 @@ from src.training.sampling import (
     sample_curriculum_indices_balanced as _sample_curriculum_indices_balanced,
     sample_supervised_rows_with_indices as _sample_supervised_rows_with_indices,
 )
+from src.training.supervised_acquisition import SupervisedAcquisitionManager as _SupervisedAcquisitionManager
 
 
 @dataclass
@@ -570,6 +571,8 @@ def train_pinn(
     logger: PinnLogger | None = None,
 ) -> tuple[PinnModel, list[EpochMetrics]]:
     resolved_stack = resolve_pinn_stack(config)
+    if bool(resolved_stack.supervised_acquisition.enabled) and resolved_stack.mode == "multistage_pinn":
+        raise ValueError("pinn.supervised_acquisition.enabled=true currently supports single-stage PINN mode only.")
     if resolved_stack.mode == "multistage_pinn":
         return _train_multistage_pinn(
             dataset=dataset,

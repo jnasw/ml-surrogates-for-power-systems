@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from torch import nn
 import torch
 
 
@@ -64,27 +65,32 @@ class SupervisedAcquisitionManager:
         add_trajectories: int,
         max_trajectories: int | None,
         refresh_period_epochs: int,
+        candidate_batch_size: int = 4096,
         seed: int,
     ) -> None:
         strategy_name = str(strategy).strip().lower()
-        if strategy_name != "random":
-            raise NotImplementedError(
-                "Only supervised acquisition strategy 'random' is implemented in this slice. "
-                "MAE-based strategies will be added in the scoring slice."
-            )
+        if strategy_name not in {"random", "mae_topk", "mae_weighted"}:
+            raise ValueError("strategy must be one of: random, mae_topk, mae_weighted.")
         if int(add_trajectories) <= 0:
             raise ValueError("add_trajectories must be > 0.")
         if int(refresh_period_epochs) <= 0:
             raise ValueError("refresh_period_epochs must be > 0.")
+        if int(candidate_batch_size) <= 0:
+            raise ValueError("candidate_batch_size must be > 0.")
 
         self._index = build_trajectory_row_index(train_traj_ids)
         self._strategy = strategy_name
         self._add_trajectories = int(add_trajectories)
         self._refresh_period_epochs = int(refresh_period_epochs)
+        self._candidate_batch_size = int(candidate_batch_size)
         self._seed = int(seed)
         self._acquisition_count = 0
         self._last_acquisition_epoch: int | None = None
         self._last_acquired_trajectory_ids: tuple[int, ...] = ()
+        self._last_candidate_score_mean: float | None = None
+        self._last_candidate_score_max: float | None = None
+        self._last_selected_score_mean: float | None = None
+        self._last_selected_score_min: float | None = None
 
         total_trajectories = int(self._index.trajectory_ids.shape[0])
         if max_trajectories in (None, "null"):
@@ -125,9 +131,20 @@ class SupervisedAcquisitionManager:
             device=device,
         )
 
-    def maybe_acquire(self, *, global_epoch: int) -> SupervisedAcquisitionDiagnostics:
+    def maybe_acquire(
+        self,
+        *,
+        global_epoch: int,
+        model: nn.Module | None = None,
+        x: torch.Tensor | None = None,
+        y: torch.Tensor | None = None,
+    ) -> SupervisedAcquisitionDiagnostics:
         """Append trajectories if the acquisition cadence fires for this epoch."""
         self._last_acquired_trajectory_ids = ()
+        self._last_candidate_score_mean = None
+        self._last_candidate_score_max = None
+        self._last_selected_score_mean = None
+        self._last_selected_score_min = None
         if not self._should_acquire(global_epoch=global_epoch):
             return self.diagnostics()
 
@@ -136,12 +153,21 @@ class SupervisedAcquisitionManager:
         if add_count <= 0:
             return self.diagnostics()
 
-        generator = torch.Generator(device="cpu")
-        generator.manual_seed(self._seed + self._acquisition_count + int(global_epoch))
-        selected_positions = torch.randperm(
-            int(self._candidate_trajectory_ids.shape[0]),
-            generator=generator,
-        )[:add_count]
+        if self._strategy == "random":
+            selected_positions = self._select_random_positions(add_count=add_count, global_epoch=global_epoch)
+            selected_scores = None
+        else:
+            candidate_scores = self._score_candidate_trajectories(model=model, x=x, y=y)
+            self._last_candidate_score_mean = float(candidate_scores.mean().item())
+            self._last_candidate_score_max = float(candidate_scores.max().item())
+            selected_positions = self._select_scored_positions(
+                scores=candidate_scores,
+                add_count=add_count,
+                global_epoch=global_epoch,
+            )
+            selected_scores = candidate_scores.index_select(0, selected_positions)
+            self._last_selected_score_mean = float(selected_scores.mean().item())
+            self._last_selected_score_min = float(selected_scores.min().item())
         selected_ids = self._candidate_trajectory_ids.index_select(0, selected_positions)
         updated_active = torch.cat((self._active_trajectory_ids, selected_ids), dim=0)
         self._active_trajectory_ids, self._candidate_trajectory_ids = split_active_candidate_trajectory_ids(
@@ -164,6 +190,10 @@ class SupervisedAcquisitionManager:
             acquisition_count=int(self._acquisition_count),
             last_acquisition_epoch=self._last_acquisition_epoch,
             last_acquired_trajectory_ids=self._last_acquired_trajectory_ids,
+            last_candidate_score_mean=self._last_candidate_score_mean,
+            last_candidate_score_max=self._last_candidate_score_max,
+            last_selected_score_mean=self._last_selected_score_mean,
+            last_selected_score_min=self._last_selected_score_min,
         )
 
     def _should_acquire(self, *, global_epoch: int) -> bool:
@@ -175,6 +205,73 @@ class SupervisedAcquisitionManager:
         if int(self._candidate_trajectory_ids.shape[0]) <= 0:
             return False
         return ((epoch - 1) % self._refresh_period_epochs) == 0
+
+    def _select_random_positions(self, *, add_count: int, global_epoch: int) -> torch.Tensor:
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(self._seed + self._acquisition_count + int(global_epoch))
+        return torch.randperm(
+            int(self._candidate_trajectory_ids.shape[0]),
+            generator=generator,
+        )[:add_count]
+
+    def _select_scored_positions(
+        self,
+        *,
+        scores: torch.Tensor,
+        add_count: int,
+        global_epoch: int,
+    ) -> torch.Tensor:
+        if self._strategy == "mae_topk":
+            return torch.topk(scores, k=add_count, largest=True).indices.to(dtype=torch.long, device="cpu")
+        if self._strategy == "mae_weighted":
+            weights = scores.to(dtype=torch.float64).clamp_min(0.0)
+            total = weights.sum()
+            if float(total.item()) <= 0.0:
+                weights = torch.ones_like(weights)
+                total = weights.sum()
+            probabilities = weights / total
+            generator = torch.Generator(device="cpu")
+            generator.manual_seed(self._seed + self._acquisition_count + int(global_epoch))
+            return torch.multinomial(probabilities, num_samples=add_count, replacement=False, generator=generator)
+        raise ValueError(f"Unsupported supervised acquisition strategy: {self._strategy}")
+
+    def _score_candidate_trajectories(
+        self,
+        *,
+        model: nn.Module | None,
+        x: torch.Tensor | None,
+        y: torch.Tensor | None,
+    ) -> torch.Tensor:
+        if model is None or x is None or y is None:
+            raise ValueError(f"strategy={self._strategy} requires model, x, and y for candidate scoring.")
+        if x.shape[0] != y.shape[0]:
+            raise ValueError("x and y must have the same leading dimension for candidate scoring.")
+
+        scores: list[float] = []
+        was_training = bool(model.training)
+        model.eval()
+        try:
+            with torch.no_grad():
+                for trajectory_id in self._candidate_trajectory_ids.tolist():
+                    rows = self._index.rows_by_trajectory_id[int(trajectory_id)].to(device=x.device, dtype=torch.long)
+                    total_abs = 0.0
+                    total_count = 0
+                    for start in range(0, int(rows.shape[0]), self._candidate_batch_size):
+                        stop = min(start + self._candidate_batch_size, int(rows.shape[0]))
+                        batch_rows = rows[start:stop]
+                        xb = x.index_select(0, batch_rows)
+                        yb = y.index_select(0, batch_rows)
+                        pred = model(xb)
+                        diff = pred - yb
+                        total_abs += float(diff.abs().sum().item())
+                        total_count += int(diff.numel())
+                    if total_count <= 0:
+                        raise ValueError(f"Cannot score empty trajectory_id={int(trajectory_id)}.")
+                    scores.append(total_abs / float(total_count))
+        finally:
+            if was_training:
+                model.train()
+        return torch.as_tensor(scores, dtype=torch.float64, device="cpu")
 
 
 def build_trajectory_row_index(train_traj_ids: torch.Tensor | None) -> TrajectoryRowIndex:
