@@ -253,7 +253,9 @@ def build_epoch_metrics_row(
     peak_gpu_memory_allocated_bytes: int | None,
     peak_gpu_memory_reserved_bytes: int | None,
     optimizer_diagnostics: dict[str, Any],
+    supervised_acquisition: Any | None = None,
 ) -> EpochMetrics:
+    acquisition = None if supervised_acquisition is None else supervised_acquisition.as_dict()
     return EpochMetrics(
         epoch=epoch,
         global_epoch=global_epoch,
@@ -299,6 +301,21 @@ def build_epoch_metrics_row(
         num_supervised_rows=num_supervised_rows,
         num_collocation_rows=num_collocation_rows,
         num_init_rows=num_init_rows,
+        supervised_acquisition_enabled=bool(acquisition and acquisition.get("enabled")),
+        supervised_acquisition_strategy=None if acquisition is None else acquisition.get("strategy"),
+        supervised_active_trajectories=None if acquisition is None else acquisition.get("active_trajectories"),
+        supervised_candidate_trajectories=None if acquisition is None else acquisition.get("candidate_trajectories"),
+        supervised_active_rows=None if acquisition is None else acquisition.get("active_rows"),
+        supervised_acquired_trajectories=None if acquisition is None else acquisition.get("acquired_trajectories"),
+        supervised_acquisition_count=None if acquisition is None else acquisition.get("acquisition_count"),
+        supervised_last_acquisition_epoch=None if acquisition is None else acquisition.get("last_acquisition_epoch"),
+        supervised_last_acquired_trajectory_ids=None
+        if acquisition is None or acquisition.get("last_acquired_trajectory_ids") is None
+        else tuple(int(value) for value in acquisition.get("last_acquired_trajectory_ids")),
+        supervised_last_candidate_score_mean=None if acquisition is None else acquisition.get("last_candidate_score_mean"),
+        supervised_last_candidate_score_max=None if acquisition is None else acquisition.get("last_candidate_score_max"),
+        supervised_last_selected_score_mean=None if acquisition is None else acquisition.get("last_selected_score_mean"),
+        supervised_last_selected_score_min=None if acquisition is None else acquisition.get("last_selected_score_min"),
         peak_gpu_memory_allocated_bytes=peak_gpu_memory_allocated_bytes,
         peak_gpu_memory_reserved_bytes=peak_gpu_memory_reserved_bytes,
         optimizer_diagnostics=optimizer_diagnostics,

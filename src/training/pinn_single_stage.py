@@ -159,7 +159,7 @@ def train_single_stage_pinn_loop(
             candidate_batch_size=acquisition_settings.candidate_batch_size,
             seed=acquisition_settings.seed,
         )
-    initial_train_x, initial_train_y, initial_train_data_idx, _ = _sample_epoch_supervised_rows(
+    initial_train_x, initial_train_y, initial_train_data_idx, initial_acquisition_diagnostics = _sample_epoch_supervised_rows(
         dataset=dataset,
         config=config,
         curriculum=resolved_stack.curriculum,
@@ -279,12 +279,13 @@ def train_single_stage_pinn_loop(
         cumulative_wall_seconds=None,
         num_batches=0 if cost_tracking_enabled else None,
         num_train_steps=0 if cost_tracking_enabled else None,
-        num_supervised_rows=int(dataset.train_x.shape[0]) if cost_tracking_enabled else None,
+        num_supervised_rows=int(initial_train_x.shape[0]) if cost_tracking_enabled else None,
         num_collocation_rows=int(dataset.train_col_x.shape[0]) if cost_tracking_enabled else None,
         num_init_rows=int(dataset.train_init_x.shape[0]) if cost_tracking_enabled else None,
         peak_gpu_memory_allocated_bytes=None,
         peak_gpu_memory_reserved_bytes=None,
         optimizer_diagnostics={"initial_evaluation": True},
+        supervised_acquisition=initial_acquisition_diagnostics,
     )
     rows.append(initial_row)
     if logger is not None:
@@ -381,7 +382,7 @@ def train_single_stage_pinn_loop(
                 next_global_epoch=global_epoch + 1,
             )
             active_weights = scheduled_base_weights if weighting_config.scheme == "static" else weighting_policy.current_weights(weighting_state)
-            epoch_train_x, epoch_train_y, epoch_train_data_idx, _ = _sample_epoch_supervised_rows(
+            epoch_train_x, epoch_train_y, epoch_train_data_idx, supervised_acquisition_diagnostics = _sample_epoch_supervised_rows(
                 dataset=dataset,
                 config=config,
                 curriculum=resolved_stack.curriculum,
@@ -656,6 +657,7 @@ def train_single_stage_pinn_loop(
                         else {}
                     ),
                 },
+                supervised_acquisition=supervised_acquisition_diagnostics,
             )
             mean_epoch_breakdown = trainer_impl._mean_epoch_breakdown(epoch_losses, train_total, train_component_losses)
             best_metric = trainer_impl._record_epoch_row_and_checkpoints(

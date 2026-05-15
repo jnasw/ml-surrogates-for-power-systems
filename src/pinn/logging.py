@@ -62,6 +62,19 @@ class EpochMetrics:
     num_supervised_rows: int | None = None
     num_collocation_rows: int | None = None
     num_init_rows: int | None = None
+    supervised_acquisition_enabled: bool = False
+    supervised_acquisition_strategy: str | None = None
+    supervised_active_trajectories: int | None = None
+    supervised_candidate_trajectories: int | None = None
+    supervised_active_rows: int | None = None
+    supervised_acquired_trajectories: int | None = None
+    supervised_acquisition_count: int | None = None
+    supervised_last_acquisition_epoch: int | None = None
+    supervised_last_acquired_trajectory_ids: tuple[int, ...] | None = None
+    supervised_last_candidate_score_mean: float | None = None
+    supervised_last_candidate_score_max: float | None = None
+    supervised_last_selected_score_mean: float | None = None
+    supervised_last_selected_score_min: float | None = None
     peak_gpu_memory_allocated_bytes: int | None = None
     peak_gpu_memory_reserved_bytes: int | None = None
     optimizer_diagnostics: dict[str, float | int | str | bool | None] | None = None
@@ -166,6 +179,24 @@ class EpochMetrics:
             flat["vrba_ic_lambda_max"] = self.vrba_ic_lambda_max
             flat["vrba_dt_lambda_mean"] = self.vrba_dt_lambda_mean
             flat["vrba_dt_lambda_max"] = self.vrba_dt_lambda_max
+        if self.supervised_acquisition_enabled or self.supervised_acquisition_strategy is not None:
+            flat["supervised_acquisition_enabled"] = bool(self.supervised_acquisition_enabled)
+            flat["supervised_acquisition_strategy"] = self.supervised_acquisition_strategy
+            flat["supervised_active_trajectories"] = self.supervised_active_trajectories
+            flat["supervised_candidate_trajectories"] = self.supervised_candidate_trajectories
+            flat["supervised_active_rows"] = self.supervised_active_rows
+            flat["supervised_acquired_trajectories"] = self.supervised_acquired_trajectories
+            flat["supervised_acquisition_count"] = self.supervised_acquisition_count
+            flat["supervised_last_acquisition_epoch"] = self.supervised_last_acquisition_epoch
+            flat["supervised_last_acquired_trajectory_ids"] = (
+                None
+                if self.supervised_last_acquired_trajectory_ids is None
+                else ",".join(str(value) for value in self.supervised_last_acquired_trajectory_ids)
+            )
+            flat["supervised_last_candidate_score_mean"] = self.supervised_last_candidate_score_mean
+            flat["supervised_last_candidate_score_max"] = self.supervised_last_candidate_score_max
+            flat["supervised_last_selected_score_mean"] = self.supervised_last_selected_score_mean
+            flat["supervised_last_selected_score_min"] = self.supervised_last_selected_score_min
         flat["stage_name"] = str(self.phase_name)
         for name, value in self.train_component_losses.items():
             flat[f"train_{name}_loss"] = value
@@ -410,6 +441,30 @@ class PinnLogger:
             payload["runtime/num_collocation_rows"] = int(row.num_collocation_rows)
         if row.num_init_rows is not None:
             payload["runtime/num_init_rows"] = int(row.num_init_rows)
+        if row.supervised_acquisition_enabled:
+            payload["supervised_acquisition/enabled"] = True
+            if row.supervised_acquisition_strategy is not None:
+                payload["supervised_acquisition/strategy"] = str(row.supervised_acquisition_strategy)
+            if row.supervised_active_trajectories is not None:
+                payload["supervised_acquisition/active_trajectories"] = int(row.supervised_active_trajectories)
+            if row.supervised_candidate_trajectories is not None:
+                payload["supervised_acquisition/candidate_trajectories"] = int(row.supervised_candidate_trajectories)
+            if row.supervised_active_rows is not None:
+                payload["supervised_acquisition/active_rows"] = int(row.supervised_active_rows)
+            if row.supervised_acquired_trajectories is not None:
+                payload["supervised_acquisition/acquired_trajectories"] = int(row.supervised_acquired_trajectories)
+            if row.supervised_acquisition_count is not None:
+                payload["supervised_acquisition/acquisition_count"] = int(row.supervised_acquisition_count)
+            if row.supervised_last_acquisition_epoch is not None:
+                payload["supervised_acquisition/last_acquisition_epoch"] = int(row.supervised_last_acquisition_epoch)
+            if row.supervised_last_candidate_score_mean is not None:
+                payload["supervised_acquisition/last_candidate_score_mean"] = float(row.supervised_last_candidate_score_mean)
+            if row.supervised_last_candidate_score_max is not None:
+                payload["supervised_acquisition/last_candidate_score_max"] = float(row.supervised_last_candidate_score_max)
+            if row.supervised_last_selected_score_mean is not None:
+                payload["supervised_acquisition/last_selected_score_mean"] = float(row.supervised_last_selected_score_mean)
+            if row.supervised_last_selected_score_min is not None:
+                payload["supervised_acquisition/last_selected_score_min"] = float(row.supervised_last_selected_score_min)
         if row.peak_gpu_memory_allocated_bytes is not None:
             payload["runtime/peak_gpu_memory_allocated_bytes"] = int(row.peak_gpu_memory_allocated_bytes)
             payload["runtime/peak_gpu_memory_allocated_mb"] = float(row.peak_gpu_memory_allocated_bytes) / (1024.0 * 1024.0)
