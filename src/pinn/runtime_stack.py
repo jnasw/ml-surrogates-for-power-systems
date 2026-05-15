@@ -60,6 +60,18 @@ class ResolvedCurriculumSettings:
 
 
 @dataclass(frozen=True)
+class ResolvedSupervisedAcquisitionSettings:
+    enabled: bool
+    strategy: str
+    initial_trajectories: int | None
+    add_trajectories: int
+    max_trajectories: int | None
+    refresh_period_epochs: int
+    candidate_batch_size: int
+    seed: int
+
+
+@dataclass(frozen=True)
 class ResolvedMultistageOptimizerSchedule:
     explicit_stage_optimizer_phases: list[list[OptimizerPhase]] | None
     base_optimizer_phases: list[OptimizerPhase]
@@ -83,6 +95,7 @@ class ResolvedPinnStack:
     vrba_config: VrbAConfig
     collocation: ResolvedCollocationSettings
     curriculum: ResolvedCurriculumSettings
+    supervised_acquisition: ResolvedSupervisedAcquisitionSettings
 
 
 def _normalize_optional_mapping(value: Any, field_name: str) -> dict[str, Any] | None:
@@ -280,6 +293,60 @@ def _resolve_loss_weight_schedule(config: Any) -> tuple[ResolvedLossWeightSchedu
     return tuple(schedule)
 
 
+def _optional_int(config: Any, key: str) -> int | None:
+    value = cfg_get(config, key, None)
+    if value in (None, "null"):
+        return None
+    return int(value)
+
+
+def _resolve_supervised_acquisition(config: Any) -> ResolvedSupervisedAcquisitionSettings:
+    enabled = bool(cfg_get(config, "pinn.supervised_acquisition.enabled", False))
+    strategy = str(cfg_get(config, "pinn.supervised_acquisition.strategy", "random")).strip().lower()
+    supported_strategies = {"random", "mae_topk", "mae_weighted"}
+    if strategy not in supported_strategies:
+        raise ValueError(
+            "pinn.supervised_acquisition.strategy must be one of: "
+            f"{', '.join(sorted(supported_strategies))}."
+        )
+
+    initial_trajectories = _optional_int(config, "pinn.supervised_acquisition.initial_trajectories")
+    max_trajectories = _optional_int(config, "pinn.supervised_acquisition.max_trajectories")
+    add_trajectories = int(cfg_get(config, "pinn.supervised_acquisition.add_trajectories", 1))
+    refresh_period_epochs = int(cfg_get(config, "pinn.supervised_acquisition.refresh_period_epochs", 500))
+    candidate_batch_size = int(cfg_get(config, "pinn.supervised_acquisition.candidate_batch_size", 4096))
+    seed = int(cfg_get(config, "pinn.supervised_acquisition.seed", cfg_get(config, "model.seed", 0)))
+
+    if enabled:
+        if initial_trajectories is not None and initial_trajectories <= 0:
+            raise ValueError("pinn.supervised_acquisition.initial_trajectories must be > 0 when provided.")
+        if max_trajectories is not None and max_trajectories <= 0:
+            raise ValueError("pinn.supervised_acquisition.max_trajectories must be > 0 when provided.")
+        if add_trajectories <= 0:
+            raise ValueError("pinn.supervised_acquisition.add_trajectories must be > 0.")
+        if refresh_period_epochs <= 0:
+            raise ValueError("pinn.supervised_acquisition.refresh_period_epochs must be > 0.")
+        if candidate_batch_size <= 0:
+            raise ValueError("pinn.supervised_acquisition.candidate_batch_size must be > 0.")
+        if initial_trajectories is not None and max_trajectories is not None:
+            if initial_trajectories > max_trajectories:
+                raise ValueError(
+                    "pinn.supervised_acquisition.initial_trajectories must be <= "
+                    "pinn.supervised_acquisition.max_trajectories."
+                )
+
+    return ResolvedSupervisedAcquisitionSettings(
+        enabled=enabled,
+        strategy=strategy,
+        initial_trajectories=initial_trajectories,
+        add_trajectories=add_trajectories,
+        max_trajectories=max_trajectories,
+        refresh_period_epochs=refresh_period_epochs,
+        candidate_batch_size=candidate_batch_size,
+        seed=seed,
+    )
+
+
 def resolve_pinn_stack(config: Any) -> ResolvedPinnStack:
     mode = resolve_pinn_training_mode(config)
     optimizer_phases = load_optimizer_phases(config) if mode == "pinn" else None
@@ -315,4 +382,5 @@ def resolve_pinn_stack(config: Any) -> ResolvedPinnStack:
             else tuple(int(value) for value in cfg_get(config, "pinn.curriculum.unlock_epochs", None)),
             stage_length_epochs=int(cfg_get(config, "pinn.curriculum.stage_length_epochs", 100)),
         ),
+        supervised_acquisition=_resolve_supervised_acquisition(config),
     )

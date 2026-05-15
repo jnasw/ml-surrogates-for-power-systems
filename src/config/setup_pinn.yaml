@@ -80,6 +80,15 @@ pinn:
     enabled: false
     rows_per_epoch: null
     fraction_per_epoch: null
+  supervised_acquisition:
+    enabled: false
+    strategy: random # random | mae_topk | mae_weighted
+    initial_trajectories: null
+    add_trajectories: 1
+    max_trajectories: null
+    refresh_period_epochs: 500
+    candidate_batch_size: 4096
+    seed: ${model.seed}
   curriculum:
     enabled: false
     num_bins: 3
