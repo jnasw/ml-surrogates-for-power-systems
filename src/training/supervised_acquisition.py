@@ -16,6 +16,167 @@ class TrajectoryRowIndex:
     total_rows: int
 
 
+@dataclass(frozen=True)
+class SupervisedAcquisitionDiagnostics:
+    """Serializable state summary for supervised acquisition."""
+
+    enabled: bool
+    strategy: str
+    active_trajectories: int
+    candidate_trajectories: int
+    active_rows: int
+    acquired_trajectories: int
+    acquisition_count: int
+    last_acquisition_epoch: int | None
+    last_acquired_trajectory_ids: tuple[int, ...]
+    last_candidate_score_mean: float | None = None
+    last_candidate_score_max: float | None = None
+    last_selected_score_mean: float | None = None
+    last_selected_score_min: float | None = None
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "enabled": bool(self.enabled),
+            "strategy": self.strategy,
+            "active_trajectories": int(self.active_trajectories),
+            "candidate_trajectories": int(self.candidate_trajectories),
+            "active_rows": int(self.active_rows),
+            "acquired_trajectories": int(self.acquired_trajectories),
+            "acquisition_count": int(self.acquisition_count),
+            "last_acquisition_epoch": self.last_acquisition_epoch,
+            "last_acquired_trajectory_ids": list(self.last_acquired_trajectory_ids),
+            "last_candidate_score_mean": self.last_candidate_score_mean,
+            "last_candidate_score_max": self.last_candidate_score_max,
+            "last_selected_score_mean": self.last_selected_score_mean,
+            "last_selected_score_min": self.last_selected_score_min,
+        }
+
+
+class SupervisedAcquisitionManager:
+    """Owns active/candidate supervised trajectories for pool-based acquisition."""
+
+    def __init__(
+        self,
+        *,
+        train_traj_ids: torch.Tensor | None,
+        strategy: str,
+        initial_trajectories: int | None,
+        add_trajectories: int,
+        max_trajectories: int | None,
+        refresh_period_epochs: int,
+        seed: int,
+    ) -> None:
+        strategy_name = str(strategy).strip().lower()
+        if strategy_name != "random":
+            raise NotImplementedError(
+                "Only supervised acquisition strategy 'random' is implemented in this slice. "
+                "MAE-based strategies will be added in the scoring slice."
+            )
+        if int(add_trajectories) <= 0:
+            raise ValueError("add_trajectories must be > 0.")
+        if int(refresh_period_epochs) <= 0:
+            raise ValueError("refresh_period_epochs must be > 0.")
+
+        self._index = build_trajectory_row_index(train_traj_ids)
+        self._strategy = strategy_name
+        self._add_trajectories = int(add_trajectories)
+        self._refresh_period_epochs = int(refresh_period_epochs)
+        self._seed = int(seed)
+        self._acquisition_count = 0
+        self._last_acquisition_epoch: int | None = None
+        self._last_acquired_trajectory_ids: tuple[int, ...] = ()
+
+        total_trajectories = int(self._index.trajectory_ids.shape[0])
+        if max_trajectories in (None, "null"):
+            self._max_trajectories = total_trajectories
+        else:
+            self._max_trajectories = int(max_trajectories)
+        if self._max_trajectories <= 0:
+            raise ValueError("max_trajectories must be > 0 when provided.")
+        if self._max_trajectories > total_trajectories:
+            raise ValueError(
+                f"max_trajectories={self._max_trajectories} exceeds available trajectories={total_trajectories}."
+            )
+
+        initial_ids = select_initial_trajectory_ids(
+            self._index.trajectory_ids,
+            initial_trajectories=initial_trajectories,
+            seed=self._seed,
+        )
+        if int(initial_ids.shape[0]) > self._max_trajectories:
+            raise ValueError("initial_trajectories must be <= max_trajectories.")
+        self._active_trajectory_ids, self._candidate_trajectory_ids = split_active_candidate_trajectory_ids(
+            self._index.trajectory_ids,
+            initial_ids,
+        )
+
+    @property
+    def active_trajectory_ids(self) -> torch.Tensor:
+        return self._active_trajectory_ids.clone()
+
+    @property
+    def candidate_trajectory_ids(self) -> torch.Tensor:
+        return self._candidate_trajectory_ids.clone()
+
+    def active_row_indices(self, *, device: torch.device | None = None) -> torch.Tensor:
+        return row_indices_for_trajectory_ids(
+            self._index,
+            self._active_trajectory_ids,
+            device=device,
+        )
+
+    def maybe_acquire(self, *, global_epoch: int) -> SupervisedAcquisitionDiagnostics:
+        """Append trajectories if the acquisition cadence fires for this epoch."""
+        self._last_acquired_trajectory_ids = ()
+        if not self._should_acquire(global_epoch=global_epoch):
+            return self.diagnostics()
+
+        remaining_capacity = self._max_trajectories - int(self._active_trajectory_ids.shape[0])
+        add_count = min(self._add_trajectories, remaining_capacity, int(self._candidate_trajectory_ids.shape[0]))
+        if add_count <= 0:
+            return self.diagnostics()
+
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(self._seed + self._acquisition_count + int(global_epoch))
+        selected_positions = torch.randperm(
+            int(self._candidate_trajectory_ids.shape[0]),
+            generator=generator,
+        )[:add_count]
+        selected_ids = self._candidate_trajectory_ids.index_select(0, selected_positions)
+        updated_active = torch.cat((self._active_trajectory_ids, selected_ids), dim=0)
+        self._active_trajectory_ids, self._candidate_trajectory_ids = split_active_candidate_trajectory_ids(
+            self._index.trajectory_ids,
+            updated_active,
+        )
+        self._acquisition_count += 1
+        self._last_acquisition_epoch = int(global_epoch)
+        self._last_acquired_trajectory_ids = tuple(int(value) for value in torch.sort(selected_ids).values.tolist())
+        return self.diagnostics()
+
+    def diagnostics(self) -> SupervisedAcquisitionDiagnostics:
+        return SupervisedAcquisitionDiagnostics(
+            enabled=True,
+            strategy=self._strategy,
+            active_trajectories=int(self._active_trajectory_ids.shape[0]),
+            candidate_trajectories=int(self._candidate_trajectory_ids.shape[0]),
+            active_rows=int(self.active_row_indices().shape[0]),
+            acquired_trajectories=len(self._last_acquired_trajectory_ids),
+            acquisition_count=int(self._acquisition_count),
+            last_acquisition_epoch=self._last_acquisition_epoch,
+            last_acquired_trajectory_ids=self._last_acquired_trajectory_ids,
+        )
+
+    def _should_acquire(self, *, global_epoch: int) -> bool:
+        epoch = int(global_epoch)
+        if epoch <= 1:
+            return False
+        if int(self._active_trajectory_ids.shape[0]) >= self._max_trajectories:
+            return False
+        if int(self._candidate_trajectory_ids.shape[0]) <= 0:
+            return False
+        return ((epoch - 1) % self._refresh_period_epochs) == 0
+
+
 def build_trajectory_row_index(train_traj_ids: torch.Tensor | None) -> TrajectoryRowIndex:
     """Build a deterministic trajectory-ID to row-index map."""
     if train_traj_ids is None:
