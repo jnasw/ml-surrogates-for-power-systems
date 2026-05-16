@@ -141,7 +141,7 @@ STRATEGY_REGISTRY: dict[str, dict[str, Any]] = {
         "default": False,
         "stages": [
             [("adam_warmup", "Adam", DEFAULT_ADAM_LR, 1_000), ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 500)],
-            [("adam_residual", "Adam", DEFAULT_ADAM_LR, 2_000)],
+            [("adam_residual", "Adam", DEFAULT_ADAM_LR, 3_500)],
         ],
     },
     "multistage_adam_lbfgs_correction": {
@@ -151,7 +151,17 @@ STRATEGY_REGISTRY: dict[str, dict[str, Any]] = {
         "stages": [
             [("adam_warmup", "Adam", DEFAULT_ADAM_LR, 1_000), ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 500)],
             [("adam_residual", "Adam", DEFAULT_ADAM_LR, 2_000)],
-            [("lbfgs_residual", "LBFGS", DEFAULT_LBFGS_LR, 500)],
+            [("lbfgs_residual", "LBFGS", DEFAULT_LBFGS_LR, 1_500)],
+        ],
+    },
+    "multistage_adam_ssbroyden_correction": {
+        "pinn_mode": "multistage",
+        "fixed_epochs": True,
+        "default": False,
+        "stages": [
+            [("adam_warmup", "Adam", DEFAULT_ADAM_LR, 1_000), ("lbfgs_warmup", "LBFGS", DEFAULT_LBFGS_LR, 500)],
+            [("adam_residual", "Adam", DEFAULT_ADAM_LR, 2_000)],
+            [("ssbroyden_residual", "SSBroyden", 1.0, 1_500)],
         ],
     },
 }
