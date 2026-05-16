@@ -30,6 +30,7 @@ class EpochMetrics:
     val_total_loss: float | None = None
     val_component_losses: dict[str, float | None] | None = None
     test_metrics: dict[str, float | None] | None = None
+    regression_metrics: dict[str, dict[str, float]] | None = None
     weighting_scheme: str | None = None
     weighting_updated: bool = False
     train_loss_weights: dict[str, float] | None = None
@@ -71,10 +72,10 @@ class EpochMetrics:
     supervised_acquisition_count: int | None = None
     supervised_last_acquisition_epoch: int | None = None
     supervised_last_acquired_trajectory_ids: tuple[int, ...] | None = None
-    supervised_last_candidate_score_mean: float | None = None
-    supervised_last_candidate_score_max: float | None = None
-    supervised_last_selected_score_mean: float | None = None
-    supervised_last_selected_score_min: float | None = None
+    supervised_last_anchor_score_mean: float | None = None
+    supervised_last_anchor_score_max: float | None = None
+    supervised_last_selected_distance_mean: float | None = None
+    supervised_last_selected_distance_max: float | None = None
     peak_gpu_memory_allocated_bytes: int | None = None
     peak_gpu_memory_reserved_bytes: int | None = None
     optimizer_diagnostics: dict[str, float | int | str | bool | None] | None = None
@@ -193,10 +194,10 @@ class EpochMetrics:
                 if self.supervised_last_acquired_trajectory_ids is None
                 else ",".join(str(value) for value in self.supervised_last_acquired_trajectory_ids)
             )
-            flat["supervised_last_candidate_score_mean"] = self.supervised_last_candidate_score_mean
-            flat["supervised_last_candidate_score_max"] = self.supervised_last_candidate_score_max
-            flat["supervised_last_selected_score_mean"] = self.supervised_last_selected_score_mean
-            flat["supervised_last_selected_score_min"] = self.supervised_last_selected_score_min
+            flat["supervised_last_anchor_score_mean"] = self.supervised_last_anchor_score_mean
+            flat["supervised_last_anchor_score_max"] = self.supervised_last_anchor_score_max
+            flat["supervised_last_selected_distance_mean"] = self.supervised_last_selected_distance_mean
+            flat["supervised_last_selected_distance_max"] = self.supervised_last_selected_distance_max
         flat["stage_name"] = str(self.phase_name)
         for name, value in self.train_component_losses.items():
             flat[f"train_{name}_loss"] = value
@@ -227,6 +228,9 @@ class EpochMetrics:
         for key, value in test_values.items():
             flat[f"test_{key}"] = value
         flat.setdefault("test_data_loss", test_values.get("data_loss"))
+        for split_name, values in (self.regression_metrics or {}).items():
+            for key, value in values.items():
+                flat[f"eval_{split_name}_{key}"] = value
         optimizer_values = {} if self.optimizer_diagnostics is None else self.optimizer_diagnostics
         for key, value in optimizer_values.items():
             flat[f"optimizer_{key}"] = value
@@ -457,14 +461,14 @@ class PinnLogger:
                 payload["supervised_acquisition/acquisition_count"] = int(row.supervised_acquisition_count)
             if row.supervised_last_acquisition_epoch is not None:
                 payload["supervised_acquisition/last_acquisition_epoch"] = int(row.supervised_last_acquisition_epoch)
-            if row.supervised_last_candidate_score_mean is not None:
-                payload["supervised_acquisition/last_candidate_score_mean"] = float(row.supervised_last_candidate_score_mean)
-            if row.supervised_last_candidate_score_max is not None:
-                payload["supervised_acquisition/last_candidate_score_max"] = float(row.supervised_last_candidate_score_max)
-            if row.supervised_last_selected_score_mean is not None:
-                payload["supervised_acquisition/last_selected_score_mean"] = float(row.supervised_last_selected_score_mean)
-            if row.supervised_last_selected_score_min is not None:
-                payload["supervised_acquisition/last_selected_score_min"] = float(row.supervised_last_selected_score_min)
+            if row.supervised_last_anchor_score_mean is not None:
+                payload["supervised_acquisition/last_anchor_score_mean"] = float(row.supervised_last_anchor_score_mean)
+            if row.supervised_last_anchor_score_max is not None:
+                payload["supervised_acquisition/last_anchor_score_max"] = float(row.supervised_last_anchor_score_max)
+            if row.supervised_last_selected_distance_mean is not None:
+                payload["supervised_acquisition/last_selected_distance_mean"] = float(row.supervised_last_selected_distance_mean)
+            if row.supervised_last_selected_distance_max is not None:
+                payload["supervised_acquisition/last_selected_distance_max"] = float(row.supervised_last_selected_distance_max)
         if row.peak_gpu_memory_allocated_bytes is not None:
             payload["runtime/peak_gpu_memory_allocated_bytes"] = int(row.peak_gpu_memory_allocated_bytes)
             payload["runtime/peak_gpu_memory_allocated_mb"] = float(row.peak_gpu_memory_allocated_bytes) / (1024.0 * 1024.0)
@@ -500,6 +504,10 @@ class PinnLogger:
                     payload["test/loss/data"] = float(value)
                 else:
                     payload[f"test/metric/{key}"] = float(value)
+        for split_name, values in (row.regression_metrics or {}).items():
+            for key, value in values.items():
+                if value is not None:
+                    payload[f"eval/{split_name}/{key}"] = float(value)
         for key, value in (row.optimizer_diagnostics or {}).items():
             if value is not None:
                 payload[f"optimizer/{key}"] = value

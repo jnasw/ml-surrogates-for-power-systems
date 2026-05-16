@@ -30,10 +30,10 @@ class SupervisedAcquisitionDiagnostics:
     acquisition_count: int
     last_acquisition_epoch: int | None
     last_acquired_trajectory_ids: tuple[int, ...]
-    last_candidate_score_mean: float | None = None
-    last_candidate_score_max: float | None = None
-    last_selected_score_mean: float | None = None
-    last_selected_score_min: float | None = None
+    last_anchor_score_mean: float | None = None
+    last_anchor_score_max: float | None = None
+    last_selected_distance_mean: float | None = None
+    last_selected_distance_max: float | None = None
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -46,10 +46,10 @@ class SupervisedAcquisitionDiagnostics:
             "acquisition_count": int(self.acquisition_count),
             "last_acquisition_epoch": self.last_acquisition_epoch,
             "last_acquired_trajectory_ids": list(self.last_acquired_trajectory_ids),
-            "last_candidate_score_mean": self.last_candidate_score_mean,
-            "last_candidate_score_max": self.last_candidate_score_max,
-            "last_selected_score_mean": self.last_selected_score_mean,
-            "last_selected_score_min": self.last_selected_score_min,
+            "last_anchor_score_mean": self.last_anchor_score_mean,
+            "last_anchor_score_max": self.last_anchor_score_max,
+            "last_selected_distance_mean": self.last_selected_distance_mean,
+            "last_selected_distance_max": self.last_selected_distance_max,
         }
 
 
@@ -66,31 +66,40 @@ class SupervisedAcquisitionManager:
         max_trajectories: int | None,
         refresh_period_epochs: int,
         candidate_batch_size: int = 4096,
+        anchor_trajectories: int | None = None,
+        similarity_space: str = "initial_condition",
         seed: int,
     ) -> None:
         strategy_name = str(strategy).strip().lower()
-        if strategy_name not in {"random", "mae_topk", "mae_weighted"}:
-            raise ValueError("strategy must be one of: random, mae_topk, mae_weighted.")
+        if strategy_name not in {"random", "mae_nearest"}:
+            raise ValueError("strategy must be one of: random, mae_nearest.")
+        similarity_space_name = str(similarity_space).strip().lower()
+        if similarity_space_name != "initial_condition":
+            raise ValueError("similarity_space must be 'initial_condition'.")
         if int(add_trajectories) <= 0:
             raise ValueError("add_trajectories must be > 0.")
         if int(refresh_period_epochs) <= 0:
             raise ValueError("refresh_period_epochs must be > 0.")
         if int(candidate_batch_size) <= 0:
             raise ValueError("candidate_batch_size must be > 0.")
+        if anchor_trajectories not in (None, "null") and int(anchor_trajectories) <= 0:
+            raise ValueError("anchor_trajectories must be > 0 when provided.")
 
         self._index = build_trajectory_row_index(train_traj_ids)
         self._strategy = strategy_name
         self._add_trajectories = int(add_trajectories)
         self._refresh_period_epochs = int(refresh_period_epochs)
         self._candidate_batch_size = int(candidate_batch_size)
+        self._anchor_trajectories = None if anchor_trajectories in (None, "null") else int(anchor_trajectories)
+        self._similarity_space = similarity_space_name
         self._seed = int(seed)
         self._acquisition_count = 0
         self._last_acquisition_epoch: int | None = None
         self._last_acquired_trajectory_ids: tuple[int, ...] = ()
-        self._last_candidate_score_mean: float | None = None
-        self._last_candidate_score_max: float | None = None
-        self._last_selected_score_mean: float | None = None
-        self._last_selected_score_min: float | None = None
+        self._last_anchor_score_mean: float | None = None
+        self._last_anchor_score_max: float | None = None
+        self._last_selected_distance_mean: float | None = None
+        self._last_selected_distance_max: float | None = None
 
         total_trajectories = int(self._index.trajectory_ids.shape[0])
         if max_trajectories in (None, "null"):
@@ -141,10 +150,10 @@ class SupervisedAcquisitionManager:
     ) -> SupervisedAcquisitionDiagnostics:
         """Append trajectories if the acquisition cadence fires for this epoch."""
         self._last_acquired_trajectory_ids = ()
-        self._last_candidate_score_mean = None
-        self._last_candidate_score_max = None
-        self._last_selected_score_mean = None
-        self._last_selected_score_min = None
+        self._last_anchor_score_mean = None
+        self._last_anchor_score_max = None
+        self._last_selected_distance_mean = None
+        self._last_selected_distance_max = None
         if not self._should_acquire(global_epoch=global_epoch):
             return self.diagnostics()
 
@@ -155,19 +164,13 @@ class SupervisedAcquisitionManager:
 
         if self._strategy == "random":
             selected_positions = self._select_random_positions(add_count=add_count, global_epoch=global_epoch)
-            selected_scores = None
         else:
-            candidate_scores = self._score_candidate_trajectories(model=model, x=x, y=y)
-            self._last_candidate_score_mean = float(candidate_scores.mean().item())
-            self._last_candidate_score_max = float(candidate_scores.max().item())
-            selected_positions = self._select_scored_positions(
-                scores=candidate_scores,
+            selected_positions = self._select_nearest_to_hard_active_positions(
+                model=model,
+                x=x,
+                y=y,
                 add_count=add_count,
-                global_epoch=global_epoch,
             )
-            selected_scores = candidate_scores.index_select(0, selected_positions)
-            self._last_selected_score_mean = float(selected_scores.mean().item())
-            self._last_selected_score_min = float(selected_scores.min().item())
         selected_ids = self._candidate_trajectory_ids.index_select(0, selected_positions)
         updated_active = torch.cat((self._active_trajectory_ids, selected_ids), dim=0)
         self._active_trajectory_ids, self._candidate_trajectory_ids = split_active_candidate_trajectory_ids(
@@ -190,10 +193,10 @@ class SupervisedAcquisitionManager:
             acquisition_count=int(self._acquisition_count),
             last_acquisition_epoch=self._last_acquisition_epoch,
             last_acquired_trajectory_ids=self._last_acquired_trajectory_ids,
-            last_candidate_score_mean=self._last_candidate_score_mean,
-            last_candidate_score_max=self._last_candidate_score_max,
-            last_selected_score_mean=self._last_selected_score_mean,
-            last_selected_score_min=self._last_selected_score_min,
+            last_anchor_score_mean=self._last_anchor_score_mean,
+            last_anchor_score_max=self._last_anchor_score_max,
+            last_selected_distance_mean=self._last_selected_distance_mean,
+            last_selected_distance_max=self._last_selected_distance_max,
         )
 
     def _should_acquire(self, *, global_epoch: int) -> bool:
@@ -214,45 +217,74 @@ class SupervisedAcquisitionManager:
             generator=generator,
         )[:add_count]
 
-    def _select_scored_positions(
-        self,
-        *,
-        scores: torch.Tensor,
-        add_count: int,
-        global_epoch: int,
-    ) -> torch.Tensor:
-        if self._strategy == "mae_topk":
-            return torch.topk(scores, k=add_count, largest=True).indices.to(dtype=torch.long, device="cpu")
-        if self._strategy == "mae_weighted":
-            weights = scores.to(dtype=torch.float64).clamp_min(0.0)
-            total = weights.sum()
-            if float(total.item()) <= 0.0:
-                weights = torch.ones_like(weights)
-                total = weights.sum()
-            probabilities = weights / total
-            generator = torch.Generator(device="cpu")
-            generator.manual_seed(self._seed + self._acquisition_count + int(global_epoch))
-            return torch.multinomial(probabilities, num_samples=add_count, replacement=False, generator=generator)
-        raise ValueError(f"Unsupported supervised acquisition strategy: {self._strategy}")
-
-    def _score_candidate_trajectories(
+    def _select_nearest_to_hard_active_positions(
         self,
         *,
         model: nn.Module | None,
         x: torch.Tensor | None,
         y: torch.Tensor | None,
+        add_count: int,
+    ) -> torch.Tensor:
+        active_scores = self._score_trajectories(
+            trajectory_ids=self._active_trajectory_ids,
+            model=model,
+            x=x,
+            y=y,
+            score_label="active",
+        )
+        anchor_count = min(
+            self._anchor_trajectories if self._anchor_trajectories is not None else self._add_trajectories,
+            int(self._active_trajectory_ids.shape[0]),
+        )
+        anchor_positions = torch.topk(active_scores, k=anchor_count, largest=True).indices.to(dtype=torch.long)
+        anchor_ids = self._active_trajectory_ids.index_select(0, anchor_positions)
+        anchor_scores = active_scores.index_select(0, anchor_positions)
+        self._last_anchor_score_mean = float(anchor_scores.mean().item())
+        self._last_anchor_score_max = float(anchor_scores.max().item())
+
+        descriptors = self._initial_condition_descriptors(x=x)
+        normalized_descriptors = _standardize_descriptors(descriptors)
+        anchor_descriptors = _descriptors_for_trajectory_ids(
+            normalized_descriptors,
+            self._index.trajectory_ids,
+            anchor_ids,
+        )
+        candidate_descriptors = _descriptors_for_trajectory_ids(
+            normalized_descriptors,
+            self._index.trajectory_ids,
+            self._candidate_trajectory_ids,
+        )
+        distances = torch.cdist(
+            candidate_descriptors.to(dtype=torch.float64),
+            anchor_descriptors.to(dtype=torch.float64),
+            p=2.0,
+        ).min(dim=1).values
+        selected_positions = torch.topk(distances, k=add_count, largest=False).indices.to(dtype=torch.long, device="cpu")
+        selected_distances = distances.index_select(0, selected_positions)
+        self._last_selected_distance_mean = float(selected_distances.mean().item())
+        self._last_selected_distance_max = float(selected_distances.max().item())
+        return selected_positions
+
+    def _score_trajectories(
+        self,
+        *,
+        trajectory_ids: torch.Tensor,
+        model: nn.Module | None,
+        x: torch.Tensor | None,
+        y: torch.Tensor | None,
+        score_label: str,
     ) -> torch.Tensor:
         if model is None or x is None or y is None:
-            raise ValueError(f"strategy={self._strategy} requires model, x, and y for candidate scoring.")
+            raise ValueError(f"strategy={self._strategy} requires model, x, and y for {score_label} scoring.")
         if x.shape[0] != y.shape[0]:
-            raise ValueError("x and y must have the same leading dimension for candidate scoring.")
+            raise ValueError("x and y must have the same leading dimension for trajectory scoring.")
 
         scores: list[float] = []
         was_training = bool(model.training)
         model.eval()
         try:
             with torch.no_grad():
-                for trajectory_id in self._candidate_trajectory_ids.tolist():
+                for trajectory_id in trajectory_ids.tolist():
                     rows = self._index.rows_by_trajectory_id[int(trajectory_id)].to(device=x.device, dtype=torch.long)
                     total_abs = 0.0
                     total_count = 0
@@ -272,6 +304,22 @@ class SupervisedAcquisitionManager:
             if was_training:
                 model.train()
         return torch.as_tensor(scores, dtype=torch.float64, device="cpu")
+
+    def _initial_condition_descriptors(self, *, x: torch.Tensor | None) -> torch.Tensor:
+        if x is None:
+            raise ValueError(f"strategy={self._strategy} requires x for initial-condition similarity.")
+        if x.ndim != 2:
+            raise ValueError("x must be rank-2 for initial-condition similarity.")
+        if int(x.shape[1]) < 2:
+            raise ValueError("initial-condition similarity expects x to contain time plus at least one feature.")
+
+        descriptors: list[torch.Tensor] = []
+        x_cpu = x.detach().to(device="cpu", dtype=torch.float64)
+        for trajectory_id in self._index.trajectory_ids.tolist():
+            rows = self._index.rows_by_trajectory_id[int(trajectory_id)]
+            first_row = int(rows[0].item())
+            descriptors.append(x_cpu[first_row, 1:])
+        return torch.stack(descriptors, dim=0)
 
 
 def build_trajectory_row_index(train_traj_ids: torch.Tensor | None) -> TrajectoryRowIndex:
@@ -379,6 +427,25 @@ def row_indices_for_trajectory_ids(
     if device is not None:
         out = out.to(device=device)
     return out
+
+
+def _descriptors_for_trajectory_ids(
+    descriptors: torch.Tensor,
+    all_trajectory_ids: torch.Tensor,
+    trajectory_ids: torch.Tensor,
+) -> torch.Tensor:
+    id_to_position = {int(value): idx for idx, value in enumerate(all_trajectory_ids.tolist())}
+    positions = [id_to_position[int(value)] for value in trajectory_ids.tolist()]
+    return descriptors.index_select(0, torch.as_tensor(positions, dtype=torch.long))
+
+
+def _standardize_descriptors(descriptors: torch.Tensor) -> torch.Tensor:
+    if descriptors.ndim != 2:
+        raise ValueError("descriptors must be rank-2.")
+    mean = descriptors.mean(dim=0, keepdim=True)
+    std = descriptors.std(dim=0, unbiased=False, keepdim=True)
+    std = torch.where(std > 1.0e-12, std, torch.ones_like(std))
+    return (descriptors - mean) / std
 
 
 def _normalize_trajectory_ids(trajectory_ids: torch.Tensor) -> torch.Tensor:

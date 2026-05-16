@@ -33,9 +33,17 @@ Path pattern:
 - `data/<model_flag>/dataset_vN/test/*.h5`
 
 Supervised files:
-- `train_data*.h5` with datasets: `x_train`, `y_train`
-- `val_data*.h5` with datasets: `x_val`, `y_val`
-- `test_data*.h5` with datasets: `x_test`, `y_test`
+- `train_data*.h5` with datasets: `x_train`, `y_train`, `trajectory_id_train`
+- `val_data*.h5` with datasets: `x_val`, `y_val`, `trajectory_id_val`
+- `test_data*.h5` with datasets: `x_test`, `y_test`, `trajectory_id_test`
+
+Supervised metadata:
+- `trajectory_id_*` is required provenance for newly preprocessed supervised files.
+  It identifies which flattened supervised rows belong to the same simulated
+  trajectory and enables trajectory-level methods such as supervised acquisition.
+- `difficulty_score_*` and `difficulty_bin_*` are optional legacy curriculum
+  metadata. They are not required by baseline, standard PINN, or adaptive
+  augmentation runs.
 
 PINN support files (train split only):
 - `train_data_col*.h5`: collocation points, only `x_train`

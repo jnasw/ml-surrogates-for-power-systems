@@ -218,6 +218,7 @@ def main(config) -> None:
             dataset_root,
             collocation_mode=str(getattr(config.pinn.collocation, "mode", "preprocessed")),
             curriculum_enabled=bool(cfg_get(config, "pinn.curriculum.enabled", False)),
+            supervised_acquisition_enabled=bool(cfg_get(config, "pinn.supervised_acquisition.enabled", False)),
         )
         for note in dataset_notes:
             print(f"[pinn] Note: {note}")
@@ -226,6 +227,7 @@ def main(config) -> None:
             dataset_root=dataset_root,
             dtype=str(config.pinn.dtype),
             allow_missing_collocation=str(getattr(config.pinn.collocation, "mode", "preprocessed")).strip().lower() == "generated",
+            supervised_acquisition_enabled=bool(cfg_get(config, "pinn.supervised_acquisition.enabled", False)),
         )
         timings["dataset_load_seconds"] = monotonic() - dataset_load_started
         active_col_points = int(cfg_get(config, "pinn.collocation.active_points", dataset.train_col_x.shape[0]))

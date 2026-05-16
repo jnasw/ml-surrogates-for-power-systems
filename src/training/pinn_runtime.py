@@ -17,6 +17,7 @@ from src.pinn.optim import OptimizerSpec
 from src.pinn.residuals import compute_residual_terms, compute_supervised_dt_terms, prepare_input_for_autograd
 from src.pinn.runtime import OptimizerPhase, ResolvedLossWeightScheduleStage, SchedulerConfig
 from src.pinn.weighting import WeightUpdateStats, WeightingConfig
+from src.training.metrics import regression_metrics_for_torch_model
 from src.training.runtime import cfg_get
 
 
@@ -279,6 +280,43 @@ def evaluate_epoch_validation_and_test(
                 )
             }
     return val_total_loss, val_component_losses, test_metrics
+
+
+def evaluate_epoch_regression_metrics(
+    *,
+    model: nn.Module,
+    active_train_x: torch.Tensor | None,
+    active_train_y: torch.Tensor | None,
+    dataset: PinnDatasetBundle,
+    config: Any,
+    global_epoch: int,
+) -> dict[str, dict[str, float]] | None:
+    """Compute periodic supervised MAE/RMSE metrics for stable training analysis."""
+    if not should_run_evaluation(global_epoch, config):
+        return None
+    batch_size = int(cfg_get(config, "pinn.default_batch_size", 4096))
+    was_training = bool(model.training)
+    try:
+        metrics: dict[str, dict[str, float]] = {}
+        split_inputs = {
+            "active_train": (active_train_x, active_train_y),
+            "full_train": (dataset.train_x, dataset.train_y),
+            "val": (dataset.val_x, dataset.val_y),
+            "test": (dataset.test_x, dataset.test_y),
+        }
+        for split_name, (x, y) in split_inputs.items():
+            values = regression_metrics_for_torch_model(
+                model=model,
+                x=x,
+                y=y,
+                batch_size=batch_size,
+            )
+            if values is not None:
+                metrics[split_name] = values
+        return metrics
+    finally:
+        if was_training:
+            model.train()
 
 
 def ceil_div(num: int, den: int) -> int:

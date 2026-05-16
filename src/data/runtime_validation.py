@@ -15,6 +15,7 @@ from src.data.contracts.data_contract import (
     H5_DIFFICULTY_SCORE_KEYS,
     H5_FILE_SUFFIX,
     H5_INIT_SUFFIX,
+    H5_TRAJECTORY_ID_KEYS,
     TEST_SPLIT,
     TRAIN_SPLIT,
     VAL_SPLIT,
@@ -125,6 +126,7 @@ def validate_pinn_runtime_dataset(
     *,
     collocation_mode: str,
     curriculum_enabled: bool,
+    supervised_acquisition_enabled: bool = False,
 ) -> list[str]:
     """Validate the minimal preprocessed artifacts required by the PINN runtime."""
     if not os.path.exists(dataset_root):
@@ -177,6 +179,13 @@ def validate_pinn_runtime_dataset(
                 H5_DIFFICULTY_BIN_KEYS[TRAIN_SPLIT],
             ],
             context="pinn.curriculum.enabled=true",
+        )
+    if supervised_acquisition_enabled:
+        _require_metadata_keys(
+            dataset_root,
+            train_supervised,
+            keys=[H5_TRAJECTORY_ID_KEYS[TRAIN_SPLIT]],
+            context="pinn.supervised_acquisition.enabled=true",
         )
 
     if not val_supervised:

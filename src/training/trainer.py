@@ -74,6 +74,7 @@ from src.training.pinn_runtime import (
     apply_single_stage_live_weight_update as _apply_single_stage_live_weight_update,
     build_phase_scheduler as _build_phase_scheduler,
     evaluate_epoch_validation_and_test as _evaluate_epoch_validation_and_test,
+    evaluate_epoch_regression_metrics as _evaluate_epoch_regression_metrics,
     iter_minibatch_batches as _iter_minibatch_batches,
     maybe_apply_single_stage_epoch_weight_update as _maybe_apply_single_stage_epoch_weight_update,
     measure_pinn_state as _measure_pinn_state,

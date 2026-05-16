@@ -26,8 +26,7 @@ This experiment addresses:
 - **Supervised acquisition strategy**
   - fixed_low_data
   - random_growth
-  - mae_topk_growth
-  - optional: mae_weighted_growth
+  - mae_nearest_growth
 
 - **Supervised trajectory budget**
   - initial active trajectory count
@@ -76,7 +75,7 @@ The pipeline must support:
 
 The dataset must provide:
 
-- Supervised training rows with `trajectory_id` metadata
+- Supervised training rows with `trajectory_id_*` metadata
 - A labelled supervised candidate pool contained in the training split
 - Preprocessed initial-condition rows for PINN IC constraints
 - Optional preprocessed collocation rows for static collocation baselines
@@ -141,12 +140,20 @@ Each run must produce:
   - A larger labelled training pool is preprocessed before the PINN run.
   - Only an initial subset of trajectory IDs is visible at epoch 1.
   - Acquisition reveals additional whole trajectories from the candidate pool.
+  - Supervised acquisition budgets are counted after splitting, in active
+    train trajectories. They are not total generated-trajectory budget labels.
 
 - **Supervised acquisition**
   - Acquisition is trajectory-level, not row-level.
-  - `mae_topk_growth` scores candidate trajectories by model MAE on their labelled rows and activates the highest-error trajectories.
+  - `mae_nearest_growth` scores active trajectories by model MAE, selects the hardest active trajectories as anchors, and activates hidden trajectories nearest to those anchors in normalized initial-condition space.
   - `random_growth` activates candidate trajectories uniformly at random.
+  - Candidate trajectory labels must not be used for the `mae_nearest_growth` selection decision.
   - Validation, test, ID evaluation, and OOD evaluation rows must never be used for acquisition.
+
+- **Training-time regression metrics**
+  - Log periodic MAE/RMSE/MSE for the active supervised train set, full train pool, validation split, and test split.
+  - Analyze these alongside weighted PINN losses because adaptive growth can make the optimization loss increase when harder data is appended.
+  - The full-train and fixed validation/test metrics provide stable curves across acquisition events.
 
 - **Collocation acquisition**
   - Collocation growth uses residual-based append behaviour.
@@ -156,6 +163,10 @@ Each run must produce:
 - **Training budget**
   - Runs must track epochs, walltime, supervised acquisition events, and collocation acquisition events.
   - Fair comparisons should keep final supervised and collocation budgets equal unless budget scaling is the explicit independent variable.
+  - The intended thesis run uses a `b4096` total reference pool, yielding about
+    3276 train trajectories with the standard 0.8 split. The supervised schedule
+    is 256 initial active train trajectories, 32 added per refresh, and 512 final
+    active train trajectories.
 
 ---
 
@@ -272,6 +283,9 @@ The codebase supports this experiment if:
 - MAE-guided acquisition requires labels for candidate trajectories. The first implementation should therefore use a precomputed labelled candidate pool rather than simulator-in-the-loop generation.
 - The experiment is pool-based active learning / active reveal, not fully online dataset generation.
 - Acquiring whole trajectories preserves the meaning of supervised data budget and avoids row-level leakage.
+- Newly preprocessed supervised HDF5 files should always include `trajectory_id_*`
+  provenance. Difficulty score/bin metadata is optional legacy curriculum
+  metadata and is not part of the adaptive augmentation contract.
 - RAR-D is the appropriate existing mechanism for append-style collocation growth. Fixed-budget RAD should remain available as the replacement-style adaptive collocation baseline.
 - Acquisition overhead must be tracked separately from normal training walltime where possible.
 - Precision behaviour must follow the existing PINN runtime expectations; adaptive scoring should not accidentally downgrade PINN tensors from float64.

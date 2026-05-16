@@ -264,6 +264,14 @@ def train_multistage_pinn_loop(
                 eval_init_x=dataset.val_init_x,
                 eval_init_y=dataset.val_init_y,
             )
+            regression_metrics = trainer_impl._evaluate_epoch_regression_metrics(
+                model=ensemble,
+                active_train_x=dataset.train_x,
+                active_train_y=dataset.train_y,
+                dataset=dataset,
+                config=config,
+                global_epoch=0,
+            )
             initial_row = trainer_impl._build_epoch_metrics_row(
                 epoch=0,
                 global_epoch=0,
@@ -280,6 +288,7 @@ def train_multistage_pinn_loop(
                 val_total_loss=val_total_loss,
                 val_component_losses=val_component_losses,
                 test_metrics=test_metrics,
+                regression_metrics=regression_metrics,
                 weighting_scheme="static",
                 weighting_updated=False,
                 train_loss_weights=base_weights.as_dict(),
@@ -580,6 +589,14 @@ def train_multistage_pinn_loop(
                     val_total_loss=val_total_loss,
                     val_component_losses=val_component_losses,
                     test_metrics=test_metrics,
+                    regression_metrics=trainer_impl._evaluate_epoch_regression_metrics(
+                        model=ensemble,
+                        active_train_x=epoch_train_x,
+                        active_train_y=epoch_train_y,
+                        dataset=dataset,
+                        config=config,
+                        global_epoch=global_epoch,
+                    ),
                     weighting_scheme="static",
                     weighting_updated=False,
                     train_loss_weights=active_weights.as_dict(),

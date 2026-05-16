@@ -173,11 +173,13 @@ def load_pinn_dataset_from_preprocessed_root(
     dataset_root: str,
     dtype: str = "float64",
     allow_missing_collocation: bool = False,
+    supervised_acquisition_enabled: bool = False,
 ) -> PinnDatasetBundle:
     validate_pinn_runtime_dataset(
         dataset_root,
         collocation_mode="generated" if allow_missing_collocation else "preprocessed",
         curriculum_enabled=False,
+        supervised_acquisition_enabled=bool(supervised_acquisition_enabled),
     )
 
     torch_dtype = resolve_torch_dtype(dtype)
@@ -282,10 +284,12 @@ def load_pinn_dataset_from_preprocessed(
     dataset_number: int,
     dtype: str = "float64",
     allow_missing_collocation: bool = False,
+    supervised_acquisition_enabled: bool = False,
 ) -> PinnDatasetBundle:
     dataset_root = os.path.join(dataset_dir, model_flag, f"dataset_v{dataset_number}")
     return load_pinn_dataset_from_preprocessed_root(
         dataset_root=dataset_root,
         dtype=dtype,
         allow_missing_collocation=allow_missing_collocation,
+        supervised_acquisition_enabled=bool(supervised_acquisition_enabled),
     )

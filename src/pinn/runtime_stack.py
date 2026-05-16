@@ -68,6 +68,8 @@ class ResolvedSupervisedAcquisitionSettings:
     max_trajectories: int | None
     refresh_period_epochs: int
     candidate_batch_size: int
+    anchor_trajectories: int | None
+    similarity_space: str
     seed: int
 
 
@@ -303,7 +305,7 @@ def _optional_int(config: Any, key: str) -> int | None:
 def _resolve_supervised_acquisition(config: Any) -> ResolvedSupervisedAcquisitionSettings:
     enabled = bool(cfg_get(config, "pinn.supervised_acquisition.enabled", False))
     strategy = str(cfg_get(config, "pinn.supervised_acquisition.strategy", "random")).strip().lower()
-    supported_strategies = {"random", "mae_topk", "mae_weighted"}
+    supported_strategies = {"random", "mae_nearest"}
     if strategy not in supported_strategies:
         raise ValueError(
             "pinn.supervised_acquisition.strategy must be one of: "
@@ -315,15 +317,23 @@ def _resolve_supervised_acquisition(config: Any) -> ResolvedSupervisedAcquisitio
     add_trajectories = int(cfg_get(config, "pinn.supervised_acquisition.add_trajectories", 1))
     refresh_period_epochs = int(cfg_get(config, "pinn.supervised_acquisition.refresh_period_epochs", 500))
     candidate_batch_size = int(cfg_get(config, "pinn.supervised_acquisition.candidate_batch_size", 4096))
+    anchor_trajectories = _optional_int(config, "pinn.supervised_acquisition.anchor_trajectories")
+    similarity_space = str(
+        cfg_get(config, "pinn.supervised_acquisition.similarity_space", "initial_condition")
+    ).strip().lower()
     seed = int(cfg_get(config, "pinn.supervised_acquisition.seed", cfg_get(config, "model.seed", 0)))
 
     if enabled:
+        if similarity_space != "initial_condition":
+            raise ValueError("pinn.supervised_acquisition.similarity_space must be 'initial_condition'.")
         if initial_trajectories is not None and initial_trajectories <= 0:
             raise ValueError("pinn.supervised_acquisition.initial_trajectories must be > 0 when provided.")
         if max_trajectories is not None and max_trajectories <= 0:
             raise ValueError("pinn.supervised_acquisition.max_trajectories must be > 0 when provided.")
         if add_trajectories <= 0:
             raise ValueError("pinn.supervised_acquisition.add_trajectories must be > 0.")
+        if anchor_trajectories is not None and anchor_trajectories <= 0:
+            raise ValueError("pinn.supervised_acquisition.anchor_trajectories must be > 0 when provided.")
         if refresh_period_epochs <= 0:
             raise ValueError("pinn.supervised_acquisition.refresh_period_epochs must be > 0.")
         if candidate_batch_size <= 0:
@@ -343,6 +353,8 @@ def _resolve_supervised_acquisition(config: Any) -> ResolvedSupervisedAcquisitio
         max_trajectories=max_trajectories,
         refresh_period_epochs=refresh_period_epochs,
         candidate_batch_size=candidate_batch_size,
+        anchor_trajectories=anchor_trajectories,
+        similarity_space=similarity_space,
         seed=seed,
     )
 

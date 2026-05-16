@@ -410,23 +410,37 @@ class Datapreprocessor:
         *,
         x: np.ndarray,
         trajectory_id: int,
-        difficulty_score: float,
-        difficulty_bin: int,
+        difficulty_score: float | None = None,
+        difficulty_bin: int | None = None,
     ) -> dict[str, np.ndarray]:
         row_count = int(x.shape[0])
-        return {
+        metadata = {
             H5_TRAJECTORY_ID_KEYS[TRAIN_SPLIT]: np.full((row_count,), int(trajectory_id), dtype=np.int64),
-            H5_DIFFICULTY_SCORE_KEYS[TRAIN_SPLIT]: np.full((row_count,), float(difficulty_score), dtype=np.float32),
-            H5_DIFFICULTY_BIN_KEYS[TRAIN_SPLIT]: np.full((row_count,), int(difficulty_bin), dtype=np.int64),
         }
+        if difficulty_score is not None and difficulty_bin is not None:
+            metadata[H5_DIFFICULTY_SCORE_KEYS[TRAIN_SPLIT]] = np.full(
+                (row_count,),
+                float(difficulty_score),
+                dtype=np.float32,
+            )
+            metadata[H5_DIFFICULTY_BIN_KEYS[TRAIN_SPLIT]] = np.full(
+                (row_count,),
+                int(difficulty_bin),
+                dtype=np.int64,
+            )
+        return metadata
 
     def _metadata_with_split_keys(self, split: str, payload: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         if split == TRAIN_SPLIT:
             return payload
+        key_map = {
+            H5_TRAJECTORY_ID_KEYS[TRAIN_SPLIT]: H5_TRAJECTORY_ID_KEYS[split],
+            H5_DIFFICULTY_SCORE_KEYS[TRAIN_SPLIT]: H5_DIFFICULTY_SCORE_KEYS[split],
+            H5_DIFFICULTY_BIN_KEYS[TRAIN_SPLIT]: H5_DIFFICULTY_BIN_KEYS[split],
+        }
         remapped: dict[str, np.ndarray] = {}
-        remapped[H5_TRAJECTORY_ID_KEYS[split]] = payload[H5_TRAJECTORY_ID_KEYS[TRAIN_SPLIT]]
-        remapped[H5_DIFFICULTY_SCORE_KEYS[split]] = payload[H5_DIFFICULTY_SCORE_KEYS[TRAIN_SPLIT]]
-        remapped[H5_DIFFICULTY_BIN_KEYS[split]] = payload[H5_DIFFICULTY_BIN_KEYS[TRAIN_SPLIT]]
+        for source_key, values in payload.items():
+            remapped[key_map[source_key]] = values
         return remapped
 
     def _split_from_index(self, traj_idx: int, train_cutoff: int, val_cutoff: int, has_val: bool) -> str:
@@ -572,22 +586,24 @@ class Datapreprocessor:
                         float(self.cfg.time),
                         simulation_time=self.time_sim,
                     )
-                    row_metadata: dict[str, np.ndarray] | None = None
+                    difficulty_score = None
+                    difficulty_bin = None
                     if local_curriculum_records is not None:
                         record = local_curriculum_records[traj_idx_global]
-                        row_metadata = self._metadata_with_split_keys(
-                            split,
-                            self._supervised_metadata_rows(
-                                x=x,
-                                trajectory_id=int(record["trajectory_id"]),
-                                difficulty_score=float(record["difficulty_score"]),
-                                difficulty_bin=int(record["difficulty_bin"]),
-                            ),
-                        )
+                        difficulty_score = float(record["difficulty_score"])
+                        difficulty_bin = int(record["difficulty_bin"])
+                    row_metadata = self._metadata_with_split_keys(
+                        split,
+                        self._supervised_metadata_rows(
+                            x=x,
+                            trajectory_id=traj_idx_global,
+                            difficulty_score=difficulty_score,
+                            difficulty_bin=difficulty_bin,
+                        ),
+                    )
                     buffers_x[split].append(x)
                     buffers_y[split].append(y)
-                    if row_metadata is not None:
-                        buffers_meta[split].append(row_metadata)
+                    buffers_meta[split].append(row_metadata)
                     trajectories_by_split[split] += 1
                     traj_idx_global += 1
 
@@ -631,7 +647,8 @@ class Datapreprocessor:
                         float(self.cfg.time),
                         simulation_time=shared_time_sim,
                     )
-                    row_metadata = None
+                    difficulty_score = None
+                    difficulty_bin = None
                     if curriculum_metadata is not None:
                         score = self._trajectory_difficulty_score(
                             trajectory=trajectory,
@@ -639,19 +656,20 @@ class Datapreprocessor:
                             simulation_time=shared_time_sim,
                         )
                         bin_edges = curriculum_metadata[1]
-                        row_metadata = self._metadata_with_split_keys(
-                            TEST_SPLIT,
-                            self._supervised_metadata_rows(
-                                x=x,
-                                trajectory_id=int(self.total_init_conditions + test_count),
-                                difficulty_score=float(score),
-                                difficulty_bin=int(np.searchsorted(bin_edges, score, side="right")),
-                            ),
-                        )
+                        difficulty_score = float(score)
+                        difficulty_bin = int(np.searchsorted(bin_edges, score, side="right"))
+                    row_metadata = self._metadata_with_split_keys(
+                        TEST_SPLIT,
+                        self._supervised_metadata_rows(
+                            x=x,
+                            trajectory_id=int(self.total_init_conditions + test_count),
+                            difficulty_score=difficulty_score,
+                            difficulty_bin=difficulty_bin,
+                        ),
+                    )
                     buffers_x[TEST_SPLIT].append(x)
                     buffers_y[TEST_SPLIT].append(y)
-                    if row_metadata is not None:
-                        buffers_meta[TEST_SPLIT].append(row_metadata)
+                    buffers_meta[TEST_SPLIT].append(row_metadata)
                     trajectories_by_split[TEST_SPLIT] += 1
                     test_count += 1
 
@@ -731,22 +749,24 @@ class Datapreprocessor:
                             float(self.cfg.time),
                             simulation_time=self.time_sim,
                         )
-                        row_metadata = None
+                        difficulty_score = None
+                        difficulty_bin = None
                         if local_curriculum_records is not None:
                             record = local_curriculum_records[global_idx]
-                            row_metadata = self._metadata_with_split_keys(
-                                split,
-                                self._supervised_metadata_rows(
-                                    x=x,
-                                    trajectory_id=int(record["trajectory_id"]),
-                                    difficulty_score=float(record["difficulty_score"]),
-                                    difficulty_bin=int(record["difficulty_bin"]),
-                                ),
-                            )
+                            difficulty_score = float(record["difficulty_score"])
+                            difficulty_bin = int(record["difficulty_bin"])
+                        row_metadata = self._metadata_with_split_keys(
+                            split,
+                            self._supervised_metadata_rows(
+                                x=x,
+                                trajectory_id=global_idx,
+                                difficulty_score=difficulty_score,
+                                difficulty_bin=difficulty_bin,
+                            ),
+                        )
                         buffers_x[split].append(x)
                         buffers_y[split].append(y)
-                        if row_metadata is not None:
-                            buffers_meta[split].append(row_metadata)
+                        buffers_meta[split].append(row_metadata)
                         trajectories_by_split[split] += 1
                         non_test_idx += 1
 
@@ -764,7 +784,8 @@ class Datapreprocessor:
                     float(self.cfg.time),
                     simulation_time=source_time,
                 )
-                row_metadata = None
+                difficulty_score = None
+                difficulty_bin = None
                 if curriculum_metadata is not None:
                     score = self._trajectory_difficulty_score(
                         trajectory=trajectory,
@@ -772,19 +793,20 @@ class Datapreprocessor:
                         simulation_time=source_time,
                     )
                     bin_edges = curriculum_metadata[1]
-                    row_metadata = self._metadata_with_split_keys(
-                        TEST_SPLIT,
-                        self._supervised_metadata_rows(
-                            x=x,
-                            trajectory_id=int(self.total_init_conditions + trajectories_by_split[TEST_SPLIT]),
-                            difficulty_score=float(score),
-                            difficulty_bin=int(np.searchsorted(bin_edges, score, side="right")),
-                        ),
-                    )
+                    difficulty_score = float(score)
+                    difficulty_bin = int(np.searchsorted(bin_edges, score, side="right"))
+                row_metadata = self._metadata_with_split_keys(
+                    TEST_SPLIT,
+                    self._supervised_metadata_rows(
+                        x=x,
+                        trajectory_id=int(self.total_init_conditions + trajectories_by_split[TEST_SPLIT]),
+                        difficulty_score=difficulty_score,
+                        difficulty_bin=difficulty_bin,
+                    ),
+                )
                 buffers_x[TEST_SPLIT].append(x)
                 buffers_y[TEST_SPLIT].append(y)
-                if row_metadata is not None:
-                    buffers_meta[TEST_SPLIT].append(row_metadata)
+                buffers_meta[TEST_SPLIT].append(row_metadata)
                 trajectories_by_split[TEST_SPLIT] += 1
                 sample_count = sum(chunk.shape[0] for chunk in buffers_x[TEST_SPLIT])
                 if sample_count >= self.save_freq:

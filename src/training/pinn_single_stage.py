@@ -157,6 +157,8 @@ def train_single_stage_pinn_loop(
             max_trajectories=acquisition_settings.max_trajectories,
             refresh_period_epochs=acquisition_settings.refresh_period_epochs,
             candidate_batch_size=acquisition_settings.candidate_batch_size,
+            anchor_trajectories=acquisition_settings.anchor_trajectories,
+            similarity_space=acquisition_settings.similarity_space,
             seed=acquisition_settings.seed,
         )
     initial_train_x, initial_train_y, initial_train_data_idx, initial_acquisition_diagnostics = _sample_epoch_supervised_rows(
@@ -245,6 +247,14 @@ def train_single_stage_pinn_loop(
         eval_init_x=dataset.val_init_x,
         eval_init_y=dataset.val_init_y,
     )
+    regression_metrics = trainer_impl._evaluate_epoch_regression_metrics(
+        model=model,
+        active_train_x=initial_train_x,
+        active_train_y=initial_train_y,
+        dataset=dataset,
+        config=config,
+        global_epoch=0,
+    )
     initial_train_component_losses = {
         name: float(value.detach().item())
         for name, value in initial_losses.components.items()
@@ -262,6 +272,7 @@ def train_single_stage_pinn_loop(
         val_total_loss=val_total_loss,
         val_component_losses=val_component_losses,
         test_metrics=test_metrics,
+        regression_metrics=regression_metrics,
         weighting_scheme=weighting_config.scheme,
         weighting_updated=False,
         train_loss_weights=initial_weights.as_dict(),
@@ -591,6 +602,14 @@ def train_single_stage_pinn_loop(
                 eval_init_x=dataset.val_init_x,
                 eval_init_y=dataset.val_init_y,
             )
+            regression_metrics = trainer_impl._evaluate_epoch_regression_metrics(
+                model=model,
+                active_train_x=epoch_train_x,
+                active_train_y=epoch_train_y,
+                dataset=dataset,
+                config=config,
+                global_epoch=global_epoch,
+            )
             scheduler_metric_value, scheduler_metric_name = trainer_impl._scheduler_metric_value(
                 scheduler_config=phase.scheduler,
                 train_total_loss=train_total,
@@ -613,6 +632,7 @@ def train_single_stage_pinn_loop(
                 val_total_loss=val_total_loss,
                 val_component_losses=val_component_losses,
                 test_metrics=test_metrics,
+                regression_metrics=regression_metrics,
                 weighting_scheme=weighting_config.scheme,
                 weighting_updated=weighting_updated,
                 train_loss_weights=active_weights.as_dict(),
