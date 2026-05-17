@@ -78,7 +78,7 @@ FINAL_DEFAULT_INITIAL_TRAJECTORIES = 256
 FINAL_DEFAULT_ADD_TRAJECTORIES = 32
 FINAL_DEFAULT_FINAL_TRAJECTORIES = 512
 
-SUPERVISED_STRATEGIES = ("fixed_low", "random_growth", "mae_nearest_growth", "fixed_full")
+SUPERVISED_STRATEGIES = ("fixed_low", "fixed_final", "random_growth", "mae_nearest_growth", "fixed_full")
 SCREENING_DEFAULT_SUPERVISED_STRATEGIES = ("fixed_low", "random_growth", "mae_nearest_growth")
 FINAL_DEFAULT_SUPERVISED_STRATEGIES = ("fixed_low", "random_growth", "mae_nearest_growth", "fixed_full")
 COLLOCATION_STRATEGIES = ("static_low", "rar_d_growth")
@@ -296,6 +296,14 @@ def _build_run_specs(
             acquisition_strategy = "random"
             initial_trajectories = supervised_initial_trajectories
             max_trajectories = supervised_initial_trajectories
+            add_trajectories = supervised_add_trajectories
+        elif supervised_strategy == "fixed_final":
+            # Fair upper-bound for the growth strategies: the full FINAL
+            # trajectory budget (e.g. 512) visible from epoch 0, randomly
+            # selected once, no acquisition curriculum / no growth.
+            acquisition_strategy = "random"
+            initial_trajectories = supervised_final_trajectories
+            max_trajectories = supervised_final_trajectories
             add_trajectories = supervised_add_trajectories
         elif supervised_strategy == "random_growth":
             acquisition_strategy = "random"
