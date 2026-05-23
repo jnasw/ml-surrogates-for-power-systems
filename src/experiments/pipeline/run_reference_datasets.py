@@ -156,6 +156,16 @@ def _reference_specs() -> list[ReferenceDatasetSpec]:
                     default_for_training_experiments=(method == "qbc_deep_ensemble"),
                 )
             )
+        specs.append(
+            ReferenceDatasetSpec(
+                suite="main",
+                model_flag=model_flag,
+                method="qbc_deep_ensemble",
+                budget="b1024",
+                dataset_seed="ds01",
+                preset="main",
+            )
+        )
         if model_flag == "SM4":
             specs.append(
                 ReferenceDatasetSpec(

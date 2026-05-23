@@ -44,6 +44,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--analysis-seed", type=int, default=None, help="Override analysis subset seed.")
     parser.add_argument("--direction-seed", type=int, default=None, help="Seed for random directions.")
     parser.add_argument("--normalization", default=None, help="Direction normalization mode.")
+    parser.add_argument(
+        "--weight-source",
+        choices=["config", "checkpoint"],
+        default="config",
+        help=(
+            "Loss weights used for the landscape total. "
+            "'config' uses pinn.loss_weights.* from the checkpoint config; "
+            "'checkpoint' uses the active train_loss_weights saved in checkpoint metrics."
+        ),
+    )
     parser.add_argument("--device", default="auto", help="Device preference for checkpoint loading.")
     parser.add_argument("--require-all-components", action="store_true", help="Require supervised, collocation, and init data.")
     parser.add_argument("--dry-run", action="store_true", help="Resolve paths/config and print summary without evaluating.")
@@ -65,6 +75,46 @@ def _beta_values(args: argparse.Namespace) -> np.ndarray:
     if int(args.resolution) <= 0:
         raise ValueError("--resolution must be > 0.")
     return np.linspace(float(args.beta_min), float(args.beta_max), int(args.resolution), dtype=np.float64)
+
+
+def _weights_from_config(config: object) -> LossWeights:
+    return LossWeights(
+        data=float(cfg_get(config, "pinn.loss_weights.data", 1.0)),
+        dt=float(cfg_get(config, "pinn.loss_weights.dt", 1.0e-4)),
+        physics=float(cfg_get(config, "pinn.loss_weights.physics", 1.0e-4)),
+        ic=float(cfg_get(config, "pinn.loss_weights.ic", 1.0e-3)),
+    )
+
+
+def _weights_from_checkpoint(payload: dict[str, object]) -> LossWeights:
+    metrics = payload.get("metrics")
+    weights = getattr(metrics, "train_loss_weights", None)
+    if not isinstance(weights, dict):
+        raise ValueError(
+            "Checkpoint metrics do not contain active train_loss_weights. "
+            "Use --weight-source config for this checkpoint."
+        )
+    missing = [name for name in ("data", "dt", "physics", "ic") if name not in weights]
+    if missing:
+        raise ValueError(
+            "Checkpoint train_loss_weights is missing component(s): "
+            + ", ".join(missing)
+            + ". Use --weight-source config for this checkpoint."
+        )
+    return LossWeights(
+        data=float(weights["data"]),
+        dt=float(weights["dt"]),
+        physics=float(weights["physics"]),
+        ic=float(weights["ic"]),
+    )
+
+
+def _resolve_loss_weights(*, payload: dict[str, object], config: object, weight_source: str) -> LossWeights:
+    if weight_source == "checkpoint":
+        return _weights_from_checkpoint(payload)
+    if weight_source == "config":
+        return _weights_from_config(config)
+    raise ValueError(f"Unsupported weight source: {weight_source}")
 
 
 def main() -> None:
@@ -125,6 +175,7 @@ def main() -> None:
         "analysis_seed": int(analysis_seed),
         "direction_seed": direction_seed,
         "normalization": normalization,
+        "weight_source": str(args.weight_source),
     }
 
     if args.dry_run:
@@ -153,17 +204,13 @@ def main() -> None:
     )
 
     ode_model = SynchronousMachineModels(config)
-    weights = LossWeights(
-        data=float(cfg_get(config, "pinn.loss_weights.data", 1.0)),
-        dt=float(cfg_get(config, "pinn.loss_weights.dt", 1.0e-4)),
-        physics=float(cfg_get(config, "pinn.loss_weights.physics", 1.0)),
-        ic=float(cfg_get(config, "pinn.loss_weights.ic", 1.0)),
-    )
+    weights = _resolve_loss_weights(payload=payload, config=config, weight_source=str(args.weight_source))
 
     manifest = {
         **summary,
         "analysis_bundle": analysis_bundle.as_manifest(),
         "weights": weights.as_dict(),
+        "weight_source": str(args.weight_source),
         "loss_components": list(weights.as_dict().keys()),
         "formulation": str(cfg_get(config, "pinn.formulation", "odequations")),
         "dtype": dtype_name,
