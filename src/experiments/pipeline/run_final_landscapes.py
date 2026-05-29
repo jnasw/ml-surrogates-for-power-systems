@@ -37,6 +37,18 @@ def _read_manifest(path: Path) -> dict[str, Any]:
     return payload
 
 
+def _parse_manifest_paths(raw_values: list[str]) -> list[Path]:
+    paths: list[Path] = []
+    for raw in raw_values:
+        for item in parse_csv_list(str(raw)):
+            value = item.strip()
+            if value:
+                paths.append(Path(value).resolve())
+    if not paths:
+        raise ValueError("At least one --run-manifest path is required.")
+    return paths
+
+
 def _checkpoint_path(run_dir: Path, tag: str) -> Path:
     return run_dir / "checkpoints" / f"{tag}.pt"
 
@@ -62,15 +74,25 @@ def _selected_runs(
     return selected
 
 
-def _weight_source_for_run(strategy: str, requested: str) -> str:
+def _weight_source_for_run(strategy: str, checkpoint_tag: str, requested: str) -> str:
     if requested != "auto":
         return requested
+    if checkpoint_tag == "init":
+        return "config"
     return "checkpoint" if strategy == "dn_adam3000_ssbroyden2000" else "config"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--run-manifest", required=True, help="Final experiment run_manifest.json.")
+    parser.add_argument(
+        "--run-manifest",
+        action="append",
+        default=[],
+        help=(
+            "Final experiment run_manifest.json. Repeat this option or pass "
+            "comma-separated paths to combine fragmented retry batches."
+        ),
+    )
     parser.add_argument("--python-bin", default=sys.executable)
     parser.add_argument("--output-root", default=None)
     parser.add_argument("--experiment-tag", default=None)
@@ -113,9 +135,13 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    source_manifest_path = Path(args.run_manifest).resolve()
-    source_manifest = _read_manifest(source_manifest_path)
-    source_run_root = Path(str(source_manifest.get("run_root", source_manifest_path.parent))).resolve()
+    source_manifest_paths = _parse_manifest_paths(list(args.run_manifest))
+    source_manifests = [(path, _read_manifest(path)) for path in source_manifest_paths]
+    source_run_roots = [
+        Path(str(manifest.get("run_root", path.parent))).resolve()
+        for path, manifest in source_manifests
+    ]
+    source_run_root = source_run_roots[0]
     stamp = args.experiment_tag or tag_stamp()
     output_root = (
         Path(args.output_root).resolve()
@@ -128,17 +154,22 @@ def main() -> None:
     strategies = _parse_optional_csv(args.strategies)
     seed_labels = _parse_optional_csv(args.seed_labels)
     checkpoint_tags = _parse_csv_or_default(args.checkpoint_tags, DEFAULT_CHECKPOINT_TAGS)
-    runs = _selected_runs(
-        [dict(run) for run in source_manifest.get("runs", []) if isinstance(run, dict)],
-        models=models,
-        strategies=strategies,
-        seed_labels=seed_labels,
-    )
+    runs: list[dict[str, Any]] = []
+    for source_manifest_path, source_manifest in source_manifests:
+        selected = _selected_runs(
+            [dict(run) for run in source_manifest.get("runs", []) if isinstance(run, dict)],
+            models=models,
+            strategies=strategies,
+            seed_labels=seed_labels,
+        )
+        for run in selected:
+            run["source_run_manifest"] = str(source_manifest_path)
+            runs.append(run)
 
     landscape_manifest: dict[str, Any] = {
         "created_at_utc": utc_now_iso(),
-        "source_run_manifest": str(source_manifest_path),
-        "source_run_root": str(source_run_root),
+        "source_run_manifests": [str(path) for path in source_manifest_paths],
+        "source_run_roots": [str(path) for path in source_run_roots],
         "output_root": str(output_root),
         "filters": {
             "models": models,
@@ -180,9 +211,10 @@ def main() -> None:
         for checkpoint_tag in tags:
             checkpoint = _checkpoint_path(run_dir, checkpoint_tag)
             landscape_dir = output_root / str(run.get("model_flag")) / strategy / str(run.get("seed_label")) / checkpoint_tag
-            weight_source = _weight_source_for_run(strategy, str(args.weight_source))
+            weight_source = _weight_source_for_run(strategy, checkpoint_tag, str(args.weight_source))
             entry = {
                 "source_run_name": run.get("run_name"),
+                "source_run_manifest": run.get("source_run_manifest"),
                 "model_flag": run.get("model_flag"),
                 "strategy": strategy,
                 "seed_label": run.get("seed_label"),

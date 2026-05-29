@@ -341,6 +341,7 @@ def _build_pinn_command(
     update_interval_epochs: int,
     ema_beta: float,
     checkpoint_fractions: list[float],
+    save_init: bool,
 ) -> list[str]:
     weighting_scheme = _strategy_weighting_scheme(spec.strategy)
     phases = _strategy_phases(
@@ -372,7 +373,7 @@ def _build_pinn_command(
         "pinn.checkpointing.enabled=true",
         "pinn.checkpointing.save_best=true",
         "pinn.checkpointing.save_last=false",
-        "pinn.checkpointing.save_init=false",
+        f"pinn.checkpointing.save_init={'true' if save_init else 'false'}",
         f"pinn.checkpointing.epoch_fractions={format_hydra_list([str(value) for value in checkpoint_fractions])}",
         f"pinn.loss_weights.data={loss_weights['data']}",
         f"pinn.loss_weights.dt={loss_weights['dt']}",
@@ -559,6 +560,12 @@ def build_parser() -> argparse.ArgumentParser:
             "Default 0.6,1.0 saves the Adam->SSBroyden boundary and final checkpoint."
         ),
     )
+    parser.add_argument(
+        "--save-init",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Save the initialization checkpoint. Useful for posthoc landscape analysis; default keeps final runs compact.",
+    )
     parser.add_argument("--wandb-project", default="thesis-final-experiment")
     parser.add_argument("--wandb-entity", default=None)
     parser.add_argument("--tag", action="append", default=[])
@@ -618,6 +625,7 @@ def main() -> None:
         "ssbroyden_lr": float(args.ssbroyden_lr),
         "adam_scheduler": bool(args.adam_scheduler),
         "checkpoint_fractions": checkpoint_fractions,
+        "save_init": bool(args.save_init),
         "loss_weights_base": {
             "data": float(args.loss_weight_data),
             "dt": float(args.loss_weight_dt),
@@ -699,6 +707,7 @@ def main() -> None:
                     update_interval_epochs=args.update_interval_epochs,
                     ema_beta=args.ema_beta,
                     checkpoint_fractions=checkpoint_fractions,
+                    save_init=bool(args.save_init),
                 )
                 run_metadata = {
                     "model_flag": model_flag,

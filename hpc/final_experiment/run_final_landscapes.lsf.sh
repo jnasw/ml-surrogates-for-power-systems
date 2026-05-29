@@ -25,6 +25,7 @@ fi
 source "${REPO_ROOT}/hpc/common/lsf_defaults.sh"
 
 RUN_MANIFEST="${RUN_MANIFEST:-}"
+RUN_MANIFESTS="${RUN_MANIFESTS:-}"
 MODELS="${MODELS:-}"
 STRATEGIES="${STRATEGIES:-}"
 SEED_LABELS="${SEED_LABELS:-}"
@@ -43,8 +44,8 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-}"
 EXPERIMENT_TAG="${EXPERIMENT_TAG:-}"
 DRY_RUN="${DRY_RUN:-false}"
 
-if [[ -z "${RUN_MANIFEST}" ]]; then
-  echo "[hpc] ERROR: RUN_MANIFEST is required." >&2
+if [[ -z "${RUN_MANIFEST}" && -z "${RUN_MANIFESTS}" ]]; then
+  echo "[hpc] ERROR: RUN_MANIFEST or RUN_MANIFESTS is required." >&2
   exit 2
 fi
 
@@ -54,13 +55,33 @@ mkdir -p "${LSF_LOG_DIR}"
 cd "${REPO_ROOT}"
 activate_repo_venv "${REPO_ROOT}"
 
+echo "[hpc] run_manifest=${RUN_MANIFEST:-<unset>}"
+echo "[hpc] run_manifests=${RUN_MANIFESTS:-<unset>}"
+echo "[hpc] models=${MODELS:-<launcher default>}"
+echo "[hpc] strategies=${STRATEGIES:-<launcher default>}"
+echo "[hpc] seed_labels=${SEED_LABELS:-<launcher default>}"
+echo "[hpc] checkpoint_tags=${CHECKPOINT_TAGS:-<launcher default>}"
+echo "[hpc] include_dn_boundary=${INCLUDE_DN_BOUNDARY}"
+echo "[hpc] output_root=${OUTPUT_ROOT:-<launcher default>}"
+echo "[hpc] experiment_tag=${EXPERIMENT_TAG:-<timestamp>}"
+echo "[hpc] dry_run=${DRY_RUN}"
+
 cmd=(
   python3
   -m
   src.experiments.pipeline.run_final_landscapes
-  --run-manifest
-  "${RUN_MANIFEST}"
 )
+
+if [[ -n "${RUN_MANIFESTS}" ]]; then
+  IFS=',' read -r -a manifest_items <<< "${RUN_MANIFESTS}"
+  for manifest_path in "${manifest_items[@]}"; do
+    if [[ -n "${manifest_path}" ]]; then
+      cmd+=(--run-manifest "${manifest_path}")
+    fi
+  done
+else
+  cmd+=(--run-manifest "${RUN_MANIFEST}")
+fi
 
 if [[ -n "${MODELS}" ]]; then cmd+=(--models "${MODELS}"); fi
 if [[ -n "${STRATEGIES}" ]]; then cmd+=(--strategies "${STRATEGIES}"); fi

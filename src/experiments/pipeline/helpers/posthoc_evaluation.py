@@ -283,6 +283,22 @@ def _resolve_eval_root_from_row(
     return resolve_posthoc_path(raw, repo_root=repo_root, must_exist=False)
 
 
+def _nearest_posthoc_batch_root(run_dir: Path) -> Path:
+    """Find the enclosing experiment batch for a run directory."""
+
+    for parent in run_dir.parents:
+        if (parent / "run_manifest.json").exists() and (parent / "runs").is_dir():
+            return parent
+    return run_dir.parent
+
+
+def _relative_run_name(batch_root: Path, run_dir: Path) -> str:
+    try:
+        return str(run_dir.relative_to(batch_root / "runs"))
+    except ValueError:
+        return run_dir.name
+
+
 def resolve_posthoc_eval_root(
     *,
     kind: str,
@@ -422,7 +438,8 @@ def discover_posthoc_runs(
     resolved_root = resolved_root.resolve()
 
     if (resolved_root / "checkpoints").is_dir():
-        batch_root = resolved_root.parents[1] if resolved_root.parent.name == "runs" else resolved_root.parent
+        batch_root = _nearest_posthoc_batch_root(resolved_root)
+        run_name = _relative_run_name(batch_root, resolved_root)
         candidate = discover_posthoc_batch_runs(
             batch_root=batch_root,
             checkpoint_tag=checkpoint_tag,
@@ -435,7 +452,11 @@ def discover_posthoc_runs(
             ood_eval_root=ood_eval_root,
             require_config=require_config,
         )
-        return [item for item in candidate if item.run_dir == resolved_root]
+        return [
+            item
+            for item in candidate
+            if item.run_dir == resolved_root or item.run_name == run_name
+        ]
 
     if (resolved_root / "runs").is_dir():
         return discover_posthoc_batch_runs(

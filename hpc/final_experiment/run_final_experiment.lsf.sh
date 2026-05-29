@@ -55,6 +55,7 @@ SSBROYDEN_LR="${SSBROYDEN_LR:-}"
 ADAM_SCHEDULER="${ADAM_SCHEDULER:-}"
 GRADIENT_TELEMETRY="${GRADIENT_TELEMETRY:-}"
 CHECKPOINT_FRACTIONS="${CHECKPOINT_FRACTIONS:-}"
+SAVE_INIT="${SAVE_INIT:-false}"
 WANDB_PROJECT="${WANDB_PROJECT:-}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"
 EXPERIMENT_TAG="${EXPERIMENT_TAG:-}"
@@ -89,6 +90,7 @@ echo "[hpc] ssbroyden_lr=${SSBROYDEN_LR:-<launcher default>}"
 echo "[hpc] adam_scheduler=${ADAM_SCHEDULER:-<launcher default>}"
 echo "[hpc] gradient_telemetry=${GRADIENT_TELEMETRY:-<launcher default>}"
 echo "[hpc] checkpoint_fractions=${CHECKPOINT_FRACTIONS:-<launcher default>}"
+echo "[hpc] save_init=${SAVE_INIT}"
 echo "[hpc] wandb_project=${WANDB_PROJECT:-<launcher default>}"
 echo "[hpc] experiment_tag=${EXPERIMENT_TAG:-<timestamp>}"
 echo "[hpc] output_root=${OUTPUT_ROOT:-<launcher default>}"
@@ -153,6 +155,19 @@ fi
 if [[ -n "${CHECKPOINT_FRACTIONS}" ]]; then
   cmd+=(--checkpoint-fractions "${CHECKPOINT_FRACTIONS}")
 fi
+
+case "${SAVE_INIT}" in
+  true|TRUE|1|yes|YES)
+    cmd+=(--save-init)
+    ;;
+  false|FALSE|0|no|NO)
+    cmd+=(--no-save-init)
+    ;;
+  *)
+    echo "[hpc] ERROR: SAVE_INIT must be true or false, got '${SAVE_INIT}'." >&2
+    exit 2
+    ;;
+esac
 
 case "${ADAM_SCHEDULER}" in
   true|TRUE|1|yes|YES)
