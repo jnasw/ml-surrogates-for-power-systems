@@ -75,12 +75,14 @@ def sample_random_direction(
 
     tensors: dict[str, torch.Tensor] = {}
     for name, parameter in model.named_parameters():
+        # Draw on CPU for reproducibility across CPU/GPU runs, then move to the
+        # parameter device before normalization and evaluation.
         raw = torch.randn(
             parameter.shape,
             generator=generator,
-            device=parameter.device,
+            device="cpu",
             dtype=parameter.dtype,
-        )
+        ).to(parameter.device)
         if normalized == "filter":
             raw = _normalize_like_filter(raw, parameter.detach())
         elif normalized == "parameter":
