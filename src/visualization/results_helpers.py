@@ -246,7 +246,10 @@ def load_posthoc_external_eval(
             "posthoc_model_flag",
             "posthoc_model_info_source",
         }:
-            frame[col] = pd.to_numeric(frame[col], errors="ignore")
+            converted = pd.to_numeric(frame[col], errors="coerce")
+            non_null = frame[col].notna()
+            if converted[non_null].notna().all():
+                frame[col] = converted
     return frame.reset_index(drop=True)
 
 
