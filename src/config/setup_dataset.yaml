@@ -1,7 +1,13 @@
 defaults:
-  - _self_
   - qbc_active: default
-  - preset: default
+  - _self_
+
+experiment:
+  id: thesis_sm4_v1
+  preset: main
+  method: unset
+  budget: unset
+  seed: unset
 
 wandb:
   project: "sm-surrogates-dataset"
@@ -18,7 +24,7 @@ model:
   init_condition_bounds: 1
   sampling: "Lhs" # Lhs | Linear | Random
   ic_generation_method: "joint_lhs" # full_factorial | joint_lhs | adaptive_iterative
-  ic_num_samples: null # used when ic_generation_method=joint_lhs; null -> product(iterations)
+  ic_num_samples: 1024 # used when ic_generation_method=joint_lhs; null -> product(iterations)
   torch: false
   seed: 37
 
@@ -31,9 +37,22 @@ surrogate:
   device: auto # auto | cuda | mps | cpu
   use_cuda: true
 
+qbc_n0: 64
+qbc_P: 1024
+qbc_K: 64
+qbc_T: 15
+qbc_M: 3
 qbc_n_test: 0
+qbc_enable_logging: false
+qbc_run_dir: ${hydra:runtime.cwd}/outputs/qbc/${experiment.preset}/${experiment.method}
 
 dirs:
   params_dir: ${hydra:runtime.cwd}/src/config/params
   init_conditions_dir: ${hydra:runtime.cwd}/src/config/ic
-  dataset_dir: ${hydra:runtime.cwd}/data
+  dataset_dir: ${hydra:runtime.cwd}/outputs/datasets/${experiment.preset}/${experiment.method}
+
+hydra:
+  run:
+    dir: ${hydra:runtime.cwd}/outputs/hydra/${experiment.preset}/${experiment.method}/${now:%Y%m%d_%H%M%S}
+  job:
+    chdir: false

@@ -842,7 +842,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ood-eval-root", default=None, help="Optional explicit OOD evaluation preprocessed dataset root.")
     parser.add_argument("--no-ood-eval", action="store_true", help=f"Disable default OOD evaluation ({DEFAULT_OOD_EVAL_ID}).")
     parser.add_argument("--allow-dataset-generation", action="store_true", help="Use the old shared dataset-generation fallback instead of reference lookup.")
-    parser.add_argument("--preset", default="main", help="Dataset pipeline preset used only with --allow-dataset-generation.")
+    parser.add_argument("--preset", default="main", help="Dataset pipeline run label used only with --allow-dataset-generation.")
     parser.add_argument("--budget", default="b512", help="Dataset budget used only with --allow-dataset-generation.")
     parser.add_argument("--dataset-seed", default="ds01", help="Dataset seed used only with --allow-dataset-generation.")
     parser.add_argument(

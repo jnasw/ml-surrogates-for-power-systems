@@ -3,7 +3,7 @@ workflow:
   version: 1
   method: marker_directed
   model_flag: SM6
-  preset: default
+  preset: main
   experiment_id_prefix: thesis_marker_sm6_hpo
   output_root: outputs/hpo_workflows
 

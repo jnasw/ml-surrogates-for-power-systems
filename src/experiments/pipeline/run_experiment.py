@@ -280,7 +280,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Baseline training seed label from src/config/registry/seeds.yaml (repeatable).",
     )
-    parser.add_argument("--preset", default="default", help="Preset config name under src/config/preset.")
+    parser.add_argument(
+        "--preset",
+        default="main",
+        help="Dataset-generation run label kept for manifests and output paths; scale is controlled by budgets and overrides.",
+    )
     parser.add_argument("--experiment-id", default="thesis_sm4_pipeline_v1")
     parser.add_argument("--model-flag", default="SM4")
     parser.add_argument(
@@ -403,7 +407,6 @@ def main() -> None:
         sys.executable,
         "00_create_dataset.py",
         "+base=base",
-        f"preset={args.preset}",
         f"+method={method_config_name}",
         f"experiment.id={args.experiment_id}",
         f"experiment.preset={args.preset}",

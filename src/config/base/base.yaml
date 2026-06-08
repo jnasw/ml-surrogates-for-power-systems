@@ -1,10 +1,10 @@
 # @package _global_
 # Shared experiment scaffold for stage-1 dataset generation.
-# Use with: python 00_create_dataset.py +base=base +preset=default +method=<...>
+# Use with: python 00_create_dataset.py +base=base +method=<...>
 
 experiment:
   id: thesis_sm4_v1
-  preset: unset
+  preset: main
   method: unset
   budget: unset
   seed: unset

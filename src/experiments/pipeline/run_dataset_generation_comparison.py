@@ -738,7 +738,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--python-bin", default=sys.executable, help="Python executable.")
     parser.add_argument(
         "--mode", default="smoke", choices=["smoke", "final"],
-        help="Experiment mode. Controls default methods, budgets, seeds, epochs, and preset.",
+        help="Experiment mode. Controls default methods, budgets, seeds, epochs, and run label.",
     )
     parser.add_argument(
         "--experiment-tag", default=None,
@@ -807,7 +807,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dtype", default="float64", help="Dtype for pinn_data_only downstream runs.")
     parser.add_argument("--batch-size", type=int, default=4096, help="Batch size for pinn_data_only downstream runs.")
     parser.add_argument("--adam-lr", type=float, default=DEFAULT_ADAM_LR, help="Adam learning rate for pinn_data_only downstream runs.")
-    parser.add_argument("--preset", default=None, help="Config preset. Defaults by --mode.")
+    parser.add_argument(
+        "--preset",
+        default=None,
+        help="Dataset-generation run label for manifests/output paths. Defaults by --mode.",
+    )
     parser.add_argument(
         "--wandb-use",
         action=argparse.BooleanOptionalAction,

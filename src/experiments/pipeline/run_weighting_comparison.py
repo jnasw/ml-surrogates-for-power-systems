@@ -576,7 +576,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-dataset-generation", action="store_true",
         help="Fallback: generate a new dataset instead of using a reference. Mutually exclusive with --reference-id and --dataset-root.",
     )
-    parser.add_argument("--preset", default=None, help="Dataset pipeline preset (--allow-dataset-generation only).")
+    parser.add_argument("--preset", default=None, help="Dataset pipeline run label (--allow-dataset-generation only).")
     parser.add_argument("--budget", default="b512", help="Dataset budget (--allow-dataset-generation only).")
     parser.add_argument("--dataset-seed", default="ds01", help="Dataset seed label (--allow-dataset-generation only).")
     parser.add_argument("--id-eval-id", default=None, help="Optional ID evaluation dataset ID from data/evaluation/index.json.")

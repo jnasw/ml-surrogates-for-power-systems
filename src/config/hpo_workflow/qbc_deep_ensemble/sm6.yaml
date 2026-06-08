@@ -3,7 +3,7 @@ workflow:
   version: 1
   method: qbc_deep_ensemble
   model_flag: SM6
-  preset: default
+  preset: main
   experiment_id_prefix: thesis_qbc_sm6_hpo
   output_root: outputs/hpo_workflows
 
