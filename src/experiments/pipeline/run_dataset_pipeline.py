@@ -1,4 +1,4 @@
-"""Run dataset-centric experiments: dataset generation -> preprocess -> baseline subruns."""
+"""Run the dataset pipeline: generate data, preprocess it, and optionally evaluate downstream."""
 
 from __future__ import annotations
 
@@ -266,7 +266,9 @@ def _dedupe_hydra_command(command: list[str]) -> list[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run full experiment pipeline in one command.")
+    parser = argparse.ArgumentParser(
+        description="Run the dataset pipeline: generate data, preprocess it, and optionally evaluate downstream."
+    )
     parser.add_argument("--method", required=True, choices=sorted(METHOD_TO_CONFIG.keys()))
     parser.add_argument("--budget", required=True, help="Budget label from src/config/registry/budgets.yaml")
     parser.add_argument(

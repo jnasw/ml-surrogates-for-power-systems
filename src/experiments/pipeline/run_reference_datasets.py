@@ -215,7 +215,7 @@ def _build_command(*, python_bin: str, spec: ReferenceDatasetSpec, run_root: Pat
     command = [
         python_bin,
         "-m",
-        "src.experiments.pipeline.run_experiment",
+        "src.experiments.pipeline.run_dataset_pipeline",
         "--method",
         spec.method,
         "--budget",
@@ -312,7 +312,7 @@ def _remove_stale_index_entries(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate persistent reusable reference datasets via the existing experiment pipeline.")
+    parser = argparse.ArgumentParser(description="Generate persistent reusable reference datasets via the dataset pipeline.")
     parser.add_argument("--suite", choices=("smoke", "dev", "main", "all"), default="all")
     parser.add_argument(
         "--model-flag",

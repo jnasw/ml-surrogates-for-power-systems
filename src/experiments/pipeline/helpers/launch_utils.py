@@ -69,7 +69,7 @@ def build_dataset_pipeline_command(
     command = [
         python_bin,
         "-m",
-        "src.experiments.pipeline.run_experiment",
+        "src.experiments.pipeline.run_dataset_pipeline",
         "--method",
         method,
         "--budget",

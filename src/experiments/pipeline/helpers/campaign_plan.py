@@ -272,7 +272,7 @@ def resolve_campaign_plan(
         command = [
             sys.executable,
             "-m",
-            "src.experiments.pipeline.run_experiment",
+            "src.experiments.pipeline.run_dataset_pipeline",
             "--method",
             method,
             "--budget",
@@ -334,4 +334,3 @@ def resolve_campaign_plan(
         campaign_root=campaign_root,
         run_plans=run_plans,
     )
-

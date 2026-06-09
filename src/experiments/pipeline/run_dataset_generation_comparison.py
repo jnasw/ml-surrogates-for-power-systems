@@ -236,7 +236,7 @@ def _resolve_eval_inputs(
 # Command builder
 # ---------------------------------------------------------------------------
 
-def _build_run_experiment_command(
+def _build_dataset_pipeline_command(
     *,
     python_bin: str,
     method: str,
@@ -258,7 +258,7 @@ def _build_run_experiment_command(
     cmd = [
         python_bin,
         "-m",
-        "src.experiments.pipeline.run_experiment",
+        "src.experiments.pipeline.run_dataset_pipeline",
         "--method", method,
         "--budget", budget,
         "--dataset-seed", dataset_seed,
@@ -1058,7 +1058,7 @@ def main() -> None:
                 dataset_run_root = output_root / method / budget / dataset_seed
                 log_path = output_root / "logs" / f"{run_name}.log"
 
-                command = _build_run_experiment_command(
+                command = _build_dataset_pipeline_command(
                     python_bin=args.python_bin,
                     method=method,
                     budget=budget,

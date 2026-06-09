@@ -122,7 +122,7 @@ def _build_command(*, python_bin: str, spec: EvaluationDatasetSpec, run_root: Pa
     command = [
         python_bin,
         "-m",
-        "src.experiments.pipeline.run_experiment",
+        "src.experiments.pipeline.run_dataset_pipeline",
         "--method",
         spec.method,
         "--budget",
@@ -254,7 +254,7 @@ def _print_command(evaluation_id: str, command: list[str], notes: str | None) ->
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate reusable supervised ID/OOD evaluation datasets via the existing experiment pipeline."
+        description="Generate reusable supervised ID/OOD evaluation datasets via the dataset pipeline."
     )
     parser.add_argument(
         "--evaluation-id",

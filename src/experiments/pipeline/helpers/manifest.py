@@ -1,4 +1,4 @@
-"""Manifest utilities for dataset-centric experiment pipeline runs."""
+"""Manifest utilities for dataset pipeline runs."""
 
 from __future__ import annotations
 
