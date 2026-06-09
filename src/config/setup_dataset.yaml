@@ -1,7 +1,3 @@
-defaults:
-  - qbc_active: default
-  - _self_
-
 experiment:
   id: thesis_sm4_v1
   preset: main
@@ -29,6 +25,11 @@ model:
   seed: 37
 
 surrogate:
+  deterministic: false
+  deterministic_strict: false
+  train_data_shuffle: true
+  require_explicit_device: false
+  warn_on_auto_device: true
   hidden_dim: 128
   hidden_layers: 3
   batch_size: 64
@@ -37,6 +38,32 @@ surrogate:
   device: auto # auto | cuda | mps | cpu
   use_cuda: true
 
+active:
+  log_every: 5 # emit round-level console logs every N rounds (and final round)
+  candidate_method: "lhs" # sobol | lhs | random
+  diversify: true
+  acquisition_strategy: "qbc_only" # qbc_only | qbc_marker_hybrid
+  predict_batch_size: 2048
+  disagreement:
+    metric: "variance_mean" # variance_mean | variance_max | variance_p90 | member_l2_mean
+  diversity:
+    preselect_factor: 5
+    uncertainty_weight: 0.7
+    distance_weight: 0.3
+    normalize_uncertainty: true
+    normalize_distance: true
+  hybrid:
+    pca_explained_variance: 0.90
+    k_density: 15
+    preselect_factor: 5
+    greedy_score_weight: 0.7
+    settling_fraction: 0.05
+    include_anchor_state_markers: true
+    weights:
+      uncertainty: 0.4
+      diversity: 0.4
+      sparsity: 0.2
+
 qbc_n0: 64
 qbc_P: 1024
 qbc_K: 64
@@ -44,7 +71,12 @@ qbc_T: 15
 qbc_M: 3
 qbc_n_test: 0
 qbc_enable_logging: false
+qbc_save_round_arrays: true
+qbc_save_dataset_checkpoints: true
+qbc_save_ensemble_checkpoints: true
 qbc_run_dir: ${hydra:runtime.cwd}/outputs/qbc/${experiment.preset}/${experiment.method}
+qbc_resume_from_round: -1
+qbc_resume_stage: next_round # next_round | same_round_post_train
 
 dirs:
   params_dir: ${hydra:runtime.cwd}/src/config/params

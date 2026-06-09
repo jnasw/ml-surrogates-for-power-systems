@@ -408,7 +408,6 @@ def main() -> None:
     stage1_cmd = [
         sys.executable,
         "00_create_dataset.py",
-        "+base=base",
         f"+method={method_config_name}",
         f"experiment.id={args.experiment_id}",
         f"experiment.preset={args.preset}",

@@ -1,10 +1,18 @@
-defaults:
-  - _self_
-  - logging: default
-
 time: 1.0
 num_of_points: 1000
 PINN_flag: true
+
+wandb:
+  use: false
+  project: "sm-surrogates-pinn"
+  entity: null
+  group: null
+  name: null
+  tags: []
+  api_key: ${oc.env:WANDB_API_KEY,null}
+
+logging:
+  log_every_epoch: 1
 
 model:
   model_flag: "SM4"
