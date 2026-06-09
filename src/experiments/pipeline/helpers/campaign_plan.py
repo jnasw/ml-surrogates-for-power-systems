@@ -72,7 +72,7 @@ def resolve_hpo_run_overrides(cfg: Any, repo_root: str) -> tuple[list[dict[str, 
     if not bool(hpo_cfg.get("enabled", False)):
         return [], {"enabled": False, "resolved": []}
 
-    winners_csv = str(hpo_cfg.get("winners_csv", "results/hpo/hpo_winners.csv"))
+    winners_csv = str(hpo_cfg.get("winners_csv", "hpo/results/hpo_winners.csv"))
     winners_path = winners_csv if os.path.isabs(winners_csv) else os.path.join(repo_root, winners_csv)
     if not os.path.exists(winners_path):
         raise FileNotFoundError(f"hpo_integration winners_csv not found: {winners_path}")

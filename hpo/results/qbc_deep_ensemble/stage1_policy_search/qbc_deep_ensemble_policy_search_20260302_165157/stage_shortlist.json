@@ -104,7 +104,7 @@
   "model_flag": "SM4",
   "preset": "default",
   "shortlist_size": 4,
-  "source_stage_root": "/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/results/hpo/qbc_deep_ensemble/stage1_policy_search/qbc_deep_ensemble_policy_search_20260302_165157",
+  "source_stage_root": "/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/hpo/results/qbc_deep_ensemble/stage1_policy_search/qbc_deep_ensemble_policy_search_20260302_165157",
   "stage": "stageA_policy",
   "stage_role": "broad_policy_search",
   "workflow_id": "qbc_deep_ensemble_sm4_v1",

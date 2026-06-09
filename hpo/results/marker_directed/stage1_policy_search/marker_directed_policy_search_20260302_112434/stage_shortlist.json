@@ -109,7 +109,7 @@
   "model_flag": "SM4",
   "preset": "default",
   "shortlist_size": 4,
-  "source_stage_root": "/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/results/hpo/marker_directed/stage1_policy_search/marker_directed_policy_search_20260302_112434",
+  "source_stage_root": "/Users/jonaswiendl/local/Repos/ml-surrogates-for-power-systems/hpo/results/marker_directed/stage1_policy_search/marker_directed_policy_search_20260302_112434",
   "stage": "stageA_policy",
   "stage_role": "broad_policy_search",
   "workflow_id": "marker_directed_sm4_v1",
