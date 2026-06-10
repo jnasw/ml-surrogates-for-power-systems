@@ -9,13 +9,17 @@ Current runnable HPO calibration lives in:
 
 - `src/experiments/pipeline/run_hpo_calibration.py`
 - `hpc/run_hpo_calibration.lsf.sh`
-- `docs/setup/hpo_calibration.md`
+- `src/experiments/README.md`
 
 Historical workflow material:
 
 - `workflow_configs/` contains the workflow YAMLs used for dataset-generation
   method HPO.
-- `results/` contains compact summary and winner tables from HPO.
+- `results/hpo_summary.csv` and `results/hpo_winners.csv` contain the compact
+  HPO summary tables.
+- `results/marker_directed/` and `results/qbc_deep_ensemble/` contain preserved
+  raw HPO run artifacts. These are provenance artifacts, not active experiment
+  inputs.
 - `hpo_analysis.ipynb` contains the analysis notebook used to inspect the HPO
   outcomes.
 

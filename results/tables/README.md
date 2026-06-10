@@ -54,5 +54,10 @@ results/tables/
 - `main_numeric.csv` is the corresponding numeric table, when useful.
 - Additional CSVs are allowed only when they are final thesis table data, not
   plot-ready traces or notebook scratch outputs.
+- Table exports may need small path, tag, or filtering adjustments when cluster
+  jobs are submitted with different campaign tags, shards, model subsets, seed
+  subsets, or output roots. The notebooks are the canonical table-generation
+  layer; update their input selectors to match the actual `outputs/` structure
+  before re-exporting CSVs.
 - Do not store `png`, `pdf`, `svg`, `npz`, notebooks, logs, or long intermediate
   analysis tables in this directory.

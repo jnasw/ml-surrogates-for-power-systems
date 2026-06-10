@@ -10,8 +10,11 @@ Python entrypoints:
 
 - `setup_dataset.yaml`: raw ODE dataset generation via `00_create_dataset.py`
 - `setup_dataset_nn.yaml`: neural-network dataset preprocessing via `01_preprocess_dataset.py`
-- `setup_baseline.yaml`: baseline model training via `10_run_baseline.py`
 - `setup_pinn.yaml`: PINN training via `20_run_pinn.py`
+
+`setup_baseline.yaml` is retained for historical baseline configuration
+provenance. The final thesis workflows use `20_run_pinn.py` for downstream
+PINN and data-only PINN training.
 
 ## Supporting Configs
 
@@ -21,4 +24,3 @@ Python entrypoints:
 - `registry/`: budget and seed labels loaded by experiment launchers
 - `params/`: physical model parameters for the simulated power-system models
 - `ic/`: initial-condition bounds and model output guide files
-

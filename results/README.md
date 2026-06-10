@@ -16,4 +16,8 @@ Run notebooks from the repository root so their project-root discovery and relat
 - `07_final_experiment.ipynb`: Final experiment analysis.
 - `08_across_experiments.ipynb`: Cross-experiment synthesis.
 
-Curated CSV outputs are written under `results/tables/`. Scratch exports to `results/data/` are disabled for repository submission.
+Curated CSV outputs are written under `results/tables/`.
+
+When rerunning notebooks after new cluster jobs, check that each notebook points
+to the intended campaign tag, output root, model subset, and seed set before
+exporting tables.
