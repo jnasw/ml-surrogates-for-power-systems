@@ -16,19 +16,19 @@ set -euo pipefail
 #
 #   Dry-run one seed:
 #     bsub -env "SEED_LABELS=s01,DRY_RUN=true" \
-#       < hpc/final_experiment/run_final_experiment.lsf.sh
+#       < hpc/run_final_experiment.lsf.sh
 #
 #   Submit one seed for all models and all final strategies:
 #     bsub -env "SEED_LABELS=s01" \
-#       < hpc/final_experiment/run_final_experiment.lsf.sh
+#       < hpc/run_final_experiment.lsf.sh
 #
 #   Submit a model subset (commas in values — use export + bsub -env all):
 #     (export MODELS=SM4,SM6 SEED_LABELS=s01 && \
-#       bsub -env "all" < hpc/final_experiment/run_final_experiment.lsf.sh)
+#       bsub -env "all" < hpc/run_final_experiment.lsf.sh)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
-  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ -d "${SCRIPT_DIR}/../src" ]]; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 else
   REPO_ROOT="${REPO_ROOT:-${LSB_SUBCWD:-$(pwd)}}"
 fi

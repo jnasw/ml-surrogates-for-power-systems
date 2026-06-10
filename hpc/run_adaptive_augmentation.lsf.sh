@@ -19,18 +19,18 @@ set -euo pipefail
 #       SUPERVISED_STRATEGIES=fixed_low,mae_nearest_growth \
 #       COLLOCATION_STRATEGIES=static_low,rar_d_growth \
 #       SEED_LABELS=s01 DRY_RUN=true && \
-#       bsub -env "all" < hpc/adaptive_augmentation/run_adaptive_augmentation.lsf.sh)
+#       bsub -env "all" < hpc/run_adaptive_augmentation.lsf.sh)
 #
 #   Final run:
 #     (export MODE=final REFERENCE_ID=main_SM4_lhs_b4096_ds01 \
 #       SUPERVISED_STRATEGIES=fixed_low,random_growth,mae_nearest_growth,fixed_full \
 #       COLLOCATION_STRATEGIES=static_low,rar_d_growth \
 #       SEED_LABELS=s01,s02,s03,s04,s05 REFRESH_PERIOD_EPOCHS=500 && \
-#       bsub -env "all" < hpc/adaptive_augmentation/run_adaptive_augmentation.lsf.sh)
+#       bsub -env "all" < hpc/run_adaptive_augmentation.lsf.sh)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
-  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ -d "${SCRIPT_DIR}/../src" ]]; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 else
   # When submitted via `bsub < script`, BASH_SOURCE may not resolve correctly.
   # LSF sets LSB_SUBCWD to the directory where `bsub` was called.

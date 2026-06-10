@@ -15,28 +15,28 @@ set -euo pipefail
 #
 #   Smoke dry-run (pipeline check, no execution):
 #     bsub -env "MODE=smoke,DRY_RUN=true" \
-#       < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+#       < hpc/run_dataset_generation_comparison.lsf.sh
 #
 #   Smoke run (lhs_static b256 ds01 bs01, 1 epoch):
 #     bsub -env "MODE=smoke,MODEL_FLAG=SM4" \
-#       < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+#       < hpc/run_dataset_generation_comparison.lsf.sh
 #
 #   Final run, lhs_static subset (values with commas require export + bsub -env all):
 #     (export CAMPAIGN_TAG=dataset_final_sm4 MODE=final MODEL_FLAG=SM4 METHODS=lhs_static \
 #       BUDGETS=b256,b512 DATASET_SEEDS=ds01 BASELINE_SEEDS=bs01,bs02 && \
-#       bsub -env "all" < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh)
+#       bsub -env "all" < hpc/run_dataset_generation_comparison.lsf.sh)
 #
 #   Final run, one method per job (no commas in values — short form works):
 #     bsub -env "CAMPAIGN_TAG=dataset_pinn_sm4,MODE=final,MODEL_FLAG=SM4,METHODS=lhs_static" \
-#       -J data_lhs_pinn < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+#       -J data_lhs_pinn < hpc/run_dataset_generation_comparison.lsf.sh
 #
 #   Final run with storage cleanup:
 #     bsub -env "MODE=final,MODEL_FLAG=SM4,METHODS=lhs_static,BUDGETS=b256,CLEANUP_DATA=true" \
-#       < hpc/dataset_generation_comparison/run_dataset_generation_comparison.lsf.sh
+#       < hpc/run_dataset_generation_comparison.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
-  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ -d "${SCRIPT_DIR}/../src" ]]; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 else
   # When submitted via `bsub < script`, BASH_SOURCE may not resolve correctly.
   # LSF sets LSB_SUBCWD to the directory where `bsub` was called.

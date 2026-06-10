@@ -16,22 +16,22 @@ set -euo pipefail
 #
 #   Dry-run screening on smoke reference dataset:
 #     bsub -env "MODE=screening,REFERENCE_ID=smoke_SM4_lhs_b256_ds01,DEVICE=cpu,DRY_RUN=true" \
-#       < hpc/multistage_comparison/run_multistage_comparison.lsf.sh
+#       < hpc/run_multistage_comparison.lsf.sh
 #
 #   Screening run with a strategy subset (commas in values — use export + bsub -env all):
 #     (export MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 \
 #       STRATEGIES=adam_30000,adam_ssbroyden_2stage SEED_LABELS=s01 DEVICE=cpu && \
-#       bsub -env "all" < hpc/multistage_comparison/run_multistage_comparison.lsf.sh)
+#       bsub -env "all" < hpc/run_multistage_comparison.lsf.sh)
 #
 #   Final run with all strategies and 5 seeds:
 #     (export MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 \
 #       STRATEGIES=adam_30000,adam_ssbroyden_2stage,adam_ssbroyden_3stage,adam_ssbroyden_4stage,adam_ssbroyden_5stage \
 #       SEED_LABELS=s01,s02,s03,s04,s05 && \
-#       bsub -env "all" < hpc/multistage_comparison/run_multistage_comparison.lsf.sh)
+#       bsub -env "all" < hpc/run_multistage_comparison.lsf.sh)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
-  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ -d "${SCRIPT_DIR}/../src" ]]; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 else
   # When submitted via `bsub < script`, BASH_SOURCE may not resolve correctly.
   # LSF sets LSB_SUBCWD to the directory where `bsub` was called.

@@ -13,11 +13,11 @@ set -euo pipefail
 
 # Example:
 #   bsub -env "RUN_MANIFEST=outputs/pinn/final_experiment/<tag>/run_manifest.json,MODELS=SM4,SEED_LABELS=s01,DRY_RUN=true" \
-#     < hpc/final_experiment/run_final_landscapes.lsf.sh
+#     < hpc/run_final_landscapes.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
-  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ -d "${SCRIPT_DIR}/../src" ]]; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 else
   REPO_ROOT="${REPO_ROOT:-${LSB_SUBCWD:-$(pwd)}}"
 fi

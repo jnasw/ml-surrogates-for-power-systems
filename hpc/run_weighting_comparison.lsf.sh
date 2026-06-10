@@ -1,43 +1,40 @@
 #!/usr/bin/env bash
-#BSUB -J colloc_cmp
+#BSUB -J weight_cmp
 #BSUB -q gpua100
 #BSUB -n 4
 #BSUB -R "span[hosts=1]"
 #BSUB -R "rusage[mem=8GB]"
 #BSUB -gpu "num=1:mode=exclusive_process"
-#BSUB -W 04:00
-#BSUB -oo hpc/logs/collocation/collocation_comparison_%J.out
-#BSUB -eo hpc/logs/collocation/collocation_comparison_%J.err
+#BSUB -W 08:00
+#BSUB -oo hpc/logs/weighting/weighting_comparison_%J.out
+#BSUB -eo hpc/logs/weighting/weighting_comparison_%J.err
 
 set -euo pipefail
 
 # Example submissions (use bsub -env to pass variables; inline VAR=val does not
 # propagate to the batch environment on this cluster):
 #
-#   Screening dry-run on smoke reference dataset:
-#     (export MODE=screening REFERENCE_ID=smoke_SM4_lhs_b256_ds01 STRATEGIES=uniform_lhs,rad \
-#       DENSITIES=p4k,p32k DEVICE=cpu DRY_RUN=true && \
-#       bsub -env "all" < hpc/collocation_comparison/run_collocation_comparison.lsf.sh)
+#   Dry-run:
+#     bsub -env "MODE=screening,DRY_RUN=true,STRATEGIES=static_tuned,SEED_LABELS=s01" \
+#       < hpc/run_weighting_comparison.lsf.sh
 #
-#   Cadence calibration dry-run:
-#     bsub -env "MODE=cadence,REFERENCE_ID=smoke_SM4_lhs_b256_ds01,DEVICE=cpu,DRY_RUN=true" \
-#       < hpc/collocation_comparison/run_collocation_comparison.lsf.sh
+#   Screening run with specific strategies (commas in values — use export + bsub -env all):
+#     (export MODE=screening STRATEGIES=static_tuned,ma,id SEED_LABELS=s01 && \
+#       bsub -env "all" < hpc/run_weighting_comparison.lsf.sh)
 #
-#   Final run with all strategies and seeds:
-#     (export MODE=final REFERENCE_ID=main_SM4_qbc_b512_ds01 \
-#       SEED_LABELS=s01,s02,s03,s04,s05 && \
-#       bsub -env "all" < hpc/collocation_comparison/run_collocation_comparison.lsf.sh)
+#   Final run with all core strategies and 5 seeds:
+#     bsub -env "MODE=final,REFERENCE_ID=main_SM4_qbc_b512_ds01" \
+#       < hpc/run_weighting_comparison.lsf.sh
 #
-#   Custom strategy/budget subset:
-#     (export MODE=screening STRATEGIES=uniform_lhs,rad DENSITIES=p4k,p32k \
-#       REFERENCE_ID=smoke_SM4_lhs_b256_ds01 && \
-#       bsub -env "all" < hpc/collocation_comparison/run_collocation_comparison.lsf.sh)
+#   Final run with custom epoch budget:
+#     bsub -env "MODE=final,EPOCHS=5000,REFERENCE_ID=main_SM4_qbc_b512_ds01" \
+#       < hpc/run_weighting_comparison.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
-  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ -d "${SCRIPT_DIR}/../src" ]]; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 else
-  # When submitted via `bsub < script`, BASH_SOURCE may not point to this file.
+  # When submitted via `bsub < script`, BASH_SOURCE may not resolve correctly.
   # LSF sets LSB_SUBCWD to the directory where `bsub` was called.
   REPO_ROOT="${REPO_ROOT:-${LSB_SUBCWD:-$(pwd)}}"
 fi
@@ -45,7 +42,7 @@ fi
 source "${REPO_ROOT}/hpc/common/lsf_defaults.sh"
 
 QUEUE="${QUEUE:-${QUEUE_GPU}}"
-WALLTIME="${WALLTIME:-04:00}"
+WALLTIME="${WALLTIME:-08:00}"
 MEM_GB="${MEM_GB:-${DEFAULT_MEM_GB}}"
 N_CORES="${N_CORES:-${DEFAULT_N_CORES}}"
 MODE="${MODE:-screening}"
@@ -61,17 +58,11 @@ NO_OOD_EVAL="${NO_OOD_EVAL:-false}"
 EPOCHS="${EPOCHS:-}"
 ADAM_LR="${ADAM_LR:-}"
 STRATEGIES="${STRATEGIES:-}"
-DENSITIES="${DENSITIES:-}"
-CADENCES="${CADENCES:-}"
-REFRESH_PERIOD_EPOCHS="${REFRESH_PERIOD_EPOCHS:-}"
-TERMINAL_OPTIMIZER="${TERMINAL_OPTIMIZER:-}"
-TERMINAL_EPOCHS="${TERMINAL_EPOCHS:-}"
-TERMINAL_LR="${TERMINAL_LR:-}"
-TERMINAL_REFRESH="${TERMINAL_REFRESH:-}"
+GRADIENT_TELEMETRY="${GRADIENT_TELEMETRY:-}"
 WANDB_PROJECT="${WANDB_PROJECT:-}"
 DRY_RUN="${DRY_RUN:-false}"
 
-LSF_LOG_DIR="${REPO_ROOT}/hpc/logs/collocation"
+LSF_LOG_DIR="${REPO_ROOT}/hpc/logs/weighting"
 mkdir -p "${LSF_LOG_DIR}"
 
 cd "${REPO_ROOT}"
@@ -80,12 +71,12 @@ activate_repo_venv "${REPO_ROOT}"
 echo "[hpc] repo_root=${REPO_ROOT}"
 echo "[hpc] lsf_log_root=${LSF_LOG_DIR}"
 echo "[hpc] queue=${QUEUE} (static #BSUB default: gpua100)"
-echo "[hpc] walltime=${WALLTIME} (static #BSUB default: 04:00)"
+echo "[hpc] walltime=${WALLTIME} (static #BSUB default: 08:00)"
 echo "[hpc] mem_gb=${MEM_GB} (static #BSUB default: 8GB)"
 echo "[hpc] n_cores=${N_CORES} (static #BSUB default: 4)"
 echo "[hpc] mode=${MODE}"
 echo "[hpc] reference_id=${REFERENCE_ID:-<launcher default>}"
-echo "[hpc] dataset_root=${DATASET_ROOT:-<none>}"
+echo "[hpc] dataset_root=${DATASET_ROOT:-<not set>}"
 echo "[hpc] model_flag=${MODEL_FLAG}"
 echo "[hpc] seed_labels=${SEED_LABELS:-<mode default>}"
 echo "[hpc] device=${DEVICE}"
@@ -95,21 +86,15 @@ echo "[hpc] ood_eval_id=${OOD_EVAL_ID:-<launcher default>}"
 echo "[hpc] no_ood_eval=${NO_OOD_EVAL}"
 echo "[hpc] epochs=${EPOCHS:-<mode default>}"
 echo "[hpc] adam_lr=${ADAM_LR:-<launcher default>}"
-echo "[hpc] strategies=${STRATEGIES:-<default>}"
-echo "[hpc] budgets=${DENSITIES:-<mode default>}"
-echo "[hpc] cadences=${CADENCES:-<mode/default single cadence>}"
-echo "[hpc] refresh_period_epochs=${REFRESH_PERIOD_EPOCHS:-<none>}"
-echo "[hpc] terminal_optimizer=${TERMINAL_OPTIMIZER:-<none>}"
-echo "[hpc] terminal_epochs=${TERMINAL_EPOCHS:-<none>}"
-echo "[hpc] terminal_lr=${TERMINAL_LR:-<launcher default>}"
-echo "[hpc] terminal_refresh=${TERMINAL_REFRESH:-<launcher default>}"
+echo "[hpc] strategies=${STRATEGIES:-<core strategies>}"
+echo "[hpc] gradient_telemetry=${GRADIENT_TELEMETRY:-<launcher default>}"
 echo "[hpc] wandb_project=${WANDB_PROJECT:-<mode default>}"
 echo "[hpc] dry_run=${DRY_RUN}"
 
 cmd=(
   python3
   -m
-  src.experiments.pipeline.run_collocation_comparison
+  src.experiments.pipeline.run_weighting_comparison
   --mode
   "${MODE}"
   --model-flag
@@ -158,41 +143,17 @@ if [[ -n "${STRATEGIES}" ]]; then
   cmd+=(--strategies "${STRATEGIES}")
 fi
 
-if [[ -n "${DENSITIES}" ]]; then
-  cmd+=(--densities "${DENSITIES}")
-fi
-
-if [[ -n "${CADENCES}" ]]; then
-  cmd+=(--cadences "${CADENCES}")
-fi
-
-if [[ -n "${REFRESH_PERIOD_EPOCHS}" ]]; then
-  cmd+=(--refresh-period-epochs "${REFRESH_PERIOD_EPOCHS}")
-fi
-
-if [[ -n "${TERMINAL_OPTIMIZER}" ]]; then
-  cmd+=(--terminal-optimizer "${TERMINAL_OPTIMIZER}")
-fi
-
-if [[ -n "${TERMINAL_EPOCHS}" ]]; then
-  cmd+=(--terminal-epochs "${TERMINAL_EPOCHS}")
-fi
-
-if [[ -n "${TERMINAL_LR}" ]]; then
-  cmd+=(--terminal-lr "${TERMINAL_LR}")
-fi
-
-case "${TERMINAL_REFRESH}" in
+case "${GRADIENT_TELEMETRY}" in
   true|TRUE|1|yes|YES)
-    cmd+=(--terminal-refresh)
+    cmd+=(--gradient-telemetry)
     ;;
   false|FALSE|0|no|NO)
-    cmd+=(--no-terminal-refresh)
+    cmd+=(--no-gradient-telemetry)
     ;;
   "")
     ;;
   *)
-    echo "[hpc] ERROR: TERMINAL_REFRESH must be true or false, got '${TERMINAL_REFRESH}'." >&2
+    echo "[hpc] ERROR: GRADIENT_TELEMETRY must be true or false, got '${GRADIENT_TELEMETRY}'." >&2
     exit 2
     ;;
 esac

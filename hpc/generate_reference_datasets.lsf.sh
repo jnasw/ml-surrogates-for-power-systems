@@ -12,19 +12,19 @@ set -euo pipefail
 
 # Example submissions:
 #   Dry-run all SM4 references:
-#     MODEL_FLAG=SM4 SUITE=all DRY_RUN=true bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+#     MODEL_FLAG=SM4 SUITE=all DRY_RUN=true bsub < hpc/generate_reference_datasets.lsf.sh
 #   Generate smoke only:
-#     MODEL_FLAG=SM4 SUITE=smoke DRY_RUN=false bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+#     MODEL_FLAG=SM4 SUITE=smoke DRY_RUN=false bsub < hpc/generate_reference_datasets.lsf.sh
 #   Generate main only:
-#     MODEL_FLAG=SM4 SUITE=main DRY_RUN=false bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+#     MODEL_FLAG=SM4 SUITE=main DRY_RUN=false bsub < hpc/generate_reference_datasets.lsf.sh
 #   Generate one specific reference ID:
-#     REFERENCE_IDS=main_SM4_qbc_b512_ds01 bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+#     REFERENCE_IDS=main_SM4_qbc_b512_ds01 bsub < hpc/generate_reference_datasets.lsf.sh
 #   Force rebuild one reference ID:
-#     REFERENCE_IDS=dev_SM4_lhs_b512_ds01 FORCE_REBUILD=true bsub < hpc/reference_datasets/generate_reference_datasets.lsf.sh
+#     REFERENCE_IDS=dev_SM4_lhs_b512_ds01 FORCE_REBUILD=true bsub < hpc/generate_reference_datasets.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
-  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ -d "${SCRIPT_DIR}/../src" ]]; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 else
   # When submitted via `bsub < script`, BASH_SOURCE may not point to this file.
   # LSF sets LSB_SUBCWD to the directory where `bsub` was called.

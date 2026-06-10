@@ -12,19 +12,19 @@ set -euo pipefail
 
 # Example submissions:
 #   Dry-run SM4 OOD evaluation dataset:
-#     EVALUATION_IDS=ood_SM4_wide_ic_b512_ds01 DRY_RUN=true bsub < hpc/evaluation_datasets/generate_evaluation_datasets.lsf.sh
+#     EVALUATION_IDS=ood_SM4_wide_ic_b512_ds01 DRY_RUN=true bsub < hpc/generate_evaluation_datasets.lsf.sh
 #   Generate SM4 OOD evaluation dataset:
-#     EVALUATION_IDS=ood_SM4_wide_ic_b512_ds01 bsub < hpc/evaluation_datasets/generate_evaluation_datasets.lsf.sh
+#     EVALUATION_IDS=ood_SM4_wide_ic_b512_ds01 bsub < hpc/generate_evaluation_datasets.lsf.sh
 #   Generate both SM4 ID and OOD evaluation datasets:
-#     EVALUATION_IDS=id_SM4_lhs_b512_ds01,ood_SM4_wide_ic_b512_ds01 bsub < hpc/evaluation_datasets/generate_evaluation_datasets.lsf.sh
+#     EVALUATION_IDS=id_SM4_lhs_b512_ds01,ood_SM4_wide_ic_b512_ds01 bsub < hpc/generate_evaluation_datasets.lsf.sh
 #   Generate all OOD evaluation datasets for all models:
-#     KIND=ood MODEL_FLAG=all bsub < hpc/evaluation_datasets/generate_evaluation_datasets.lsf.sh
+#     KIND=ood MODEL_FLAG=all bsub < hpc/generate_evaluation_datasets.lsf.sh
 #   Force rebuild one evaluation dataset:
-#     EVALUATION_IDS=ood_SM4_wide_ic_b512_ds01 FORCE_REBUILD=true bsub < hpc/evaluation_datasets/generate_evaluation_datasets.lsf.sh
+#     EVALUATION_IDS=ood_SM4_wide_ic_b512_ds01 FORCE_REBUILD=true bsub < hpc/generate_evaluation_datasets.lsf.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -d "${SCRIPT_DIR}/../../src" ]]; then
-  REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [[ -d "${SCRIPT_DIR}/../src" ]]; then
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 else
   # When submitted via `bsub < script`, BASH_SOURCE may not point to this file.
   # LSF sets LSB_SUBCWD to the directory where `bsub` was called.
