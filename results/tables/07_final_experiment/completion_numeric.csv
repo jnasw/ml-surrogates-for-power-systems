@@ -1,0 +1,10 @@
+model_flag,strategy,expected_runs,completed_manifest_runs,completed_seeds,posthoc_runs,posthoc_seeds,non_completed_manifest_runs,non_completed_statuses,model,method
+SM4,data_only_adam_5000,3,3,"s01,s02,s03",3,"s01,s02,s03",0,,SM4,Data-only Adam
+SM4,dn_adam3000_ssbroyden2000,3,3,"s01,s02,s03",3,"s01,s02,s03",0,,SM4,DN + SSBroyden
+SM4,ssbroyden_5000,3,3,"s01,s02,s03",3,"s01,s02,s03",2,running,SM4,SSBroyden
+SM6,data_only_adam_5000,3,3,"s01,s02,s03",3,"s01,s02,s03",0,,SM6,Data-only Adam
+SM6,dn_adam3000_ssbroyden2000,3,3,"s01,s02,s03",3,"s01,s02,s03",0,,SM6,DN + SSBroyden
+SM6,ssbroyden_5000,3,3,"s01,s02,s03",3,"s01,s02,s03",0,,SM6,SSBroyden
+SM_AVR_GOV,data_only_adam_5000,3,3,"s01,s02,s03",3,"s01,s02,s03",0,,SM9 (AVR/GOV),Data-only Adam
+SM_AVR_GOV,dn_adam3000_ssbroyden2000,3,3,"s01,s02,s03",3,"s01,s02,s03",1,failed,SM9 (AVR/GOV),DN + SSBroyden
+SM_AVR_GOV,ssbroyden_5000,3,2,"s01,s02",2,"s01,s02",2,failed,SM9 (AVR/GOV),SSBroyden (lr=0.1)

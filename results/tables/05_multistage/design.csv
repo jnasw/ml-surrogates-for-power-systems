@@ -1,0 +1,4 @@
+strategy,label,stages,epochs,optimizer sequence,terminal correction
+multistage_adam_correction,Adam correction,2,1000 Adam + 500 L-BFGS; 3500 Adam,Adam/L-BFGS warmup -> Adam residual,Adam
+multistage_adam_lbfgs_correction,Adam + L-BFGS correction,3,1000 Adam + 500 L-BFGS; 2000 Adam; 1500 L-BFGS,Adam/L-BFGS warmup -> Adam residual -> L-BFGS residual,L-BFGS
+multistage_adam_ssbroyden_correction,Adam + SSBroyden correction,3,1000 Adam + 500 L-BFGS; 2000 Adam; 1500 SSBroyden,Adam/L-BFGS warmup -> Adam residual -> SSBroyden residual,SSBroyden
