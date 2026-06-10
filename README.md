@@ -21,7 +21,7 @@ The repository is organized around reproducible thesis experiments. Canonical Py
 
 ## Environment
 
-Use Python 3.11. For local development, install the lightweight requirements:
+For local development, install the lightweight requirements:
 
 ```bash
 python3 -m venv .venv
@@ -30,7 +30,14 @@ python3 -m pip install --upgrade pip
 python3 -m pip install -r requirements.txt
 ```
 
-On the A100 cluster, use `requirements-lock-a100.txt` instead. 
+The thesis experiments were run on the A100 cluster with Python 3.9.25 and
+`requirements-lock-a100.txt`. Install the lock file with the PyTorch CUDA wheel
+index:
+
+```bash
+python -m pip install --extra-index-url https://download.pytorch.org/whl/cu124 \
+  -r requirements-lock-a100.txt
+```
 
 ## Core Entry Points
 
