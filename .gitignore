@@ -208,25 +208,28 @@ marimo/_lsp/
 __marimo__/
 
 # Project-generated artifacts
-outputs/
-wandb/
 /data/
 !/src/data/
 !/src/data/**
 # Re-ignore Python cache artifacts under src/data after the explicit include above.
 src/data/**/__pycache__/
 src/data/**/*.pyc
+outputs/
+wandb/
+hpc/logs/
+
+# Local/generated result scratch space
+results/data/
+results/figures/
+
+# Large binary intermediates
 *.npz
 *.npy
+
+# Historical/local archive
 obsolete/
-!obsolete/
-!obsolete/tools/
-!obsolete/tools/pinn/
-!obsolete/tools/pinn/run_optimizer_comparison.py
-!obsolete/src/
-!obsolete/src/pipeline/
-!obsolete/src/pipeline/run_optimizer_comparison.py
-tests/
 other_repos/
-.DS_Storeshou
+
+# Local clutter
+.DS_Store
 .claude/
