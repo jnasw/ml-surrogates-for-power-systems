@@ -16,4 +16,4 @@ Run notebooks from the repository root so their project-root discovery and relat
 - `07_final_experiment.ipynb`: Final experiment analysis.
 - `08_across_experiments.ipynb`: Cross-experiment synthesis.
 
-Curated CSV outputs are written under `results/tables/`. Chapter 4 methodology figures are written under `results/figures/`. Scratch exports to `results/data/` are disabled for repository submission.
+Curated CSV outputs are written under `results/tables/`. Scratch exports to `results/data/` are disabled for repository submission.
