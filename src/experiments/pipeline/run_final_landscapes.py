@@ -235,7 +235,8 @@ def main() -> None:
 
             command = [
                 args.python_bin,
-                "tools/analysis/run_loss_landscape.py",
+                "-m",
+                "src.experiments.pipeline.run_loss_landscape",
                 "--checkpoint",
                 str(checkpoint),
                 "--output-dir",
