@@ -1,4 +1,9 @@
-"""Train a phase-1 PINN from preprocessed stage-2 outputs."""
+"""Train a PINN from preprocessed stage-2 outputs.
+
+This is the canonical thesis entrypoint for PINN training. Hydra composes
+`src/config/setup_pinn.yaml`; `dataset.root` or `dataset.number` selects the
+preprocessed dataset produced by `01_preprocess_dataset.py`.
+"""
 
 from __future__ import annotations
 
@@ -34,6 +39,7 @@ def _format_example_values(values, *, max_items: int = 8) -> list[float]:
 
 
 def _model_io_names(config) -> tuple[list[str], list[str]]:
+    """Return readable input/output names for the configured ODE model."""
     guide_path = os.path.join(str(config.dirs.init_conditions_dir), "modellings_guide.yaml")
     guide = OmegaConf.load(guide_path)
     for model in guide:
@@ -45,6 +51,7 @@ def _model_io_names(config) -> tuple[list[str], list[str]]:
 
 
 def _print_pinn_io_example(config, dataset) -> None:
+    """Print one supervised, collocation, and initial-condition row."""
     input_names, output_names = _model_io_names(config)
     train_x0 = dataset.train_x[0].detach().cpu()
     train_y0 = dataset.train_y[0].detach().cpu()
@@ -74,6 +81,7 @@ def _print_pinn_io_example(config, dataset) -> None:
 
 
 def _resolve_optional_eval_root(config, original_cwd: str, *, kind: str) -> str | None:
+    """Resolve optional ID/OOD evaluation roots from the Hydra config."""
     if kind not in {"id", "ood"}:
         raise ValueError(f"Unsupported evaluation kind: {kind}")
     root_cfg = cfg_get(config, f"evaluation.{kind}.root", None)
@@ -91,6 +99,7 @@ def _evaluate_external_sets(
     model,
     batch_size: int,
 ) -> dict[str, dict[str, object]] | None:
+    """Evaluate the trained model on optional external ID/OOD datasets."""
     evaluation_sets: dict[str, dict[str, object]] = {}
     for kind in ("id", "ood"):
         eval_root = _resolve_optional_eval_root(config, original_cwd, kind=kind)
@@ -125,6 +134,7 @@ def _evaluate_best_checkpoint(
     dataset,
     batch_size: int,
 ) -> dict[str, object] | None:
+    """Reload the best checkpoint and compute comparable split metrics."""
     if not os.path.exists(checkpoint_path):
         return None
     best_model = PinnModel.load_checkpoint(
@@ -192,6 +202,8 @@ def main(config) -> None:
     started_at_utc = utc_now_iso()
     total_started = monotonic()
     original_cwd = get_original_cwd()
+    # Resolve all run paths before training so success and failure cases write
+    # artifacts to the same predictable location.
     dataset_root = resolve_dataset_root(config=config, original_cwd=original_cwd)
     run_dir = resolve_run_dir(config=config, section="pinn", original_cwd=original_cwd)
     os.makedirs(run_dir, exist_ok=True)
@@ -214,6 +226,8 @@ def main(config) -> None:
 
     logger = PinnLogger(run_dir=run_dir, config=config)
     try:
+        # Validate and load the preprocessed stage-2 dataset before constructing
+        # the ODE model or training state.
         dataset_notes = validate_pinn_runtime_dataset(
             dataset_root,
             collocation_mode=str(getattr(config.pinn.collocation, "mode", "preprocessed")),
@@ -248,10 +262,14 @@ def main(config) -> None:
 
         ode_model = SynchronousMachineModels(config)
         save_resolved_config(config=config, run_dir=run_dir)
+        # Training is delegated to src.training.trainer; this entrypoint owns
+        # orchestration and artifact collection.
         train_started = monotonic()
         pinn_model, rows = train_pinn(dataset=dataset, ode_model=ode_model, config=config, logger=logger)
         timings["training_seconds"] = monotonic() - train_started
         artifact_write_started = monotonic()
+        # Store final split metrics and, when available, metrics for the
+        # checkpoint selected during training.
         metric_batch_size = int(cfg_get(config, "pinn.default_batch_size", 1024))
         run_summary = build_run_summary(
             run_type="pinn",
@@ -321,6 +339,7 @@ def main(config) -> None:
         raise
     finally:
         timings["total_seconds"] = monotonic() - total_started
+        # Always leave a manifest and timing file, including failed runs.
         write_json(timings_path, timings)
         write_json(
             manifest_path,
