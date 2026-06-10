@@ -1,8 +1,10 @@
 hydra-core
 omegaconf
 numpy
+pandas
 scipy
 h5py
 wandb
 pytorch-optimizer
 torch
+adjustText
