@@ -99,6 +99,28 @@ data/evaluation/index.json
 
 PINN comparison launchers enable OOD evaluation by default using the model-aware OOD evaluation dataset. ID evaluation is opt-in unless a launcher says otherwise.
 
+## PINN Training Framework
+
+`20_run_pinn.py` is the low-level training entrypoint used by the thesis
+launchers. It trains time-conditioned surrogates `(t, x0, u) -> x(t)` from
+preprocessed trajectory datasets and supports both data-only and
+physics-informed runs.
+
+The thesis experiments use a subset of the framework: single-stage PINNs,
+selected multistage residual-correction runs, static and adaptive loss
+weighting, fixed and adaptive collocation strategies, and Adam/quasi-Newton
+optimizer schedules.
+
+The implementation also contains additional experimental options that were not
+all included in the final thesis comparisons, including further adaptive
+weighting schemes, generated collocation variants, vRBA-related components,
+SOAP, custom BFGS/SSBFGS/SSBroyden optimizers, stochastic quasi-Newton variants,
+supervised-data acquisition, checkpoint re-evaluation, and loss-landscape
+analysis.
+
+Most thesis runs should be launched through `src/experiments/pipeline/`. The
+main training configuration is `src/config/setup_pinn.yaml`.
+
 ## Running Experiments
 
 Example local dry-run:
